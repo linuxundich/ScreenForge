@@ -1,0 +1,14 @@
+[package]
+name = "screenforge-core"
+description = "GTK-independent data model, layout engine and Cairo renderer for ScreenForge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cairo-rs = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }

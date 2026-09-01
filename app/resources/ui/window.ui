@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="ScreenForgeWindow" parent="AdwApplicationWindow">
+    <property name="title" translatable="yes">ScreenForge</property>
+    <property name="default-width">1100</property>
+    <property name="default-height">700</property>
+    <property name="width-request">360</property>
+    <property name="height-request">400</property>
+    <child>
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <child type="start">
+              <object class="GtkMenuButton" id="open_menu_button">
+                <property name="icon-name">document-open-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Öffnen</property>
+                <property name="menu-model">open_menu</property>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="undo_button">
+                <property name="icon-name">edit-undo-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Rückgängig (Strg+Z)</property>
+                <property name="action-name">win.undo</property>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="redo_button">
+                <property name="icon-name">edit-redo-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Wiederholen (Strg+Umschalt+Z)</property>
+                <property name="action-name">win.redo</property>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkButton" id="export_button">
+                <property name="label" translatable="yes">Exportieren</property>
+                <property name="action-name">win.export</property>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkMenuButton" id="zoom_menu_button">
+                <property name="icon-name">zoom-fit-best-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Zoom</property>
+                <property name="menu-model">zoom_menu</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwToastOverlay" id="toast_overlay">
+            <child>
+              <object class="AdwOverlaySplitView" id="split_view">
+            <property name="sidebar-width-fraction">0.28</property>
+            <property name="min-sidebar-width">240</property>
+            <property name="max-sidebar-width">360</property>
+            <child type="sidebar">
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">never</property>
+                <child>
+                  <object class="AdwPreferencesPage">
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title" translatable="yes">Layout</property>
+                        <child>
+                          <object class="AdwSpinRow" id="spacing_row">
+                            <property name="title" translatable="yes">Abstand</property>
+                            <property name="subtitle" translatable="yes">Zwischen den Screenshots, in Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">500</property>
+                                <property name="step-increment">4</property>
+                                <property name="page-increment">20</property>
+                                <property name="value">24</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="margin_row">
+                            <property name="title" translatable="yes">Außenrand</property>
+                            <property name="subtitle" translatable="yes">Rand um die Komposition, in Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">500</property>
+                                <property name="step-increment">4</property>
+                                <property name="page-increment">20</property>
+                                <property name="value">48</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title" translatable="yes">Hintergrund</property>
+                        <child>
+                          <object class="AdwComboRow" id="background_type_row">
+                            <property name="title" translatable="yes">Art</property>
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Einfarbig</item>
+                                  <item translatable="yes">Linearer Verlauf</item>
+                                </items>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow">
+                            <property name="title" translatable="yes">Farbe 1</property>
+                            <child type="suffix">
+                              <object class="GtkColorDialogButton" id="background_color_button">
+                                <property name="valign">center</property>
+                                <property name="dialog">
+                                  <object class="GtkColorDialog"/>
+                                </property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="gradient_color2_row">
+                            <property name="title" translatable="yes">Farbe 2</property>
+                            <property name="visible">false</property>
+                            <child type="suffix">
+                              <object class="GtkColorDialogButton" id="gradient_color2_button">
+                                <property name="valign">center</property>
+                                <property name="dialog">
+                                  <object class="GtkColorDialog"/>
+                                </property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="gradient_angle_row">
+                            <property name="title" translatable="yes">Winkel</property>
+                            <property name="subtitle" translatable="yes">In Grad</property>
+                            <property name="visible">false</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">360</property>
+                                <property name="step-increment">15</property>
+                                <property name="page-increment">45</property>
+                                <property name="value">90</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title" translatable="yes">Effekte</property>
+                        <child>
+                          <object class="AdwComboRow" id="shadow_row">
+                            <property name="title" translatable="yes">Schatten</property>
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Kein Schatten</item>
+                                  <item translatable="yes">Subtil</item>
+                                  <item translatable="yes">Standard</item>
+                                  <item translatable="yes">Stark</item>
+                                  <item translatable="yes">Floating</item>
+                                </items>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="corner_radius_row">
+                            <property name="title" translatable="yes">Eckenradius</property>
+                            <property name="subtitle" translatable="yes">In Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">200</property>
+                                <property name="step-increment">2</property>
+                                <property name="page-increment">10</property>
+                                <property name="value">0</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title" translatable="yes">Export</property>
+                        <child>
+                          <object class="AdwSpinRow" id="export_width_row">
+                            <property name="title" translatable="yes">Breite</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">100</property>
+                                <property name="upper">8000</property>
+                                <property name="step-increment">10</property>
+                                <property name="page-increment">100</property>
+                                <property name="value">1920</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="export_height_row">
+                            <property name="title" translatable="yes">Höhe</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">100</property>
+                                <property name="upper">8000</property>
+                                <property name="step-increment">10</property>
+                                <property name="page-increment">100</property>
+                                <property name="value">1080</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwComboRow" id="export_format_row">
+                            <property name="title" translatable="yes">Format</property>
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item>PNG</item>
+                                  <item>JPEG</item>
+                                  <item>WebP</item>
+                                </items>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="export_quality_row">
+                            <property name="title" translatable="yes">Qualität</property>
+                            <property name="subtitle" translatable="yes">Nur für JPEG/WebP</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">1</property>
+                                <property name="upper">100</property>
+                                <property name="step-increment">5</property>
+                                <property name="page-increment">10</property>
+                                <property name="value">90</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child type="content">
+              <object class="GtkScrolledWindow">
+                <property name="hexpand">true</property>
+                <property name="vexpand">true</property>
+                <child>
+                  <object class="ScreenForgeCanvas" id="canvas">
+                    <property name="hexpand">true</property>
+                    <property name="vexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+  <menu id="open_menu">
+    <item>
+      <attribute name="label" translatable="yes">Screenshots importieren…</attribute>
+      <attribute name="action">win.open</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">Projekt öffnen…</attribute>
+      <attribute name="action">win.open-project</attribute>
+    </item>
+  </menu>
+  <menu id="zoom_menu">
+    <item>
+      <attribute name="label" translatable="yes">An Fenster anpassen</attribute>
+      <attribute name="action">win.zoom-fit</attribute>
+      <attribute name="accel">&lt;Ctrl&gt;0</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">100 %</attribute>
+      <attribute name="action">win.zoom-100</attribute>
+      <attribute name="accel">&lt;Ctrl&gt;1</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">Vergrößern</attribute>
+      <attribute name="action">win.zoom-in</attribute>
+      <attribute name="accel">&lt;Ctrl&gt;plus</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">Verkleinern</attribute>
+      <attribute name="action">win.zoom-out</attribute>
+      <attribute name="accel">&lt;Ctrl&gt;minus</attribute>
+    </item>
+  </menu>
+</interface>
