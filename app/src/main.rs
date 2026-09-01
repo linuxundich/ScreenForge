@@ -3,9 +3,9 @@ mod export;
 mod import;
 mod window;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk4::gdk;
@@ -15,8 +15,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
-    AddScreenshots, ReorderScreenshot, SetBackground, SetCornerRadiusForAllElements, SetMargin, SetShadowForAllElements, SetSpacing,
-    UndoStack,
+    AddScreenshots, Command, DuplicateScreenshot, RemoveScreenshot, ReorderScreenshot, ReplaceScreenshotSource, SetBackground,
+    SetCornerRadiusForAllElements, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
 };
 use screenforge_core::model::{
     Background, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageSource, Rgba, ScreenshotElement, ShadowParams,
@@ -34,7 +34,13 @@ const APP_ID: &str = "de.christophlangner.ScreenForge";
 /// threaded through every callback individually.
 struct EditorState {
     document: Document,
-    decoded_images: HashMap<Uuid, DecodedImage>,
+    /// Decoded bytes keyed by *source path*, not by element id. Keying by
+    /// path means "replace screenshot" and its undo/redo never need to
+    /// touch this cache at all: whichever path an element's `source`
+    /// currently names (old or new, before or after undo) is simply looked
+    /// up here, decoding on first use — self-healing, and it's also why a
+    /// duplicate that shares a source path costs no extra decode.
+    image_cache: HashMap<PathBuf, DecodedImage>,
     /// Where this project was last saved to or loaded from, if anywhere.
     /// `win.save` reuses it; `win.save-as` always prompts and updates it.
     project_path: Option<PathBuf>,
@@ -55,12 +61,29 @@ impl EditorState {
     fn new() -> Self {
         Self {
             document: Document::new(),
-            decoded_images: HashMap::new(),
+            image_cache: HashMap::new(),
             project_path: None,
             undo_stack: UndoStack::new(),
             syncing_controls: false,
         }
     }
+}
+
+/// Looks up `path` in `cache`, decoding and inserting it on first use.
+/// `None` only if decoding fails (missing/corrupt file).
+fn get_or_decode<'a>(cache: &'a mut HashMap<PathBuf, DecodedImage>, path: &Path) -> Option<&'a DecodedImage> {
+    if !cache.contains_key(path) {
+        match import::decode_image(path) {
+            Ok(image) => {
+                cache.insert(path.to_path_buf(), image);
+            }
+            Err(err) => {
+                eprintln!("ScreenForge: failed to decode {}: {err}", path.display());
+                return None;
+            }
+        }
+    }
+    cache.get(path)
 }
 
 fn main() -> glib::ExitCode {
@@ -88,21 +111,29 @@ fn build_ui(app: &adw::Application) {
     register_undo_redo_actions(app, &window, &canvas, &state);
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
+    register_context_menu(&window, &canvas, &state);
+    register_paste_action(app, &window, &canvas, &state);
 
     window.present();
 }
 
-/// Materializes a fresh `cairo::ImageSurface` per decoded image (see
-/// `import.rs` for why these aren't cached) and hands the result to the
+/// Builds a fresh `cairo::ImageSurface` per *currently referenced* image
+/// (decoding on demand via `image_cache`, so this also self-heals after
+/// undoing/redoing a "replace screenshot") and hands the result to the
 /// canvas widget.
 fn refresh_canvas(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let state_ref = state.borrow();
-    let surfaces: HashMap<Uuid, gtk4::cairo::ImageSurface> = state_ref
-        .decoded_images
-        .iter()
-        .filter_map(|(id, image)| import::surface_from_decoded(image).ok().map(|s| (*id, s)))
-        .collect();
-    canvas.set_document(state_ref.document.clone(), surfaces);
+    let mut state_ref = state.borrow_mut();
+    let EditorState { document, image_cache, .. } = &mut *state_ref;
+    let mut surfaces = HashMap::new();
+    for element in &document.elements {
+        let ImageSource::Path(path) = &element.source else { continue };
+        if let Some(image) = get_or_decode(image_cache, path) {
+            if let Ok(surface) = import::surface_from_decoded(image) {
+                surfaces.insert(element.id, surface);
+            }
+        }
+    }
+    canvas.set_document(document.clone(), surfaces);
 }
 
 /// Decodes every path and appends the successful ones to `state` as one
@@ -111,15 +142,12 @@ fn refresh_canvas(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
 /// two import paths can't drift apart.
 fn import_paths(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, paths: Vec<PathBuf>) {
     let mut new_elements = Vec::new();
-    let mut decoded = Vec::new();
-    for path in paths {
-        match import::decode_image(&path) {
-            Ok(image) => {
-                let element = ScreenshotElement::new(ImageSource::Path(path), image.width as f64, image.height as f64);
-                decoded.push((element.id, image));
-                new_elements.push(element);
+    {
+        let mut state_ref = state.borrow_mut();
+        for path in paths {
+            if let Some(image) = get_or_decode(&mut state_ref.image_cache, &path) {
+                new_elements.push(ScreenshotElement::new(ImageSource::Path(path), image.width as f64, image.height as f64));
             }
-            Err(err) => eprintln!("ScreenForge: failed to import {}: {err}", path.display()),
         }
     }
     if new_elements.is_empty() {
@@ -127,7 +155,6 @@ fn import_paths(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState
     }
 
     let mut state_ref = state.borrow_mut();
-    state_ref.decoded_images.extend(decoded);
     let EditorState { document, undo_stack, .. } = &mut *state_ref;
     undo_stack.apply(Box::new(AddScreenshots { elements: new_elements }), document);
     drop(state_ref);
@@ -572,7 +599,18 @@ fn register_export_action(app: &adw::Application, window: &Window, state: &Rc<Re
                 export_button.set_sensitive(false);
 
                 let doc = state.borrow().document.clone();
-                let decoded_images = state.borrow().decoded_images.clone();
+                let decoded_images = {
+                    let mut state_ref = state.borrow_mut();
+                    let EditorState { document, image_cache, .. } = &mut *state_ref;
+                    document
+                        .elements
+                        .iter()
+                        .filter_map(|el| {
+                            let ImageSource::Path(path) = &el.source else { return None };
+                            get_or_decode(image_cache, path).map(|image| (el.id, image.clone()))
+                        })
+                        .collect::<HashMap<_, _>>()
+                };
                 let result = gio::spawn_blocking(move || export::render_and_write(&doc, &decoded_images, &path)).await;
 
                 export_button.set_sensitive(true);
@@ -738,25 +776,19 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
 
                 match screenforge_core::project::load(&path) {
                     Ok(doc) => {
-                        let mut decoded = HashMap::new();
+                        let mut image_cache = HashMap::new();
                         let mut missing = 0u32;
                         for element in &doc.elements {
                             let ImageSource::Path(source_path) = &element.source else { continue };
-                            match import::decode_image(source_path) {
-                                Ok(image) => {
-                                    decoded.insert(element.id, image);
-                                }
-                                Err(err) => {
-                                    missing += 1;
-                                    eprintln!("ScreenForge: missing/unreadable image {}: {err}", source_path.display());
-                                }
+                            if get_or_decode(&mut image_cache, source_path).is_none() {
+                                missing += 1;
                             }
                         }
 
                         {
                             let mut state_ref = state.borrow_mut();
                             state_ref.document = doc;
-                            state_ref.decoded_images = decoded;
+                            state_ref.image_cache = image_cache;
                             state_ref.project_path = Some(path);
                             // A freshly loaded project starts with a clean
                             // undo history — undoing past "load" into the
@@ -919,4 +951,270 @@ fn register_reorder(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorS
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
+}
+
+fn build_context_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+
+    let edit_section = gio::Menu::new();
+    edit_section.append(Some("Duplizieren"), Some("win.duplicate-screenshot"));
+    edit_section.append(Some("Screenshot ersetzen…"), Some("win.replace-screenshot"));
+    edit_section.append(Some("Löschen"), Some("win.delete-screenshot"));
+    menu.append_section(None, &edit_section);
+
+    let order_section = gio::Menu::new();
+    order_section.append(Some("Nach vorne"), Some("win.bring-forward"));
+    order_section.append(Some("Nach hinten"), Some("win.send-backward"));
+    order_section.append(Some("Ganz nach vorne"), Some("win.bring-to-front"));
+    order_section.append(Some("Ganz nach hinten"), Some("win.send-to-back"));
+    menu.append_section(None, &order_section);
+
+    let transform_section = gio::Menu::new();
+    transform_section.append(Some("Um 90° drehen"), Some("win.rotate-screenshot"));
+    transform_section.append(Some("Horizontal spiegeln"), Some("win.flip-horizontal"));
+    transform_section.append(Some("Vertikal spiegeln"), Some("win.flip-vertical"));
+    menu.append_section(None, &transform_section);
+
+    menu
+}
+
+/// Registers one `win.<name>` action that acts on whatever element the
+/// context menu was last opened for. `build` computes the command from the
+/// target's index and the current document, or returns `None` to silently
+/// do nothing (e.g. "bring forward" on the first element already).
+fn register_element_action<F>(
+    window: &Window,
+    canvas: &Canvas,
+    state: &Rc<RefCell<EditorState>>,
+    context_target: &Rc<Cell<Option<usize>>>,
+    name: &str,
+    build: F,
+) where
+    F: Fn(usize, &Document) -> Option<Box<dyn Command>> + 'static,
+{
+    let action = gio::SimpleAction::new(name, None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        context_target,
+        move |_, _| {
+            let Some(index) = context_target.get() else { return };
+            let mut state_ref = state.borrow_mut();
+            if index >= state_ref.document.elements.len() {
+                return;
+            }
+            let Some(cmd) = build(index, &state_ref.document) else { return };
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(cmd, document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+    window.add_action(&action);
+}
+
+/// `win.replace-screenshot`: swaps one element's source image, keeping its
+/// position, effects and place in the sequence (spec §2/§21: "Screenshot
+/// ersetzen"). Handled separately from [`register_element_action`] because
+/// it needs an async file dialog and a decode step.
+fn register_replace_action(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, context_target: &Rc<Cell<Option<usize>>>) {
+    let action = gio::SimpleAction::new("replace-screenshot", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        context_target,
+        move |_, _| {
+            let Some(index) = context_target.get() else { return };
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let filter = gtk4::FileFilter::new();
+                filter.add_mime_type("image/png");
+                filter.add_mime_type("image/jpeg");
+                filter.add_mime_type("image/webp");
+                filter.set_name(Some("Screenshots"));
+
+                let dialog = gtk4::FileDialog::builder()
+                    .title("Screenshot ersetzen")
+                    .accept_label("Ersetzen")
+                    .default_filter(&filter)
+                    .build();
+
+                let file = match dialog.open_future(Some(&window)).await {
+                    Ok(file) => file,
+                    Err(err) => {
+                        if !err.matches(gtk4::DialogError::Dismissed) {
+                            eprintln!("ScreenForge: replace dialog failed: {err}");
+                        }
+                        return;
+                    }
+                };
+                let Some(new_path) = file.path() else { return };
+
+                let mut state_ref = state.borrow_mut();
+                if index >= state_ref.document.elements.len() {
+                    return;
+                }
+                let Some(image) = get_or_decode(&mut state_ref.image_cache, &new_path) else { return };
+                let (new_w, new_h) = (image.width as f64, image.height as f64);
+
+                let element = &state_ref.document.elements[index];
+                let cmd = ReplaceScreenshotSource {
+                    element_id: element.id,
+                    old_source: element.source.clone(),
+                    old_natural_width: element.natural_width,
+                    old_natural_height: element.natural_height,
+                    new_source: ImageSource::Path(new_path),
+                    new_natural_width: new_w,
+                    new_natural_height: new_h,
+                };
+                let EditorState { document, undo_stack, .. } = &mut *state_ref;
+                undo_stack.apply(Box::new(cmd), document);
+                drop(state_ref);
+                refresh_canvas(&canvas, &state);
+                update_undo_redo_sensitivity(&window, &state);
+            });
+        }
+    ));
+    window.add_action(&action);
+}
+
+/// Right-click on a screenshot opens a `GtkPopoverMenu` with per-element
+/// actions (spec §21). `context_target` remembers which element it was
+/// opened for, since GAction activation carries no click-position payload.
+fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let context_target: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+
+    let menu_model = build_context_menu();
+    let popover = gtk4::PopoverMenu::from_model(Some(&menu_model));
+    popover.set_has_arrow(false);
+    popover.set_parent(canvas);
+
+    canvas.connect_context_menu(glib::clone!(
+        #[strong]
+        context_target,
+        #[weak]
+        popover,
+        move |index, x, y| {
+            context_target.set(Some(index));
+            popover.set_pointing_to(Some(&gdk::Rectangle::new(x.round() as i32, y.round() as i32, 1, 1)));
+            popover.popup();
+        }
+    ));
+
+    register_element_action(window, canvas, state, &context_target, "delete-screenshot", |index, doc| {
+        Some(Box::new(RemoveScreenshot { index, element: doc.elements[index].clone() }))
+    });
+
+    register_element_action(window, canvas, state, &context_target, "duplicate-screenshot", |index, doc| {
+        let mut duplicate = doc.elements[index].clone();
+        duplicate.id = Uuid::new_v4();
+        Some(Box::new(DuplicateScreenshot { source_index: index, duplicate }))
+    });
+
+    register_element_action(window, canvas, state, &context_target, "bring-forward", |index, _doc| {
+        (index > 0).then(|| Box::new(ReorderScreenshot { from: index, to: index - 1 }) as Box<dyn Command>)
+    });
+
+    register_element_action(window, canvas, state, &context_target, "send-backward", |index, doc| {
+        (index + 1 < doc.elements.len()).then(|| Box::new(ReorderScreenshot { from: index, to: index + 1 }) as Box<dyn Command>)
+    });
+
+    register_element_action(window, canvas, state, &context_target, "bring-to-front", |index, _doc| {
+        (index > 0).then(|| Box::new(ReorderScreenshot { from: index, to: 0 }) as Box<dyn Command>)
+    });
+
+    register_element_action(window, canvas, state, &context_target, "send-to-back", |index, doc| {
+        let last = doc.elements.len() - 1;
+        (index != last).then(|| Box::new(ReorderScreenshot { from: index, to: last }) as Box<dyn Command>)
+    });
+
+    register_element_action(window, canvas, state, &context_target, "rotate-screenshot", |index, doc| {
+        let el = &doc.elements[index];
+        let old = el.transform;
+        let mut new = old;
+        new.rotation_deg = (old.rotation_deg + 90.0) % 360.0;
+        Some(Box::new(SetTransform { element_id: el.id, old, new }))
+    });
+
+    register_element_action(window, canvas, state, &context_target, "flip-horizontal", |index, doc| {
+        let el = &doc.elements[index];
+        let old = el.transform;
+        let mut new = old;
+        new.flip_horizontal = !old.flip_horizontal;
+        Some(Box::new(SetTransform { element_id: el.id, old, new }))
+    });
+
+    register_element_action(window, canvas, state, &context_target, "flip-vertical", |index, doc| {
+        let el = &doc.elements[index];
+        let old = el.transform;
+        let mut new = old;
+        new.flip_vertical = !old.flip_vertical;
+        Some(Box::new(SetTransform { element_id: el.id, old, new }))
+    });
+
+    register_replace_action(window, canvas, state, &context_target);
+}
+
+/// `win.paste` (`Ctrl+V`, spec §1: "Screenshot aus der Zwischenablage
+/// einfügen"). Silently does nothing if the clipboard holds no image —
+/// pasting text or nothing is not an error condition here.
+fn register_paste_action(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("paste", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, _| {
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let clipboard = window.clipboard();
+                let texture = match clipboard.read_texture_future().await {
+                    Ok(Some(texture)) => texture,
+                    Ok(None) => return,
+                    Err(err) => {
+                        eprintln!("ScreenForge: clipboard read failed: {err}");
+                        return;
+                    }
+                };
+
+                let image = import::decoded_image_from_texture(&texture);
+                let path = match import::save_pasted_image(&image) {
+                    Ok(path) => path,
+                    Err(err) => {
+                        eprintln!("ScreenForge: could not save pasted image: {err}");
+                        return;
+                    }
+                };
+
+                let mut state_ref = state.borrow_mut();
+                let element = ScreenshotElement::new(ImageSource::Path(path.clone()), image.width as f64, image.height as f64);
+                state_ref.image_cache.insert(path, image);
+                let EditorState { document, undo_stack, .. } = &mut *state_ref;
+                undo_stack.apply(Box::new(AddScreenshots { elements: vec![element] }), document);
+                drop(state_ref);
+                refresh_canvas(&canvas, &state);
+                update_undo_redo_sensitivity(&window, &state);
+            });
+        }
+    ));
+    window.add_action(&action);
+    app.set_accels_for_action("win.paste", &["<Ctrl>v"]);
 }

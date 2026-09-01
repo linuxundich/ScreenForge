@@ -123,6 +123,48 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// A 0.1.0-shaped project file predates `Transform::flip_horizontal`/
+    /// `flip_vertical` — this pins down that loading one doesn't break just
+    /// because `core::model` grew fields since. This is `#[serde(default)]`
+    /// doing its job, not a project-format `version` bump, so this test
+    /// stays version 1 throughout.
+    #[test]
+    fn loads_a_pre_flip_fields_transform_with_defaults() {
+        let path = temp_path("pre-flip-fields.screenforge");
+        let json = r#"{
+            "format": "screenforge",
+            "version": 1,
+            "document": {
+                "id": "8f14e45f-ceea-467e-adc0-51944115d5c6",
+                "elements": [{
+                    "id": "9b2e1a3c-1234-4a3b-8cde-0123456789ab",
+                    "source": { "type": "path", "value": "/tmp/a.png" },
+                    "natural_width": 400.0,
+                    "natural_height": 800.0,
+                    "transform": {
+                        "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0,
+                        "rotation_deg": 0.0, "aspect_locked": true
+                    },
+                    "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
+                    "shadow": {
+                        "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0,
+                        "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+                    },
+                    "visible": true
+                }],
+                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
+                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
+                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 }
+            }
+        }"#;
+        std::fs::write(&path, json).unwrap();
+
+        let doc = load(&path).unwrap();
+        assert!(!doc.elements[0].transform.flip_horizontal);
+        assert!(!doc.elements[0].transform.flip_vertical);
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn unsupported_future_version_is_reported_clearly() {
         let path = temp_path("future.screenforge");

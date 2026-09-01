@@ -43,7 +43,12 @@ pub struct Transform {
     pub height: f64,
     pub rotation_deg: f64,
     pub aspect_locked: bool,
+    /// `#[serde(default)]` so a `.screenforge` file saved before these two
+    /// fields existed (0.1.0) still loads — absent means "never flipped",
+    /// which `false` already means, so no migration logic is needed.
+    #[serde(default)]
     pub flip_horizontal: bool,
+    #[serde(default)]
     pub flip_vertical: bool,
 }
 

@@ -11,9 +11,12 @@ PNG, JPEG or WebP image.
 
 ## Features
 
-- **Import** via file dialog (`Ctrl+O`) or drag-and-drop; PNG, JPEG, WebP.
+- **Import** via file dialog (`Ctrl+O`), drag-and-drop, or pasting from the
+  clipboard (`Ctrl+V`); PNG, JPEG, WebP.
 - **Automatic horizontal layout** with adjustable spacing and outer margin.
 - **Reordering** by dragging screenshots directly on the canvas.
+- **Per-screenshot context menu**: duplicate, replace, delete, bring
+  forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
 - **Backgrounds**: solid color or linear gradient.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) and
   rounded corners.
@@ -59,11 +62,10 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: clipboard paste, a context menu for
-per-screenshot actions (delete/duplicate/rotate/flip/replace), grid/snap
-guides, text and vector decorations, reusable templates, image backgrounds,
-additional layout modes (vertical/grid/free), AVIF export, and a
-preferences page.
+history. Not yet implemented: grid/snap guides, text and vector
+decorations, reusable templates, image backgrounds, additional layout modes
+(vertical/grid/free), AVIF export, radial gradients, per-element manual
+size/position controls, and a preferences page.
 
 ## License
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-01
+
+### Added
+
+- A right-click context menu on any screenshot (spec §21): Duplicate,
+  Replace…, Delete, Bring forward/backward/to front/to back, Rotate 90°,
+  and Flip horizontal/vertical.
+- Paste a screenshot directly from the clipboard (`Ctrl+V`).
+- All of the above are undoable, alongside every existing edit.
+
 ## [0.1.0] - 2026-09-01
 
 Initial release: a GTK4 + libadwaita GNOME app for arranging smartphone

@@ -63,6 +63,15 @@ impl Canvas {
     pub fn connect_reorder<F: Fn(usize, usize) + 'static>(&self, f: F) {
         self.imp().set_reorder_callback(f);
     }
+
+    /// Called on a secondary (right) click that lands on a screenshot,
+    /// with the element's index into `Document.elements` and the click
+    /// point in widget coordinates (for positioning a popover menu) — spec
+    /// §21: "Für ausgewählte Screenshots soll ein Kontextmenü verfügbar
+    /// sein". Never fires for a click on empty canvas space.
+    pub fn connect_context_menu<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+        self.imp().set_context_menu_callback(f);
+    }
 }
 
 impl Default for Canvas {
@@ -85,6 +94,7 @@ mod imp {
     use uuid::Uuid;
 
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
+    type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
 
     pub struct Canvas {
         document: RefCell<Document>,
@@ -115,6 +125,7 @@ mod imp {
         /// callback expects.
         drag_hover: Cell<Option<usize>>,
         reorder_callback: RefCell<Option<ReorderCallback>>,
+        context_menu_callback: RefCell<Option<ContextMenuCallback>>,
     }
 
     impl Default for Canvas {
@@ -131,6 +142,7 @@ mod imp {
                 drag_from: Cell::new(None),
                 drag_hover: Cell::new(None),
                 reorder_callback: RefCell::new(None),
+                context_menu_callback: RefCell::new(None),
             }
         }
     }
@@ -174,6 +186,15 @@ mod imp {
                 }
             ));
             obj.add_controller(drag);
+
+            let secondary_click = gtk4::GestureClick::new();
+            secondary_click.set_button(gtk4::gdk::BUTTON_SECONDARY);
+            secondary_click.connect_released(glib::clone!(
+                #[weak]
+                obj,
+                move |_, _n_press, x, y| obj.imp().on_secondary_click(x, y)
+            ));
+            obj.add_controller(secondary_click);
         }
     }
 
@@ -270,6 +291,19 @@ mod imp {
 
         pub fn set_reorder_callback<F: Fn(usize, usize) + 'static>(&self, f: F) {
             *self.reorder_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub fn set_context_menu_callback<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+            *self.context_menu_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub(super) fn on_secondary_click(&self, x: f64, y: f64) {
+            let Some(index) = self.widget_to_document(x, y).and_then(|(dx, dy)| self.element_index_at(dx, dy)) else {
+                return;
+            };
+            if let Some(cb) = self.context_menu_callback.borrow().as_ref() {
+                cb(index, x, y);
+            }
         }
 
         /// Re-renders into `cached` at the current scale — either a fixed
