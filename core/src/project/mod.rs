@@ -47,7 +47,9 @@ pub fn save(document: &Document, path: &Path) -> Result<(), ProjectError> {
 /// step would slot in without touching the call sites.
 pub fn load(path: &Path) -> Result<Document, ProjectError> {
     let content = std::fs::read_to_string(path)?;
-    let project: ProjectFile = serde_json::from_str(&content)?;
+    let mut raw: serde_json::Value = serde_json::from_str(&content)?;
+    migrate_legacy_text_overlay(&mut raw);
+    let project: ProjectFile = serde_json::from_value(raw)?;
     match project.version {
         1 => {
             let mut document = project.document;
@@ -59,6 +61,61 @@ pub fn load(path: &Path) -> Result<Document, ProjectError> {
         }
         other => Err(ProjectError::UnsupportedVersion { found: other, supported: CURRENT_VERSION }),
     }
+}
+
+/// Projects saved before the title/label system existed used a simpler
+/// `text_overlay` field (`{enabled, content, x, y, font_size, color}`) for
+/// what's now `Document.title` (a full `TextElement`). `Document`'s own
+/// `#[serde(default)]` on `title` already means an old file loads without
+/// error even without this step — but silently as a disabled, empty title,
+/// discarding whatever caption was actually saved. This runs on the raw
+/// JSON, before the typed deserialization ever sees it, converting that
+/// old shape into an equivalent `TextElement` (the same x/y, now as
+/// `TextPosition::Absolute`, and the same content/size/color) so the
+/// caption survives the upgrade instead of quietly vanishing. A no-op
+/// whenever `title` is already present (current-format files, or a file
+/// this has already migrated).
+fn migrate_legacy_text_overlay(raw: &mut serde_json::Value) {
+    let Some(document) = raw.get_mut("document") else { return };
+    if document.get("title").is_some() {
+        return;
+    }
+    let Some(text_overlay) = document.get("text_overlay").cloned() else { return };
+    let Some(document_obj) = document.as_object_mut() else { return };
+
+    let get_f64 = |key: &str, default: f64| text_overlay.get(key).and_then(|v| v.as_f64()).unwrap_or(default);
+    let enabled = text_overlay.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let content = text_overlay.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let color = text_overlay
+        .get("color")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({ "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }));
+
+    let title = serde_json::json!({
+        "enabled": enabled,
+        "content": content,
+        "position": { "mode": "absolute", "x": get_f64("x", 48.0), "y": get_f64("y", 24.0) },
+        "typography": {
+            "font_family": "Sans",
+            "font_size": get_f64("font_size", 32.0),
+            "weight": 700,
+            "italic": false,
+            "color": color,
+            "alignment": "center",
+            "opacity": 1.0,
+            "letter_spacing": 0.0,
+            "line_spacing": 1.2,
+            "wrap": false
+        },
+        "background": { "type": "none" },
+        "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
+        "background_padding": 16.0,
+        "shadow": {
+            "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0,
+            "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+        }
+    });
+    document_obj.insert("title".to_string(), title);
 }
 
 #[cfg(test)]
@@ -111,6 +168,44 @@ mod tests {
         }
         assert_eq!(loaded.layout.spacing_px, 12.0);
         assert_eq!(loaded.layout.margin_px, 30.0);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Spec: "the project must be able to regenerate the exact same
+    /// background" — this only holds if every generator input (seed,
+    /// strategy, resolved palette, and every numeric parameter) actually
+    /// survives a save/load round trip, not just some of them.
+    #[test]
+    fn save_then_load_round_trips_a_generated_background_exactly() {
+        use crate::model::{ColorStrategy, GeneratedBackground};
+
+        let path = temp_path("generated-background.screenforge");
+        let mut doc = Document::new();
+        let generated = GeneratedBackground {
+            seed: 48291374,
+            color_strategy: ColorStrategy::FromScreenshots,
+            palette: vec![Rgba::new(0.2, 0.3, 0.6, 1.0), Rgba::new(0.8, 0.5, 0.1, 1.0)],
+            adapt_to_screenshots: false,
+            inverse_contrast: 0.73,
+            density: 0.61,
+            flow: 0.28,
+            variation: 0.5,
+            contrast: 0.5,
+            softness: 0.9,
+            corner_bias: 0.44,
+            offset_x: -0.2,
+            offset_y: 0.15,
+            scale: 1.3,
+        };
+        doc.background = Background::Generated(generated.clone());
+
+        save(&doc, &path).unwrap();
+        let loaded = load(&path).unwrap();
+
+        match loaded.background {
+            Background::Generated(loaded_generated) => assert_eq!(loaded_generated, generated),
+            other => panic!("expected Generated background, got {other:?}"),
+        }
         std::fs::remove_file(&path).ok();
     }
 
@@ -169,6 +264,81 @@ mod tests {
         let doc = load(&path).unwrap();
         assert!(!doc.elements[0].transform.flip_horizontal);
         assert!(!doc.elements[0].transform.flip_vertical);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A project saved before the title/label system existed used the
+    /// older, simpler `text_overlay` shape — this pins down that its
+    /// caption survives loading (migrated into `Document.title`) instead
+    /// of silently vanishing behind `#[serde(default)]`.
+    #[test]
+    fn migrates_a_legacy_text_overlay_into_the_new_title() {
+        let path = temp_path("legacy-text-overlay.screenforge");
+        let json = r#"{
+            "format": "screenforge",
+            "version": 1,
+            "document": {
+                "id": "8f14e45f-ceea-467e-adc0-51944115d5c6",
+                "elements": [],
+                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
+                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
+                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 },
+                "text_overlay": {
+                    "enabled": true,
+                    "content": "My App Review",
+                    "x": 100.0,
+                    "y": 50.0,
+                    "font_size": 40.0,
+                    "color": { "r": 0.1, "g": 0.2, "b": 0.3, "a": 1.0 }
+                }
+            }
+        }"#;
+        std::fs::write(&path, json).unwrap();
+
+        let doc = load(&path).unwrap();
+        assert!(doc.title.enabled);
+        assert_eq!(doc.title.content, "My App Review");
+        assert_eq!(doc.title.position, crate::model::TextPosition::Absolute { x: 100.0, y: 50.0 });
+        assert_eq!(doc.title.typography.font_size, 40.0);
+        assert_eq!(doc.title.typography.color, crate::model::Rgba::new(0.1, 0.2, 0.3, 1.0));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A file that already carries the new `title` field must not be
+    /// clobbered by a leftover/legacy `text_overlay` also present.
+    #[test]
+    fn a_file_with_both_title_and_legacy_text_overlay_keeps_the_title() {
+        let path = temp_path("title-and-legacy.screenforge");
+        let json = r#"{
+            "format": "screenforge",
+            "version": 1,
+            "document": {
+                "id": "8f14e45f-ceea-467e-adc0-51944115d5c6",
+                "elements": [],
+                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
+                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
+                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 },
+                "text_overlay": { "enabled": true, "content": "Old", "x": 1.0, "y": 1.0, "font_size": 10.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } },
+                "title": {
+                    "enabled": true,
+                    "content": "New Title",
+                    "position": { "mode": "absolute", "x": 5.0, "y": 5.0 },
+                    "typography": {
+                        "font_family": "Sans", "font_size": 20.0, "weight": 700, "italic": false,
+                        "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }, "alignment": "center", "opacity": 1.0,
+                        "letter_spacing": 0.0, "line_spacing": 1.2, "wrap": false
+                    },
+                    "background": { "type": "none" },
+                    "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
+                    "background_padding": 16.0,
+                    "shadow": { "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } }
+                }
+            }
+        }"#;
+        std::fs::write(&path, json).unwrap();
+
+        let doc = load(&path).unwrap();
+        assert_eq!(doc.title.content, "New Title");
         std::fs::remove_file(&path).ok();
     }
 

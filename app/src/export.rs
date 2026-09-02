@@ -62,7 +62,12 @@ pub fn render_and_write(
     let out_height = ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32;
 
     let mut target = cairo::ImageSurface::create(cairo::Format::ARgb32, out_width as i32, out_height as i32)?;
-    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref())?;
+    // A fresh, one-shot cache: export renders this document exactly once,
+    // so there's nothing to gain from reusing shadow bitmaps across calls
+    // the way the interactive preview does (see `Canvas`'s long-lived
+    // one) — every shadow just misses once and renders at full quality.
+    let shadow_cache = screenforge_core::shadow_cache::ShadowCache::new();
+    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache)?;
 
     match doc.canvas.export_format {
         ExportFormat::Png => {

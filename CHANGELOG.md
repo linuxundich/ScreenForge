@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-02
+
+### Changed
+
+- Replaced the "Vektor-Muster" background and the old six-style
+  ("Flow"/"Waves"/"Blobs"/"Geometry"/"Rays"/"Minimal") generator with a
+  single "wave-layer fan" algorithm: nested, wave-perturbed arc layers
+  around one focus point, continuously morphing between flat wave bands
+  and nested corner arcs via one "Fokus" slider — replicating the
+  minimal vector-wallpaper look of the reference SVGs that prompted this
+  instead of the previous grab-bag of styles.
+- Reduced generated-background color strategies from seven to four:
+  Manuell (4 fixed color fields), Von Screenshots (dominant color, with
+  "Invertierter Kontrast" sliding between matching and complementary),
+  Schwarz-Weiß, and Zufällig.
+- The generator dialog no longer exposes Dichte, Fluss, Abwechslung or
+  Weichheit as sliders — every "Generieren" click now draws fresh random
+  values for them instead (still fully deterministic/reproducible from
+  the stored seed on save/load). Kontrast remains manually adjustable.
+- A new document now defaults to a linear-gradient background instead of
+  a flat color.
+
+### Added
+
+- "Position X"/"Position Y" and "Skalierung" controls for generated
+  backgrounds, moving and resizing the wave-layer pattern independently
+  of its focus/geometry.
+- A "Screenshots ausblenden" toggle in the header bar to temporarily
+  preview a background without the screenshots drawn on top — a
+  render-only preference that never touches the document, undo history,
+  or the saved project.
+
+### Removed
+
+- The "Vektor-Muster" background type (dot grid, diagonal stripes, and
+  the freeform circle/line editor) — superseded by the new generator.
+
+### Fixed
+
+- Generated backgrounds no longer show a stray straight diagonal edge
+  cutting across the pattern. Each wave layer is a "pie slice" with two
+  dead-straight radial sides; their angular sweep is now sized from the
+  actual canvas geometry (rather than a fixed formula), so both sides
+  always fall outside the visible canvas regardless of focus point,
+  seed, or aspect ratio.
+
+### Performance
+
+- Rendered shadow bitmaps are now cached and reused across repaints
+  (`core::shadow_cache`) — moving an element no longer re-blurs its
+  shadow on every frame.
+
 ## [0.17.0] - 2026-09-02
 
 ### Added

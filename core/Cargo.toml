@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 cairo-rs = "0.22"
+pango = { version = "0.22", features = ["v1_44"] }
+pangocairo = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -161,6 +161,13 @@ mod imp {
         /// re-run `compose()` on every frame — only when content changes or
         /// the widget is resized (which changes the "fit to window" scale).
         cached: RefCell<Option<(cairo::ImageSurface, i32, i32)>>,
+        /// Rendered shadow bitmaps, kept across `ensure_rendered()` calls
+        /// (unlike `cached` above, which holds the *whole* composited
+        /// frame) so a move/reorder drag — which re-composites the whole
+        /// document every frame via `content_dirty` — reuses each
+        /// element's shadow bitmap instead of re-blurring it on every
+        /// single mouse-move event. See `screenforge_core::shadow_cache`.
+        shadow_cache: screenforge_core::shadow_cache::ShadowCache,
         content_dirty: Cell<bool>,
         pub(super) drag_active: Cell<bool>,
         /// `None` = fit to window (default); `Some(z)` = fixed render scale,
@@ -227,6 +234,7 @@ mod imp {
                 resolved_images: RefCell::new(HashMap::new()),
                 background_image: RefCell::new(None),
                 cached: RefCell::new(None),
+                shadow_cache: screenforge_core::shadow_cache::ShadowCache::new(),
                 content_dirty: Cell::new(true),
                 drag_active: Cell::new(false),
                 manual_zoom: Cell::new(None),
@@ -556,7 +564,9 @@ mod imp {
             };
             let resolved = self.resolved_images.borrow();
             let background_image = self.background_image.borrow();
-            if let Err(err) = screenforge_core::render::compose(&doc, &surface, scale, &resolved, background_image.as_ref()) {
+            if let Err(err) =
+                screenforge_core::render::compose(&doc, &surface, scale, &resolved, background_image.as_ref(), &self.shadow_cache)
+            {
                 eprintln!("ScreenForge: render error: {err}");
                 return;
             }

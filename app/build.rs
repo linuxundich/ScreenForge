@@ -2,6 +2,15 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    // `glib_build_tools::compile_resources` doesn't emit its own
+    // `rerun-if-changed` for the files it bundles, and `compile_gsettings_schema`
+    // below emits one of its own — which, once *any* rerun-if-changed is
+    // emitted, opts this whole build script out of Cargo's default "rerun
+    // every build" behavior. Without this, editing window.ui (or any other
+    // resource) silently doesn't take effect until something else happens
+    // to touch build.rs or Cargo.toml.
+    println!("cargo:rerun-if-changed=resources");
+
     glib_build_tools::compile_resources(
         &["resources"],
         "resources/screenforge.gresource.xml",

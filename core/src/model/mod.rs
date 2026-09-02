@@ -186,6 +186,20 @@ impl ShadowParams {
         let rad = angle_deg.to_radians();
         (distance * rad.cos(), distance * rad.sin())
     }
+
+    /// Applies `preset`'s distance/blur/opacity/color, keeping *this*
+    /// shadow's current angle unchanged. This is the fix for the "choosing
+    /// a preset resets the angle to 90°" bug: the old code built a whole
+    /// new `ShadowParams` from a preset's own hard-coded `offset_x`/
+    /// `offset_y` (always straight down), which discarded whatever angle
+    /// the user had dialed in. A preset is a statement about *how strong*
+    /// a shadow looks, not *which direction* it's cast, so it must only
+    /// touch the fields it actually describes.
+    pub fn with_preset(&self, preset: ShadowPreset) -> ShadowParams {
+        let (angle, _) = self.angle_and_distance();
+        let (offset_x, offset_y) = Self::offset_for_angle_and_distance(angle, preset.distance);
+        ShadowParams { enabled: preset.enabled(), offset_x, offset_y, blur: preset.blur, opacity: preset.opacity, color: preset.color }
+    }
 }
 
 impl Default for ShadowParams {
@@ -194,29 +208,242 @@ impl Default for ShadowParams {
     }
 }
 
-/// A single text caption drawn over the whole composition (e.g. a title
-/// above the arranged screenshots) — one per document, not per element,
-/// mirroring how shadow/corner radius apply document-wide rather than
-/// needing per-element selection yet (spec §9/§27).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TextOverlay {
-    pub enabled: bool,
-    pub content: String,
-    pub x: f64,
-    pub y: f64,
-    pub font_size: f64,
+/// The "how strong" knobs of a shadow — distance, blur, opacity, color —
+/// deliberately without a direction: applying a preset must never overwrite
+/// the angle the user chose (see [`ShadowParams::with_preset`]). Mirrors
+/// the values `ShadowParams::subtle()`/`standard()`/`strong()`/`floating()`
+/// used to hard-code into `offset_x`/`offset_y` at a fixed 90° angle.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ShadowPreset {
+    pub distance: f64,
+    pub blur: f64,
+    pub opacity: f64,
     pub color: Rgba,
 }
 
-impl TextOverlay {
-    pub fn none() -> Self {
-        Self { enabled: false, content: String::new(), x: 48.0, y: 24.0, font_size: 32.0, color: Rgba::BLACK }
+impl ShadowPreset {
+    pub const NONE: ShadowPreset = ShadowPreset { distance: 0.0, blur: 0.0, opacity: 0.0, color: Rgba::BLACK };
+    pub const SUBTLE: ShadowPreset = ShadowPreset { distance: 2.0, blur: 8.0, opacity: 0.15, color: Rgba::BLACK };
+    pub const STANDARD: ShadowPreset = ShadowPreset { distance: 6.0, blur: 16.0, opacity: 0.25, color: Rgba::BLACK };
+    pub const STRONG: ShadowPreset = ShadowPreset { distance: 12.0, blur: 28.0, opacity: 0.4, color: Rgba::BLACK };
+    pub const FLOATING: ShadowPreset = ShadowPreset { distance: 24.0, blur: 40.0, opacity: 0.3, color: Rgba::BLACK };
+
+    /// A shadow is "on" once it would actually paint something — mirrors
+    /// `ShadowParams::none()` being the only preset with `enabled: false`.
+    pub fn enabled(&self) -> bool {
+        self.distance > 0.0 || self.blur > 0.0 || self.opacity > 0.0
     }
 }
 
-impl Default for TextOverlay {
-    fn default() -> Self {
-        Self::none()
+/// Where a [`TextElement`] sits horizontally within its reference rect —
+/// the whole canvas for a composition title, or one screenshot's placement
+/// for a label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HorizontalAnchor {
+    Left,
+    Center,
+    Right,
+}
+
+/// The vertical counterpart of [`HorizontalAnchor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VerticalAnchor {
+    Top,
+    Center,
+    Bottom,
+}
+
+/// Where a [`TextElement`]'s box (its background + padding + text) is
+/// placed within its reference rect. `Semantic` is resolved against that
+/// rect's *current* width/height wherever it's used (see
+/// `TextElement::resolve_box_origin`), never against a stored pixel
+/// coordinate — that's what keeps a title correctly positioned when the
+/// export size changes, and a label correctly positioned when its
+/// screenshot is resized, with nothing needing to be recomputed by the
+/// caller.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+pub enum TextPosition {
+    Semantic { horizontal: HorizontalAnchor, vertical: VerticalAnchor, padding: f64 },
+    /// Advanced/manual placement: the box's top-left corner, in the same
+    /// coordinate space `Semantic` resolves against (document pixels for a
+    /// title, screenshot-local pixels for a label).
+    Absolute { x: f64, y: f64 },
+}
+
+impl TextPosition {
+    /// The top-left corner of a `box_w`×`box_h` box within a
+    /// `ref_w`×`ref_h` reference rect, per this position. Pure geometry —
+    /// no font/rendering dependency — so both `core::render` and the
+    /// canvas/inspector UI can resolve exactly the same point.
+    pub fn resolve_box_origin(&self, ref_w: f64, ref_h: f64, box_w: f64, box_h: f64) -> (f64, f64) {
+        match *self {
+            TextPosition::Absolute { x, y } => (x, y),
+            TextPosition::Semantic { horizontal, vertical, padding } => {
+                let x = match horizontal {
+                    HorizontalAnchor::Left => padding,
+                    HorizontalAnchor::Center => (ref_w - box_w) / 2.0,
+                    HorizontalAnchor::Right => ref_w - box_w - padding,
+                };
+                let y = match vertical {
+                    VerticalAnchor::Top => padding,
+                    VerticalAnchor::Center => (ref_h - box_h) / 2.0,
+                    VerticalAnchor::Bottom => ref_h - box_h - padding,
+                };
+                (x, y)
+            }
+        }
+    }
+}
+
+/// Horizontal alignment of text *within* a [`TextElement`]'s own box —
+/// distinct from [`HorizontalAnchor`], which places the box itself within
+/// the reference rect. Only matters for multi-line content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// Typography for one [`TextElement`]. `weight` uses Pango's numeric scale
+/// (100..=900; 400 is normal, 700 is bold) rather than a `bool` — Pango
+/// natively supports the finer range and the render side hands it straight
+/// to `pango::FontDescription::set_weight`, so there's no separate mapping
+/// to maintain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Typography {
+    pub font_family: String,
+    pub font_size: f64,
+    pub weight: i32,
+    pub italic: bool,
+    pub color: Rgba,
+    pub alignment: TextAlign,
+    /// `0.0..=1.0`, multiplies `color.a` — kept separate so a user can dim
+    /// the whole label without having to remember/restore the color's own
+    /// alpha.
+    pub opacity: f64,
+    /// Extra space between characters, in pixels; `0.0` is Pango's normal
+    /// spacing.
+    pub letter_spacing: f64,
+    /// Pango's line-spacing factor; `1.0` is normal, matching a single
+    /// line's natural height.
+    pub line_spacing: f64,
+    /// Whether long content wraps within the box's available width
+    /// (`TextElement::wrap_width`) instead of growing the box to fit a
+    /// single line.
+    pub wrap: bool,
+}
+
+impl Typography {
+    pub fn title_default() -> Self {
+        Self {
+            font_family: "Sans".to_string(),
+            font_size: 32.0,
+            weight: 700,
+            italic: false,
+            color: Rgba::BLACK,
+            alignment: TextAlign::Center,
+            opacity: 1.0,
+            letter_spacing: 0.0,
+            line_spacing: 1.2,
+            wrap: false,
+        }
+    }
+
+    pub fn label_default() -> Self {
+        Self {
+            font_family: "Sans".to_string(),
+            font_size: 18.0,
+            weight: 700,
+            italic: false,
+            color: Rgba::WHITE,
+            alignment: TextAlign::Center,
+            opacity: 1.0,
+            letter_spacing: 0.0,
+            line_spacing: 1.2,
+            wrap: false,
+        }
+    }
+}
+
+/// A [`TextElement`]'s box background. Reuses [`Rgba`]'s own alpha channel
+/// for "solid with adjustable opacity" (matching how [`Background::Solid`]
+/// already works) and [`GradientSpec`] for a gradient fill, rather than
+/// inventing parallel types.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "kebab-case")]
+pub enum TextBackground {
+    #[default]
+    None,
+    Solid(Rgba),
+    Gradient(GradientSpec),
+}
+
+/// A reusable text/label object (spec: composition title and per-screenshot
+/// labels share this one shape rather than being separate hard-coded draw
+/// calls). Two positioning *contexts* reuse the same type: a
+/// canvas-relative title lives on [`Document`], a screenshot-relative
+/// label lives on [`ScreenshotElement`] — which reference rect
+/// `position`/`shadow` resolve against is entirely up to the caller
+/// (`core::render`), not encoded in this struct itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextElement {
+    pub enabled: bool,
+    pub content: String,
+    pub position: TextPosition,
+    pub typography: Typography,
+    pub background: TextBackground,
+    pub corner_radius: CornerRadius,
+    /// Padding, in pixels, between the background box's own edge and the
+    /// text inside it — distinct from `TextPosition::Semantic`'s
+    /// `padding`, which is the gap between the box and the canvas/
+    /// screenshot edge.
+    pub background_padding: f64,
+    pub shadow: ShadowParams,
+}
+
+impl TextElement {
+    pub fn title_default() -> Self {
+        Self {
+            enabled: false,
+            content: String::new(),
+            position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 32.0 },
+            typography: Typography::title_default(),
+            background: TextBackground::None,
+            corner_radius: CornerRadius::none(),
+            background_padding: 16.0,
+            shadow: ShadowParams::none(),
+        }
+    }
+
+    pub fn label_default() -> Self {
+        Self {
+            enabled: false,
+            content: String::new(),
+            position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Bottom, padding: 16.0 },
+            typography: Typography::label_default(),
+            background: TextBackground::None,
+            corner_radius: CornerRadius::none(),
+            background_padding: 8.0,
+            shadow: ShadowParams::none(),
+        }
+    }
+
+    /// The width (in the same coordinate space as `position`) long content
+    /// should wrap within, when `typography.wrap` is set — the reference
+    /// rect's own width for `Absolute` placement (no better bound exists),
+    /// or the rect's width minus the semantic edge padding on both sides,
+    /// so wrapped text never overflows past where the box itself is
+    /// anchored.
+    pub fn wrap_width(&self, ref_w: f64) -> f64 {
+        match self.position {
+            TextPosition::Absolute { .. } => ref_w.max(1.0),
+            TextPosition::Semantic { padding, .. } => (ref_w - 2.0 * padding).max(1.0),
+        }
     }
 }
 
@@ -233,6 +460,13 @@ pub struct ScreenshotElement {
     pub transform: Transform,
     pub corner_radius: CornerRadius,
     pub shadow: ShadowParams,
+    /// This screenshot's own label (spec §11) — screenshot-relative, so it
+    /// moves/scales with the element rather than living on `Document`
+    /// alongside the canvas-relative title. `#[serde(default)]` so a
+    /// project saved before labels existed still loads, with every
+    /// existing screenshot getting a disabled default label.
+    #[serde(default = "TextElement::label_default")]
+    pub label: TextElement,
     pub visible: bool,
 }
 
@@ -246,6 +480,7 @@ impl ScreenshotElement {
             transform: Transform::default(),
             corner_radius: CornerRadius::default(),
             shadow: ShadowParams::default(),
+            label: TextElement::label_default(),
             visible: true,
         }
     }
@@ -284,12 +519,119 @@ pub struct ImageBackgroundSpec {
     pub opacity: f64,
 }
 
-/// Stub for the later decorative vector background elements (spec §8).
+/// How a [`GeneratedBackground`]'s palette is derived. `Random` and
+/// `Grayscale` ignore the screenshots entirely; `Manual` uses the user's own
+/// 4 chosen colors as-is; `FromScreenshots` derives from the currently
+/// visible screenshots' dominant color, with `inverse_contrast` sliding
+/// between staying close to it and swinging to its complement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ColorStrategy {
+    /// The user's own 4 colors, picked directly (`palette` holds exactly
+    /// what they chose; nothing is derived).
+    Manual,
+    /// The screenshots' dominant color, shifted toward its complement by
+    /// `inverse_contrast`.
+    FromScreenshots,
+    /// A pure lightness ramp, no hue.
+    Grayscale,
+    /// Ignores the screenshots entirely; a fresh aesthetically-valid
+    /// palette each time, seeded like everything else here.
+    Random,
+}
+
+/// A background rendered procedurally from a seed and a handful of
+/// parameters, rather than a fixed image or a simple gradient (spec §4).
+/// Deliberately holds only *inputs* to generation — `palette`, `seed`, and
+/// every numeric knob below — never the resolved vector scene itself: the
+/// same inputs always regenerate the identical scene (see
+/// `crate::generator::render`), so there's nothing else worth persisting
+/// (spec §20/§24 — "the project must be able to regenerate the exact same
+/// background", not store a rendered image of it).
+///
+/// The scene itself is a single algorithm — a fan of nested, wave-perturbed
+/// arc layers around a focus point (see `crate::generator::draw_wave_layers`)
+/// — rather than a choice of unrelated styles; `corner_bias` alone controls
+/// whether that focus point (and thus the whole look) reads as flat wave
+/// bands or as nested arcs anchored in a canvas corner.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "shape", rename_all = "kebab-case")]
-pub enum VectorShape {
-    Circle { cx: f64, cy: f64, radius: f64, color: Rgba },
-    Line { x1: f64, y1: f64, x2: f64, y2: f64, width: f64, color: Rgba },
+pub struct GeneratedBackground {
+    pub seed: u64,
+    pub color_strategy: ColorStrategy,
+    /// The resolved palette this background was last generated with —
+    /// derived from `color_strategy` (and the screenshots, unless it's
+    /// `Random`) at the moment Generate/Regenerate was pressed. Kept
+    /// explicit rather than re-derived from the live document on every
+    /// render, so the background stays stable while editing unrelated
+    /// things, and so `adapt_to_screenshots = false` really means
+    /// "frozen" (spec §21 "Lock Background"). For `ColorStrategy::Manual`
+    /// this *is* the user's input, not a derived value.
+    pub palette: Vec<Rgba>,
+    /// When true, changing which screenshots are visible re-resolves
+    /// `palette` (and re-renders) automatically; when false, the palette
+    /// stays exactly as generated until the user explicitly regenerates
+    /// (spec §22). Meaningless for `Manual`/`Random`, which never derive
+    /// from the screenshots in the first place.
+    pub adapt_to_screenshots: bool,
+    /// `0.0..=1.0` — how strongly `ColorStrategy::FromScreenshots` contrasts
+    /// against, rather than matches, the screenshots' own colors (spec §2).
+    pub inverse_contrast: f64,
+    /// `0.0..=1.0` generation knobs — see `GeneratedBackground::new` for
+    /// sensible defaults.
+    pub density: f64,
+    pub flow: f64,
+    pub variation: f64,
+    pub contrast: f64,
+    pub softness: f64,
+    /// `0.0..=1.0` — 0 reads as flat, near-parallel wave bands; 1 as nested
+    /// arcs anchored in a canvas corner; in between, a continuous morph
+    /// between the two. See `crate::generator::draw_wave_layers`.
+    pub corner_bias: f64,
+    /// `-1.0..=1.0` — shifts the pattern's focus point horizontally
+    /// (`-1.0`/`1.0` move it a full half-canvas-width left/right), letting
+    /// the user recenter it without touching `corner_bias`'s wave-vs-arc
+    /// morph. `#[serde(default)]` so a project saved before this field
+    /// existed still loads, with the pattern staying exactly where it was
+    /// (`0.0` is "unmoved").
+    #[serde(default)]
+    pub offset_x: f64,
+    /// The vertical counterpart of `offset_x`.
+    #[serde(default)]
+    pub offset_y: f64,
+    /// `>0.0` — zooms the whole pattern in (`> 1.0`) or out (`< 1.0`) around
+    /// its focus point; `1.0` is unscaled. `#[serde(default = "..")]` so a
+    /// project saved before this field existed still loads at its original
+    /// size.
+    #[serde(default = "default_generated_scale")]
+    pub scale: f64,
+}
+
+fn default_generated_scale() -> f64 {
+    1.0
+}
+
+impl GeneratedBackground {
+    /// A fresh background with reasonable defaults — restrained enough
+    /// that the very first "Generate" click already looks intentional,
+    /// not just technically valid.
+    pub fn new(seed: u64) -> Self {
+        Self {
+            seed,
+            color_strategy: ColorStrategy::FromScreenshots,
+            palette: Vec::new(),
+            adapt_to_screenshots: true,
+            inverse_contrast: 0.5,
+            density: 0.4,
+            flow: 0.5,
+            variation: 0.4,
+            contrast: 0.5,
+            softness: 0.6,
+            corner_bias: 0.5,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            scale: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -298,12 +640,15 @@ pub enum Background {
     Solid(Rgba),
     Gradient(GradientSpec),
     Image(ImageBackgroundSpec),
-    Decoration(Vec<VectorShape>),
+    Generated(GeneratedBackground),
 }
 
 impl Default for Background {
     fn default() -> Self {
-        Background::Solid(Rgba::new(0.95, 0.95, 0.96, 1.0))
+        Background::Gradient(GradientSpec {
+            kind: GradientKind::Linear { angle_deg: 135.0 },
+            stops: vec![(0.0, Rgba::new(0.86, 0.90, 0.97, 1.0)), (1.0, Rgba::new(0.98, 0.98, 0.99, 1.0))],
+        })
     }
 }
 
@@ -391,8 +736,15 @@ pub struct Document {
     pub layout: LayoutSettings,
     pub background: Background,
     pub canvas: CanvasSettings,
-    #[serde(default)]
-    pub text_overlay: TextOverlay,
+    /// The composition-wide title (spec §5) — canvas-relative; see
+    /// [`ScreenshotElement::label`] for the screenshot-relative kind.
+    /// `#[serde(default)]` so a project saved before titles existed, or
+    /// one saved with the older single-purpose `TextOverlay`, still loads
+    /// (with no title rather than a load error — the older overlay's
+    /// content isn't migrated, since its shape doesn't map cleanly onto
+    /// `TextElement`'s).
+    #[serde(default = "TextElement::title_default")]
+    pub title: TextElement,
 }
 
 impl Document {
@@ -403,7 +755,7 @@ impl Document {
             layout: LayoutSettings::default(),
             background: Background::default(),
             canvas: CanvasSettings::default(),
-            text_overlay: TextOverlay::default(),
+            title: TextElement::title_default(),
         }
     }
 }
@@ -521,5 +873,98 @@ mod tests {
         let shadow = ShadowParams::none();
         let (_, distance) = shadow.angle_and_distance();
         assert_eq!(distance, 0.0);
+    }
+
+    /// Regression test for the "changing the shadow preset resets the
+    /// angle to 90°" bug: a custom angle must survive every preset switch.
+    #[test]
+    fn with_preset_preserves_a_custom_angle_across_every_preset() {
+        let mut shadow = ShadowParams::none();
+        shadow.offset_x = ShadowParams::offset_for_angle_and_distance(135.0, 6.0).0;
+        shadow.offset_y = ShadowParams::offset_for_angle_and_distance(135.0, 6.0).1;
+
+        for preset in [ShadowPreset::SUBTLE, ShadowPreset::STANDARD, ShadowPreset::STRONG, ShadowPreset::FLOATING] {
+            shadow = shadow.with_preset(preset);
+            let (angle, _) = shadow.angle_and_distance();
+            assert!((angle - 135.0).abs() < 1e-9, "expected angle to stay 135°, got {angle}");
+        }
+    }
+
+    #[test]
+    fn with_preset_applies_the_presets_own_blur_opacity_and_color() {
+        let shadow = ShadowParams::none().with_preset(ShadowPreset::STRONG);
+        assert_eq!(shadow.blur, ShadowPreset::STRONG.blur);
+        assert_eq!(shadow.opacity, ShadowPreset::STRONG.opacity);
+        assert_eq!(shadow.color, ShadowPreset::STRONG.color);
+        assert!(shadow.enabled);
+    }
+
+    #[test]
+    fn with_preset_none_disables_the_shadow() {
+        let shadow = ShadowParams::strong().with_preset(ShadowPreset::NONE);
+        assert!(!shadow.enabled);
+    }
+
+    #[test]
+    fn semantic_position_places_the_box_at_each_named_corner() {
+        let (ref_w, ref_h, box_w, box_h, padding) = (1000.0, 800.0, 200.0, 100.0, 20.0);
+
+        let top_left = TextPosition::Semantic { horizontal: HorizontalAnchor::Left, vertical: VerticalAnchor::Top, padding };
+        assert_eq!(top_left.resolve_box_origin(ref_w, ref_h, box_w, box_h), (20.0, 20.0));
+
+        let bottom_right = TextPosition::Semantic { horizontal: HorizontalAnchor::Right, vertical: VerticalAnchor::Bottom, padding };
+        assert_eq!(bottom_right.resolve_box_origin(ref_w, ref_h, box_w, box_h), (1000.0 - 200.0 - 20.0, 800.0 - 100.0 - 20.0));
+
+        let center = TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Center, padding };
+        assert_eq!(center.resolve_box_origin(ref_w, ref_h, box_w, box_h), ((1000.0 - 200.0) / 2.0, (800.0 - 100.0) / 2.0));
+    }
+
+    /// The core of spec §16 "responsive positioning": the same semantic
+    /// position must resolve to a *different* absolute point when the
+    /// reference rect (export size, or a resized screenshot) changes size
+    /// — this is what keeps a title centered/padded correctly rather than
+    /// staying at a stale pixel coordinate.
+    #[test]
+    fn semantic_position_tracks_a_changing_reference_rect_size() {
+        let position = TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 32.0 };
+
+        let at_1080p = position.resolve_box_origin(1920.0, 1080.0, 400.0, 80.0);
+        let at_4k = position.resolve_box_origin(3840.0, 2160.0, 400.0, 80.0);
+
+        assert_eq!(at_1080p, ((1920.0 - 400.0) / 2.0, 32.0));
+        assert_eq!(at_4k, ((3840.0 - 400.0) / 2.0, 32.0));
+        assert_ne!(at_1080p.0, at_4k.0, "centering must follow the new width, not stay at the old absolute x");
+    }
+
+    #[test]
+    fn absolute_position_ignores_the_reference_rect_entirely() {
+        let position = TextPosition::Absolute { x: 42.0, y: 17.0 };
+        assert_eq!(position.resolve_box_origin(100.0, 100.0, 30.0, 30.0), (42.0, 17.0));
+        assert_eq!(position.resolve_box_origin(5000.0, 5000.0, 30.0, 30.0), (42.0, 17.0));
+    }
+
+    #[test]
+    fn wrap_width_is_bounded_by_semantic_padding_on_both_sides() {
+        let el = TextElement { position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 50.0 }, ..TextElement::title_default() };
+        assert_eq!(el.wrap_width(1000.0), 900.0);
+    }
+
+    #[test]
+    fn wrap_width_for_absolute_position_falls_back_to_the_full_reference_width() {
+        let el = TextElement { position: TextPosition::Absolute { x: 10.0, y: 10.0 }, ..TextElement::title_default() };
+        assert_eq!(el.wrap_width(1000.0), 1000.0);
+    }
+
+    #[test]
+    fn screenshot_element_gets_a_disabled_default_label() {
+        let el = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("a.png")), 100.0, 200.0);
+        assert!(!el.label.enabled);
+        assert_eq!(el.label.content, "");
+    }
+
+    #[test]
+    fn document_gets_a_disabled_default_title() {
+        let doc = Document::new();
+        assert!(!doc.title.enabled);
     }
 }

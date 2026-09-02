@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextOverlay, Transform};
+use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextElement, Transform};
 
 /// A single reversible mutation of a [`Document`]. Implementations should
 /// store enough state to invert themselves cheaply (e.g. the old and new
@@ -436,20 +436,46 @@ impl Command for SetCornerRadiusForAllElements {
     }
 }
 
-/// Sets the document-wide text caption (spec's "text decorations").
+/// Sets the composition-wide title (spec §5) — canvas-relative; see
+/// [`SetScreenshotLabel`] for the screenshot-relative kind.
 #[derive(Debug)]
-pub struct SetTextOverlay {
-    pub old: TextOverlay,
-    pub new: TextOverlay,
+pub struct SetTitle {
+    pub old: TextElement,
+    pub new: TextElement,
 }
 
-impl Command for SetTextOverlay {
+impl Command for SetTitle {
     fn apply(&self, doc: &mut Document) {
-        doc.text_overlay = self.new.clone();
+        doc.title = self.new.clone();
     }
 
     fn undo(&self, doc: &mut Document) {
-        doc.text_overlay = self.old.clone();
+        doc.title = self.old.clone();
+    }
+}
+
+/// Sets one screenshot's own label (spec §11) — looked up by id like
+/// [`SetTransform`], since a label edit always targets whichever specific
+/// element is selected, not "every element" the way shadow/corner-radius
+/// commands do.
+#[derive(Debug)]
+pub struct SetScreenshotLabel {
+    pub element_id: Uuid,
+    pub old: TextElement,
+    pub new: TextElement,
+}
+
+impl Command for SetScreenshotLabel {
+    fn apply(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.label = self.new.clone();
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.label = self.old.clone();
+        }
     }
 }
 
@@ -769,10 +795,7 @@ mod tests {
         assert!(matches!(doc.background, Background::Solid(c) if c == Rgba::new(0.1, 0.2, 0.3, 1.0)));
 
         stack.undo(&mut doc);
-        match (&doc.background, &old) {
-            (Background::Solid(a), Background::Solid(b)) => assert_eq!(a, b),
-            _ => panic!("expected Solid backgrounds"),
-        }
+        assert_eq!(doc.background, old, "undo must restore the exact prior background, whatever its variant");
     }
 
     #[test]

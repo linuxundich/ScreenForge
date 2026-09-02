@@ -4,10 +4,13 @@
 
 pub mod blur;
 pub mod command;
-pub mod decoration;
+pub mod generator;
 pub mod layout;
 pub mod model;
+pub mod palette;
 pub mod project;
 pub mod render;
+pub mod rng;
+pub mod shadow_cache;
 pub mod snap;
 pub mod template;

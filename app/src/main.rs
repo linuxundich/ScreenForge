@@ -16,12 +16,13 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, RemoveScreenshots, ReorderScreenshot,
-    ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing,
-    SetTextOverlay, SetTransform, SetTransforms, UndoStack,
+    ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetScreenshotLabel,
+    SetShadowForAllElements, SetSpacing, SetTitle, SetTransform, SetTransforms, UndoStack,
 };
 use screenforge_core::model::{
-    Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
-    LayoutMode, Rgba, ScreenshotElement, ShadowParams, TextOverlay, VectorShape,
+    Background, BackgroundImageFit, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GradientKind, GradientSpec,
+    HorizontalAnchor, ImageBackgroundSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement, ShadowParams, ShadowPreset, TextAlign,
+    TextBackground, TextElement, TextPosition, Typography, VerticalAnchor,
 };
 use uuid::Uuid;
 
@@ -57,12 +58,20 @@ struct EditorState {
     /// and push a spurious undo command built from a mix of old and new
     /// values, corrupting the very history the sync was restoring.
     syncing_controls: bool,
-    /// The "Benutzerdefiniert" pattern's per-shape editor rows, dynamically
-    /// added to `background_group` by `rebuild_custom_shapes_ui` — tracked
-    /// here (rather than only as local variables) so a later rebuild can
-    /// find and remove exactly the rows a previous rebuild added, and
-    /// nothing else in the group.
-    custom_shape_rows: Vec<adw::ExpanderRow>,
+    /// Bumped on every "Generate from screenshots" click, and fed to
+    /// `screenforge_core::palette::suggest_gradient` as its seed — this is
+    /// what makes clicking the button again ("Regenerate") suggest a
+    /// different palette each time rather than the same one, with no
+    /// external RNG state needed. Transient UI convenience, not saved with
+    /// the project.
+    gradient_auto_seed: u32,
+    /// Set by the header bar's "Screenshots ausblenden" toggle. Purely a
+    /// preview convenience for judging a generated/gradient background
+    /// without the screenshots on top of it — `refresh_canvas` skips
+    /// drawing elements while this is set, but never touches
+    /// `document.elements` or its `visible` flags, so it leaves undo
+    /// history and the saved project completely untouched.
+    hide_screenshots: bool,
 }
 
 impl EditorState {
@@ -81,7 +90,8 @@ impl EditorState {
             project_path: None,
             undo_stack: UndoStack::new(),
             syncing_controls: false,
-            custom_shape_rows: Vec::new(),
+            gradient_auto_seed: 0,
+            hide_screenshots: false,
         }
     }
 }
@@ -142,6 +152,8 @@ fn build_ui(app: &adw::Application) {
     register_drop_target(&window, &canvas, &state);
     register_layout_controls(&window, &canvas, &state);
     register_effect_controls(&window, &canvas, &state);
+    register_generator_controls(&window, &canvas, &state);
+    register_title_controls(&window, &canvas, &state);
     register_export_controls(&window, &state);
     register_export_action(app, &window, &state);
     register_project_actions(app, &window, &canvas, &state);
@@ -154,8 +166,27 @@ fn build_ui(app: &adw::Application) {
     register_context_menu(&window, &canvas, &state);
     register_delete_selected(app, &window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
+    register_hide_screenshots_toggle(&window, &canvas, &state);
 
     window.present();
+}
+
+/// Wires the header bar's "Screenshots ausblenden" toggle to
+/// `EditorState::hide_screenshots` — a pure preview flag (see its own doc
+/// comment), so this never touches the undo stack.
+fn register_hide_screenshots_toggle(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    window.hide_screenshots_button().connect_toggled(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |button| {
+            state.borrow_mut().hide_screenshots = button.is_active();
+            refresh_canvas(&window, &canvas, &state);
+        }
+    ));
 }
 
 /// Builds a fresh `cairo::ImageSurface` per *currently referenced* image
@@ -167,7 +198,7 @@ fn build_ui(app: &adw::Application) {
 /// not just the ones that go through `sync_controls_from_document`.
 fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let mut state_ref = state.borrow_mut();
-    let EditorState { document, image_cache, .. } = &mut *state_ref;
+    let EditorState { document, image_cache, hide_screenshots, .. } = &mut *state_ref;
     let mut surfaces = HashMap::new();
     for element in &document.elements {
         let ImageSource::Path(path) = &element.source else { continue };
@@ -181,7 +212,14 @@ fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorSta
         .and_then(|path| get_or_decode(image_cache, &path))
         .and_then(|image| import::surface_from_decoded(image).ok());
     let canvas_settings = document.canvas;
-    canvas.set_document(document.clone(), surfaces, background_image);
+    // "Screenshots ausblenden" only ever affects what gets handed to the
+    // canvas widget for this one render — `document` itself (and therefore
+    // undo history and the saved project) is never touched.
+    let mut doc_for_render = document.clone();
+    if *hide_screenshots {
+        doc_for_render.elements.clear();
+    }
+    canvas.set_document(doc_for_render, surfaces, background_image);
     drop(state_ref);
 
     update_export_height_display(window, canvas_settings);
@@ -445,26 +483,280 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
     ));
 }
 
-fn shadow_preset_for_index(index: u32) -> ShadowParams {
+fn color_strategy_for_index(index: u32) -> ColorStrategy {
     match index {
-        0 => ShadowParams::none(),
-        1 => ShadowParams::subtle(),
-        2 => ShadowParams::standard(),
-        3 => ShadowParams::strong(),
-        _ => ShadowParams::floating(),
+        0 => ColorStrategy::Manual,
+        1 => ColorStrategy::FromScreenshots,
+        2 => ColorStrategy::Grayscale,
+        _ => ColorStrategy::Random,
     }
+}
+
+fn index_for_color_strategy(strategy: ColorStrategy) -> u32 {
+    match strategy {
+        ColorStrategy::Manual => 0,
+        ColorStrategy::FromScreenshots => 1,
+        ColorStrategy::Grayscale => 2,
+        ColorStrategy::Random => 3,
+    }
+}
+
+/// Reflects a `GeneratedBackground`'s parameters onto the generator
+/// controls — used both by `sync_background_controls`'s `Generated` arm
+/// and after a fresh "Generieren" click updates the seed, mirroring
+/// `sync_title_controls`'s role for the title.
+fn sync_generator_controls(window: &Window, generated: &GeneratedBackground) {
+    window.generator_color_strategy_row().set_selected(index_for_color_strategy(generated.color_strategy));
+    let manual_buttons =
+        [window.generator_manual_color_button_1(), window.generator_manual_color_button_2(), window.generator_manual_color_button_3(), window.generator_manual_color_button_4()];
+    for (i, button) in manual_buttons.iter().enumerate() {
+        let color = generated.palette.get(i).copied().unwrap_or(Rgba::new(0.5, 0.5, 0.5, 1.0));
+        button.set_rgba(&gdk_rgba_from(&color));
+    }
+    window.generator_adapt_row().set_active(generated.adapt_to_screenshots);
+    window.generator_inverse_contrast_row().set_value(generated.inverse_contrast * 100.0);
+    window.generator_corner_bias_row().set_value(generated.corner_bias * 100.0);
+    window.generator_offset_x_row().set_value(generated.offset_x * 100.0);
+    window.generator_offset_y_row().set_value(generated.offset_y * 100.0);
+    window.generator_scale_row().set_value(generated.scale * 100.0);
+    window.generator_contrast_row().set_value(generated.contrast * 100.0);
+    window.generator_seed_row().set_value(generated.seed as f64);
+}
+
+fn shadow_preset_for_index(index: u32) -> ShadowPreset {
+    match index {
+        0 => ShadowPreset::NONE,
+        1 => ShadowPreset::SUBTLE,
+        2 => ShadowPreset::STANDARD,
+        3 => ShadowPreset::STRONG,
+        _ => ShadowPreset::FLOATING,
+    }
+}
+
+/// The preset dropdown index matching `shadow`'s current distance/blur/
+/// opacity/color — deliberately ignoring `angle_and_distance().0` (the
+/// angle), so a shadow with a custom angle still shows its actual
+/// Subtle/Standard/Strong/Floating preset instead of falling back to "Kein
+/// Schatten" just because a plain `ShadowParams` equality check would fail
+/// once the angle no longer matches the preset's own baked-in 90°.
+fn shadow_preset_index_for(shadow: &ShadowParams) -> u32 {
+    let (_, distance) = shadow.angle_and_distance();
+    let presets = [ShadowPreset::NONE, ShadowPreset::SUBTLE, ShadowPreset::STANDARD, ShadowPreset::STRONG, ShadowPreset::FLOATING];
+    presets
+        .iter()
+        .position(|p| {
+            (p.distance - distance).abs() < 0.01
+                && (p.blur - shadow.blur).abs() < 0.01
+                && (p.opacity - shadow.opacity).abs() < 0.001
+                && p.color == shadow.color
+        })
+        .map(|i| i as u32)
+        .unwrap_or(0)
+}
+
+fn horizontal_anchor_for_index(index: u32) -> HorizontalAnchor {
+    match index {
+        0 => HorizontalAnchor::Left,
+        2 => HorizontalAnchor::Right,
+        _ => HorizontalAnchor::Center,
+    }
+}
+
+fn index_for_horizontal_anchor(anchor: HorizontalAnchor) -> u32 {
+    match anchor {
+        HorizontalAnchor::Left => 0,
+        HorizontalAnchor::Center => 1,
+        HorizontalAnchor::Right => 2,
+    }
+}
+
+fn vertical_anchor_for_index(index: u32) -> VerticalAnchor {
+    match index {
+        0 => VerticalAnchor::Top,
+        2 => VerticalAnchor::Bottom,
+        _ => VerticalAnchor::Center,
+    }
+}
+
+fn index_for_vertical_anchor(anchor: VerticalAnchor) -> u32 {
+    match anchor {
+        VerticalAnchor::Top => 0,
+        VerticalAnchor::Center => 1,
+        VerticalAnchor::Bottom => 2,
+    }
+}
+
+fn text_align_for_index(index: u32) -> TextAlign {
+    match index {
+        0 => TextAlign::Left,
+        2 => TextAlign::Right,
+        _ => TextAlign::Center,
+    }
+}
+
+fn index_for_text_align(align: TextAlign) -> u32 {
+    match align {
+        TextAlign::Left => 0,
+        TextAlign::Center => 1,
+        TextAlign::Right => 2,
+    }
+}
+
+/// Extracts family/size/weight/italic from a Pango font description — the
+/// shape `Typography` stores them in, so a `GtkFontDialogButton` can be
+/// this app's one control for all four (spec: "use the native GNOME text
+/// stack"). Size is read as whatever raw number Pango carries (points from
+/// the system font picker, or pixels if we set it via `set_absolute_size`
+/// ourselves) without converting between the two — close enough at
+/// typical desktop DPI for a screenshot compositor, and it means this app
+/// never needs to know the display's actual DPI.
+fn typography_from_font_desc(font_desc: &pango::FontDescription) -> (String, f64, i32, bool) {
+    use glib::translate::IntoGlib;
+    let family = font_desc.family().map(|f| f.to_string()).unwrap_or_else(|| "Sans".to_string());
+    let size = (font_desc.size() as f64 / pango::SCALE as f64).max(1.0);
+    let weight = font_desc.weight().into_glib();
+    let italic = matches!(font_desc.style(), pango::Style::Italic | pango::Style::Oblique);
+    (family, size, weight, italic)
+}
+
+fn font_desc_from_typography(typography: &Typography) -> pango::FontDescription {
+    let mut font_desc = pango::FontDescription::new();
+    font_desc.set_family(&typography.font_family);
+    font_desc.set_absolute_size(typography.font_size.max(0.1) * pango::SCALE as f64);
+    font_desc.set_weight(pango::Weight::__Unknown(typography.weight));
+    font_desc.set_style(if typography.italic { pango::Style::Italic } else { pango::Style::Normal });
+    font_desc
+}
+
+/// Reflects a `TextElement` (the composition title) onto its controls —
+/// used for both the initial sync and after undo/redo/load, mirroring
+/// `sync_background_controls`.
+fn sync_title_controls(window: &Window, title: &TextElement) {
+    window.title_enabled_row().set_active(title.enabled);
+    window.title_content_row().set_text(&title.content);
+
+    let is_absolute = matches!(title.position, TextPosition::Absolute { .. });
+    window.title_position_mode_row().set_selected(if is_absolute { 1 } else { 0 });
+    window.title_horizontal_row().set_visible(!is_absolute);
+    window.title_vertical_row().set_visible(!is_absolute);
+    window.title_padding_row().set_visible(!is_absolute);
+    window.title_x_row().set_visible(is_absolute);
+    window.title_y_row().set_visible(is_absolute);
+    match title.position {
+        TextPosition::Semantic { horizontal, vertical, padding } => {
+            window.title_horizontal_row().set_selected(index_for_horizontal_anchor(horizontal));
+            window.title_vertical_row().set_selected(index_for_vertical_anchor(vertical));
+            window.title_padding_row().set_value(padding);
+        }
+        TextPosition::Absolute { x, y } => {
+            window.title_x_row().set_value(x);
+            window.title_y_row().set_value(y);
+        }
+    }
+
+    let background_index = match &title.background {
+        TextBackground::None => 0,
+        TextBackground::Solid(_) => 1,
+        TextBackground::Gradient(_) => 2,
+    };
+    window.title_background_row().set_selected(background_index);
+    window.title_background_color_row().set_visible(background_index != 0);
+    window.title_background_color2_row().set_visible(background_index == 2);
+    match &title.background {
+        TextBackground::Solid(color) => window.title_background_color_button().set_rgba(&gdk_rgba_from(color)),
+        TextBackground::Gradient(spec) => {
+            if let Some((_, color)) = spec.stops.first() {
+                window.title_background_color_button().set_rgba(&gdk_rgba_from(color));
+            }
+            if let Some((_, color)) = spec.stops.get(1) {
+                window.title_background_color2_button().set_rgba(&gdk_rgba_from(color));
+            }
+        }
+        TextBackground::None => {}
+    }
+
+    window.title_corner_radius_row().set_value(title.corner_radius.top_left);
+    window.title_font_button().set_font_desc(&font_desc_from_typography(&title.typography));
+    window.title_alignment_row().set_selected(index_for_text_align(title.typography.alignment));
+    window.title_letter_spacing_row().set_value(title.typography.letter_spacing);
+    window.title_line_spacing_row().set_value(title.typography.line_spacing);
+    window.title_color_button().set_rgba(&gdk_rgba_from(&title.typography.color));
+    window.title_opacity_row().set_value(title.typography.opacity * 100.0);
+
+    window.title_shadow_row().set_selected(shadow_preset_index_for(&title.shadow));
+    let (angle, distance) = title.shadow.angle_and_distance();
+    window.title_shadow_angle_row().set_value(angle);
+    window.title_shadow_distance_row().set_value(distance);
+    window.title_shadow_blur_row().set_value(title.shadow.blur);
+
+    let controls_enabled = title.enabled;
+    for row in [
+        &window.title_content_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_position_mode_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_background_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_corner_radius_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_font_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_alignment_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_letter_spacing_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_line_spacing_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_color_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_opacity_row().clone().upcast::<gtk4::Widget>(),
+        &window.title_shadow_row().clone().upcast::<gtk4::Widget>(),
+    ] {
+        row.set_sensitive(controls_enabled);
+    }
+    window.title_horizontal_row().set_sensitive(controls_enabled);
+    window.title_vertical_row().set_sensitive(controls_enabled);
+    window.title_padding_row().set_sensitive(controls_enabled);
+    window.title_x_row().set_sensitive(controls_enabled);
+    window.title_y_row().set_sensitive(controls_enabled);
+    window.title_background_color_row().set_sensitive(controls_enabled);
+    window.title_background_color2_row().set_sensitive(controls_enabled);
+    let shadow_geometry_enabled = controls_enabled && title.shadow.enabled;
+    window.title_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
+    window.title_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
+    window.title_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
 }
 
 /// Reflects a `Background` value onto the type/color1/color2/angle controls
 /// (used for both the initial sync and after undo/redo/load).
+/// Shows/hides the generator's color-strategy-dependent rows: the 4 manual
+/// swatches only for `Manual`, the screenshot-contrast dial only for
+/// `FromScreenshots` — shared between the initial sync and the
+/// color-strategy combo's own live notify handler.
+fn sync_generator_color_strategy_visibility(window: &Window, is_generated: bool, strategy: ColorStrategy) {
+    let is_manual = is_generated && matches!(strategy, ColorStrategy::Manual);
+    let is_from_screenshots = is_generated && matches!(strategy, ColorStrategy::FromScreenshots);
+    window.generator_manual_color_row_1().set_visible(is_manual);
+    window.generator_manual_color_row_2().set_visible(is_manual);
+    window.generator_manual_color_row_3().set_visible(is_manual);
+    window.generator_manual_color_row_4().set_visible(is_manual);
+    window.generator_inverse_contrast_row().set_visible(is_from_screenshots);
+}
+
 fn sync_background_controls(window: &Window, background: &Background) {
-    window.background_color1_row().set_visible(!matches!(background, Background::Image(_)));
+    let is_generated = matches!(background, Background::Generated(_));
+    window.background_color1_row().set_visible(!matches!(background, Background::Image(_)) && !is_generated);
     window.gradient_color2_row().set_visible(matches!(background, Background::Gradient(_)));
     window.gradient_angle_row().set_visible(matches!(background, Background::Gradient(spec) if matches!(spec.kind, GradientKind::Linear { .. })));
+    window.gradient_auto_colors_row().set_visible(matches!(background, Background::Gradient(_)));
     window.background_image_row().set_visible(matches!(background, Background::Image(_)));
     window.background_image_fit_row().set_visible(matches!(background, Background::Image(_)));
     window.background_image_opacity_row().set_visible(matches!(background, Background::Image(_)));
-    window.background_decoration_row().set_visible(matches!(background, Background::Decoration(_)));
+    window.generator_color_strategy_row().set_visible(is_generated);
+    window.generator_adapt_row().set_visible(is_generated);
+    window.generator_corner_bias_row().set_visible(is_generated);
+    window.generator_offset_x_row().set_visible(is_generated);
+    window.generator_offset_y_row().set_visible(is_generated);
+    window.generator_scale_row().set_visible(is_generated);
+    window.generator_contrast_row().set_visible(is_generated);
+    window.generator_seed_row().set_visible(is_generated);
+    window.generator_generate_row().set_visible(is_generated);
+    sync_generator_color_strategy_visibility(
+        window,
+        is_generated,
+        if let Background::Generated(generated) = background { generated.color_strategy } else { ColorStrategy::Manual },
+    );
 
     match background {
         Background::Solid(color) => {
@@ -490,33 +782,9 @@ fn sync_background_controls(window: &Window, background: &Background) {
             window.background_image_fit_row().set_selected(index_for_background_image_fit(spec.fit));
             window.background_image_opacity_row().set_value(spec.opacity * 100.0);
         }
-        Background::Decoration(shapes) => {
+        Background::Generated(generated) => {
             window.background_type_row().set_selected(4);
-            // Dots/DiagonalLines each produce a many-shape grid of a
-            // single kind; anything smaller, mixed, or empty is treated
-            // as a hand-curated "Benutzerdefiniert" list instead — not a
-            // perfect round-trip (a tiny/coincidentally-uniform manual
-            // selection could misfire as a preset), but harmless since
-            // "Benutzerdefiniert" stays fully editable either way, and
-            // there's no separate field recording which preset (if any)
-            // actually produced the current shapes.
-            let all_circles = !shapes.is_empty() && shapes.iter().all(|s| matches!(s, VectorShape::Circle { .. }));
-            let all_lines = !shapes.is_empty() && shapes.iter().all(|s| matches!(s, VectorShape::Line { .. }));
-            let selected = if all_circles && shapes.len() > 8 {
-                0
-            } else if all_lines && shapes.len() > 8 {
-                1
-            } else {
-                2
-            };
-            window.background_decoration_row().set_selected(selected);
-            let color = shapes.first().map(|s| match s {
-                VectorShape::Circle { color, .. } => *color,
-                VectorShape::Line { color, .. } => *color,
-            });
-            if let Some(color) = color {
-                window.background_color_button().set_rgba(&gdk_rgba_from(&color));
-            }
+            sync_generator_controls(window, generated);
         }
     }
 }
@@ -556,21 +824,9 @@ fn rgba_from_gdk(c: &gdk::RGBA) -> Rgba {
     Rgba::new(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64)
 }
 
-fn decoration_preset_for_index(index: u32) -> screenforge_core::decoration::DecorationPreset {
-    match index {
-        0 => screenforge_core::decoration::DecorationPreset::Dots,
-        _ => screenforge_core::decoration::DecorationPreset::DiagonalLines,
-    }
-}
-
-/// Reads the background controls (type/color1/color2/angle/pattern) and
-/// builds the `Background` they currently describe. `canvas_width`/
-/// `canvas_height` are only used for the "Vektor-Muster" preset, which is
-/// generated once at selection time rather than kept resolution-
-/// independent — it won't retroactively resize if the canvas's
-/// content-fitted size changes afterward (see `fit_canvas_to_content`),
-/// same simplification as every other one-shot preset in this app.
-fn background_from_controls(window: &Window, canvas_width: f64, canvas_height: f64) -> Background {
+/// Reads the background controls (type/color1/color2/angle) and builds the
+/// `Background` they currently describe.
+fn background_from_controls(window: &Window) -> Background {
     let color1 = rgba_from_gdk(&window.background_color_button().rgba());
     match window.background_type_row().selected() {
         1 => {
@@ -588,22 +844,6 @@ fn background_from_controls(window: &Window, canvas_width: f64, canvas_height: f
                 stops: vec![(0.0, color1), (1.0, color2)],
             })
         }
-        4 => {
-            // Index 2 ("Benutzerdefiniert") is edited entirely through
-            // `on_custom_shapes_selected`/`add_custom_shape`/
-            // `apply_shape_edit`, never through this function — but this
-            // arm still needs to produce *something* sane for it rather
-            // than falling into `decoration_preset_for_index`'s `_` catch-
-            // all (which would silently generate a `DiagonalLines` preset
-            // instead), in case some other control change re-triggers
-            // `apply_background_from_controls` while it's selected.
-            if window.background_decoration_row().selected() == 2 {
-                Background::Decoration(Vec::new())
-            } else {
-                let preset = decoration_preset_for_index(window.background_decoration_row().selected());
-                Background::Decoration(preset.shapes(canvas_width, canvas_height, color1))
-            }
-        }
         _ => Background::Solid(color1),
     }
 }
@@ -616,8 +856,7 @@ fn background_from_controls(window: &Window, canvas_width: f64, canvas_height: f
 /// history it was trying to restore.
 fn apply_background_from_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let mut state_ref = state.borrow_mut();
-    let (canvas_width, canvas_height) = (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64);
-    let new = background_from_controls(window, canvas_width, canvas_height);
+    let new = background_from_controls(window);
     if state_ref.syncing_controls || state_ref.document.background == new {
         return;
     }
@@ -627,317 +866,6 @@ fn apply_background_from_controls(window: &Window, canvas: &Canvas, state: &Rc<R
     drop(state_ref);
     refresh_canvas(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
-    rebuild_custom_shapes_ui(window, canvas, state);
-}
-
-/// Switches the "Muster" combo to "Benutzerdefiniert" — unlike the Dots/
-/// DiagonalLines presets (which regenerate their shapes from scratch every
-/// time they're (re)selected), this preserves whatever shapes are already
-/// there if the background is already `Background::Decoration` (e.g.
-/// switching away and back, or starting from a preset to hand-edit it),
-/// and only resets to an empty list when switching in from a genuinely
-/// different background type.
-fn on_custom_shapes_selected(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let mut state_ref = state.borrow_mut();
-    if state_ref.syncing_controls {
-        return;
-    }
-    if matches!(state_ref.document.background, Background::Decoration(_)) {
-        drop(state_ref);
-        rebuild_custom_shapes_ui(window, canvas, state);
-        return;
-    }
-    let old = state_ref.document.background.clone();
-    let new = Background::Decoration(Vec::new());
-    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-    undo_stack.apply(Box::new(SetBackground { old, new }), document);
-    drop(state_ref);
-    refresh_canvas(window, canvas, state);
-    update_undo_redo_sensitivity(window, state);
-    rebuild_custom_shapes_ui(window, canvas, state);
-}
-
-/// Appends one shape to the "Benutzerdefiniert" pattern's list as one
-/// undo step, starting from an empty list if the background isn't
-/// already `Background::Decoration` for some reason (shouldn't normally
-/// happen — the add-shape buttons are only visible once it is).
-fn add_custom_shape(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, shape: VectorShape) {
-    let mut state_ref = state.borrow_mut();
-    let old = state_ref.document.background.clone();
-    let mut shapes = match &old {
-        Background::Decoration(shapes) => shapes.clone(),
-        _ => Vec::new(),
-    };
-    shapes.push(shape);
-    let new = Background::Decoration(shapes);
-    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-    undo_stack.apply(Box::new(SetBackground { old, new }), document);
-    drop(state_ref);
-    refresh_canvas(window, canvas, state);
-    update_undo_redo_sensitivity(window, state);
-    rebuild_custom_shapes_ui(window, canvas, state);
-}
-
-/// Removes one shape from the "Benutzerdefiniert" pattern's list (its
-/// delete button) as one undo step.
-fn delete_custom_shape(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize) {
-    let mut state_ref = state.borrow_mut();
-    let Background::Decoration(shapes) = &state_ref.document.background else { return };
-    if index >= shapes.len() {
-        return;
-    }
-    let old = state_ref.document.background.clone();
-    let mut new_shapes = shapes.clone();
-    new_shapes.remove(index);
-    let new = Background::Decoration(new_shapes);
-    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-    undo_stack.apply(Box::new(SetBackground { old, new }), document);
-    drop(state_ref);
-    refresh_canvas(window, canvas, state);
-    update_undo_redo_sensitivity(window, state);
-    rebuild_custom_shapes_ui(window, canvas, state);
-}
-
-/// Replaces one shape in the "Benutzerdefiniert" pattern's list in place
-/// as one undo step — called by a shape row's own spin/color controls.
-/// Deliberately doesn't call `rebuild_custom_shapes_ui`: unlike add/
-/// delete, editing a value doesn't change how many rows there are, and
-/// tearing down/rebuilding the row the user is actively typing into on
-/// every keystroke would steal its own focus.
-fn apply_shape_edit(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize, new_shape: VectorShape) {
-    let mut state_ref = state.borrow_mut();
-    if state_ref.syncing_controls {
-        return;
-    }
-    let Background::Decoration(shapes) = &state_ref.document.background else { return };
-    match shapes.get(index) {
-        Some(current) if *current == new_shape => return,
-        Some(_) => {}
-        None => return,
-    }
-    let old = state_ref.document.background.clone();
-    let mut new_shapes = shapes.clone();
-    new_shapes[index] = new_shape;
-    let new = Background::Decoration(new_shapes);
-    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-    undo_stack.apply(Box::new(SetBackground { old, new }), document);
-    drop(state_ref);
-    refresh_canvas(window, canvas, state);
-    update_undo_redo_sensitivity(window, state);
-}
-
-fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::SpinRow {
-    let adjustment = gtk4::Adjustment::new(value, lower, upper, 1.0, 10.0, 0.0);
-    let row = adw::SpinRow::new(Some(&adjustment), 1.0, 1);
-    row.set_title(title);
-    row
-}
-
-/// Builds one shape's `AdwExpanderRow` editor — position/size/color spin
-/// rows and color button matching its variant, plus a delete button in
-/// the header. Each control's own change handler reads every field back
-/// from these same widgets and pushes the whole shape as one
-/// `apply_shape_edit` call, rather than tracking incremental diffs.
-fn build_shape_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize, shape: &VectorShape) -> adw::ExpanderRow {
-    let expander = adw::ExpanderRow::new();
-    let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
-    delete_button.set_valign(gtk4::Align::Center);
-    delete_button.add_css_class("flat");
-    expander.add_suffix(&delete_button);
-
-    match *shape {
-        VectorShape::Circle { cx, cy, radius, color } => {
-            expander.set_title(&format!("Kreis {}", index + 1));
-            let cx_row = spin_row("Mitte X", 0.0, 8000.0, cx);
-            let cy_row = spin_row("Mitte Y", 0.0, 8000.0, cy);
-            let radius_row = spin_row("Radius", 1.0, 4000.0, radius);
-            let color_row = adw::ActionRow::new();
-            color_row.set_title("Farbe");
-            let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
-            color_button.set_valign(gtk4::Align::Center);
-            color_button.set_rgba(&gdk_rgba_from(&color));
-            color_row.add_suffix(&color_button);
-            expander.add_row(&cx_row);
-            expander.add_row(&cy_row);
-            expander.add_row(&radius_row);
-            expander.add_row(&color_row);
-
-            let apply = glib::clone!(
-                #[weak]
-                window,
-                #[weak]
-                canvas,
-                #[strong]
-                state,
-                #[weak]
-                cx_row,
-                #[weak]
-                cy_row,
-                #[weak]
-                radius_row,
-                #[weak]
-                color_button,
-                move || {
-                    let new_shape = VectorShape::Circle {
-                        cx: cx_row.value(),
-                        cy: cy_row.value(),
-                        radius: radius_row.value(),
-                        color: rgba_from_gdk(&color_button.rgba()),
-                    };
-                    apply_shape_edit(&window, &canvas, &state, index, new_shape);
-                }
-            );
-            cx_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            cy_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            radius_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            color_button.connect_rgba_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-        }
-        VectorShape::Line { x1, y1, x2, y2, width, color } => {
-            expander.set_title(&format!("Linie {}", index + 1));
-            let x1_row = spin_row("X1", 0.0, 8000.0, x1);
-            let y1_row = spin_row("Y1", 0.0, 8000.0, y1);
-            let x2_row = spin_row("X2", 0.0, 8000.0, x2);
-            let y2_row = spin_row("Y2", 0.0, 8000.0, y2);
-            let width_row = spin_row("Linienbreite", 1.0, 200.0, width);
-            let color_row = adw::ActionRow::new();
-            color_row.set_title("Farbe");
-            let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
-            color_button.set_valign(gtk4::Align::Center);
-            color_button.set_rgba(&gdk_rgba_from(&color));
-            color_row.add_suffix(&color_button);
-            expander.add_row(&x1_row);
-            expander.add_row(&y1_row);
-            expander.add_row(&x2_row);
-            expander.add_row(&y2_row);
-            expander.add_row(&width_row);
-            expander.add_row(&color_row);
-
-            let apply = glib::clone!(
-                #[weak]
-                window,
-                #[weak]
-                canvas,
-                #[strong]
-                state,
-                #[weak]
-                x1_row,
-                #[weak]
-                y1_row,
-                #[weak]
-                x2_row,
-                #[weak]
-                y2_row,
-                #[weak]
-                width_row,
-                #[weak]
-                color_button,
-                move || {
-                    let new_shape = VectorShape::Line {
-                        x1: x1_row.value(),
-                        y1: y1_row.value(),
-                        x2: x2_row.value(),
-                        y2: y2_row.value(),
-                        width: width_row.value(),
-                        color: rgba_from_gdk(&color_button.rgba()),
-                    };
-                    apply_shape_edit(&window, &canvas, &state, index, new_shape);
-                }
-            );
-            x1_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            y1_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            x2_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            y2_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            width_row.connect_value_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-            color_button.connect_rgba_notify(glib::clone!(
-                #[strong]
-                apply,
-                move |_| apply()
-            ));
-        }
-    }
-
-    delete_button.connect_clicked(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |_| delete_custom_shape(&window, &canvas, &state, index)
-    ));
-
-    expander
-}
-
-/// Rebuilds the "Benutzerdefiniert" pattern's per-shape editor rows to
-/// match `state.document.background`'s current shapes — called after
-/// every structural change (add/delete a shape, switch pattern/type,
-/// undo/redo, project load). Removes exactly the rows a previous call
-/// added (tracked in `EditorState::custom_shape_rows`) before adding
-/// fresh ones, so this is always safe to call repeatedly. A no-op list
-/// (but still updates `add_shape_row`'s visibility) whenever the combo
-/// isn't on "Benutzerdefiniert".
-fn rebuild_custom_shapes_ui(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let group = window.background_group();
-    let old_rows = std::mem::take(&mut state.borrow_mut().custom_shape_rows);
-    for row in old_rows {
-        group.remove(&row);
-    }
-
-    let is_custom = window.background_type_row().selected() == 4 && window.background_decoration_row().selected() == 2;
-    window.add_shape_row().set_visible(is_custom);
-    if !is_custom {
-        return;
-    }
-
-    let shapes = match &state.borrow().document.background {
-        Background::Decoration(shapes) => shapes.clone(),
-        _ => Vec::new(),
-    };
-
-    let mut new_rows = Vec::with_capacity(shapes.len());
-    for (index, shape) in shapes.iter().enumerate() {
-        let row = build_shape_row(window, canvas, state, index, shape);
-        group.add(&row);
-        new_rows.push(row);
-    }
-    state.borrow_mut().custom_shape_rows = new_rows;
 }
 
 /// Wires background (solid or linear gradient), shadow preset and
@@ -955,12 +883,6 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
     let shadow_distance_row = window.shadow_distance_row();
     let shadow_blur_row = window.shadow_blur_row();
     let corner_radius_row = window.corner_radius_row();
-    let text_enabled_row = window.text_enabled_row();
-    let text_content_row = window.text_content_row();
-    let text_x_row = window.text_x_row();
-    let text_y_row = window.text_y_row();
-    let text_font_size_row = window.text_font_size_row();
-    let text_color_button = window.text_color_button();
 
     {
         let state_ref = state.borrow();
@@ -973,19 +895,6 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         shadow_angle_row.set_sensitive(shadow_geometry_enabled);
         shadow_distance_row.set_sensitive(shadow_geometry_enabled);
         shadow_blur_row.set_sensitive(shadow_geometry_enabled);
-
-        let text_overlay = &state_ref.document.text_overlay;
-        text_enabled_row.set_active(text_overlay.enabled);
-        text_content_row.set_text(&text_overlay.content);
-        text_x_row.set_value(text_overlay.x);
-        text_y_row.set_value(text_overlay.y);
-        text_font_size_row.set_value(text_overlay.font_size);
-        text_color_button.set_rgba(&gdk_rgba_from(&text_overlay.color));
-        text_content_row.set_sensitive(text_overlay.enabled);
-        text_x_row.set_sensitive(text_overlay.enabled);
-        text_y_row.set_sensitive(text_overlay.enabled);
-        text_font_size_row.set_sensitive(text_overlay.enabled);
-        window.text_color_row().set_sensitive(text_overlay.enabled);
     }
 
     sync_background_controls(window, &state.borrow().document.background);
@@ -999,17 +908,35 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |row| {
             let selected = row.selected();
-            window.background_color1_row().set_visible(selected != 3);
+            window.background_color1_row().set_visible(selected != 3 && selected != 4);
             window.gradient_color2_row().set_visible(selected == 1 || selected == 2);
             window.gradient_angle_row().set_visible(selected == 1);
+            window.gradient_auto_colors_row().set_visible(selected == 1 || selected == 2);
             window.background_image_row().set_visible(selected == 3);
             window.background_image_fit_row().set_visible(selected == 3);
             window.background_image_opacity_row().set_visible(selected == 3);
-            window.background_decoration_row().set_visible(selected == 4);
+            let is_generated = selected == 4;
+            window.generator_color_strategy_row().set_visible(is_generated);
+            window.generator_adapt_row().set_visible(is_generated);
+            window.generator_corner_bias_row().set_visible(is_generated);
+            window.generator_offset_x_row().set_visible(is_generated);
+            window.generator_offset_y_row().set_visible(is_generated);
+            window.generator_scale_row().set_visible(is_generated);
+            window.generator_contrast_row().set_visible(is_generated);
+            window.generator_seed_row().set_visible(is_generated);
+            window.generator_generate_row().set_visible(is_generated);
+            sync_generator_color_strategy_visibility(&window, is_generated, color_strategy_for_index(window.generator_color_strategy_row().selected()));
             // Selecting "Bild" only reveals the file picker — there's
-            // nothing to render until a file is actually chosen (below), so
-            // this doesn't push a command yet.
-            if selected != 3 {
+            // nothing to render until a file is actually chosen (below).
+            // Selecting "Generiert" needs an actual palette/seed resolved
+            // from the current screenshots before there's anything to
+            // render either, which `background_from_controls` (a synchronous,
+            // state-free helper) has no way to do — so this goes through
+            // `generate_background` instead, same as the "Generieren"
+            // button itself.
+            if is_generated {
+                generate_background(&window, &canvas, &state);
+            } else if selected != 3 {
                 apply_background_from_controls(&window, &canvas, &state);
             }
         }
@@ -1041,64 +968,8 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |_| apply_background_from_controls(&window, &canvas, &state)
     ));
-    window.background_decoration_row().connect_selected_notify(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |row| {
-            if row.selected() == 2 {
-                on_custom_shapes_selected(&window, &canvas, &state);
-            } else {
-                apply_background_from_controls(&window, &canvas, &state);
-            }
-        }
-    ));
-    window.add_circle_button().connect_clicked(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |_| {
-            let (w, h) = {
-                let state_ref = state.borrow();
-                (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64)
-            };
-            let radius = (w.min(h) * 0.1).max(10.0);
-            let shape = VectorShape::Circle { cx: w / 2.0, cy: h / 2.0, radius, color: Rgba::new(0.2, 0.2, 0.2, 0.5) };
-            add_custom_shape(&window, &canvas, &state, shape);
-        }
-    ));
-    window.add_line_button().connect_clicked(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |_| {
-            let (w, h) = {
-                let state_ref = state.borrow();
-                (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64)
-            };
-            let shape = VectorShape::Line {
-                x1: w * 0.25,
-                y1: h * 0.5,
-                x2: w * 0.75,
-                y2: h * 0.5,
-                width: 4.0,
-                color: Rgba::new(0.2, 0.2, 0.2, 0.5),
-            };
-            add_custom_shape(&window, &canvas, &state, shape);
-        }
-    ));
-    rebuild_custom_shapes_ui(window, canvas, state);
-
     register_background_image_controls(window, canvas, state);
+    register_gradient_auto_colors_control(window, canvas, state);
 
     shadow_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -1108,19 +979,40 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         #[strong]
         state,
         move |row| {
-            let new = shadow_preset_for_index(row.selected());
-            let (angle, distance) = new.angle_and_distance();
-            window.shadow_angle_row().set_value(angle);
-            window.shadow_distance_row().set_value(distance);
+            let preset = shadow_preset_for_index(row.selected());
+            // `with_preset` only touches distance/blur/opacity/color and
+            // keeps whichever angle the shadow already had — a preset is a
+            // statement about how strong a shadow looks, not which
+            // direction it's cast (spec: choosing Subtle/Standard/Strong
+            // must never reset a user-chosen angle back to 90°).
+            let mut state_ref = state.borrow_mut();
+            let was_syncing = state_ref.syncing_controls;
+            let current = state_ref.document.elements.first().map(|e| e.shadow).unwrap_or_default();
+            let new = current.with_preset(preset);
+
+            // Guard these writes the same way `sync_controls_from_document`
+            // guards its own batch: without it, each `set_value` below
+            // reentrantly fires `apply_shadow_geometry`, which would push
+            // its own spurious undo command built from a partially-updated
+            // mix of old and new values. Saved/restored rather than
+            // unconditionally cleared, since this handler itself can be
+            // reentered from inside that batch (`shadow_row.set_selected`
+            // in `sync_controls_from_document`) — clearing the flag there
+            // would drop the guard for that batch's *remaining* writes.
+            state_ref.syncing_controls = true;
+            drop(state_ref);
+
+            // Deliberately not touching shadow_angle_row's value — it
+            // already shows the angle `with_preset` preserved.
+            window.shadow_distance_row().set_value(new.angle_and_distance().1);
             window.shadow_blur_row().set_value(new.blur);
             window.shadow_angle_row().set_sensitive(new.enabled);
             window.shadow_distance_row().set_sensitive(new.enabled);
             window.shadow_blur_row().set_sensitive(new.enabled);
 
             let mut state_ref = state.borrow_mut();
-            // See the background-color handler above for why this guard
-            // against a reentrant sync-triggered no-op is needed.
-            if state_ref.syncing_controls || state_ref.document.elements.iter().all(|e| e.shadow == new) {
+            state_ref.syncing_controls = was_syncing;
+            if was_syncing || state_ref.document.elements.iter().all(|e| e.shadow == new) {
                 return;
             }
             let old: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
@@ -1205,7 +1097,23 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         }
     ));
 
-    let apply_text_overlay = glib::clone!(
+}
+
+/// Wires the composition-wide title's sidebar controls (spec §5-§10):
+/// enable/content, semantic or manual position, background, corner radius,
+/// typography (via a native `GtkFontDialogButton`), and an independently
+/// cached shadow — all funneled through one `apply_title` that rebuilds
+/// the whole `TextElement` and pushes a single `SetTitle` undo step,
+/// except the shadow *preset* dropdown, which (like the screenshot
+/// shadow's) needs to preserve the current angle rather than reset it —
+/// see `ShadowParams::with_preset`.
+fn register_title_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    {
+        let state_ref = state.borrow();
+        sync_title_controls(window, &state_ref.document.title);
+    }
+
+    let apply_title = glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -1217,64 +1125,302 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             if state_ref.syncing_controls {
                 return;
             }
-            let new = TextOverlay {
-                enabled: window.text_enabled_row().is_active(),
-                content: window.text_content_row().text().to_string(),
-                x: window.text_x_row().value(),
-                y: window.text_y_row().value(),
-                font_size: window.text_font_size_row().value(),
-                color: rgba_from_gdk(&window.text_color_button().rgba()),
+
+            let position = if window.title_position_mode_row().selected() == 1 {
+                TextPosition::Absolute { x: window.title_x_row().value(), y: window.title_y_row().value() }
+            } else {
+                TextPosition::Semantic {
+                    horizontal: horizontal_anchor_for_index(window.title_horizontal_row().selected()),
+                    vertical: vertical_anchor_for_index(window.title_vertical_row().selected()),
+                    padding: window.title_padding_row().value(),
+                }
             };
-            if state_ref.document.text_overlay == new {
+            let background = match window.title_background_row().selected() {
+                1 => TextBackground::Solid(rgba_from_gdk(&window.title_background_color_button().rgba())),
+                2 => TextBackground::Gradient(GradientSpec {
+                    kind: GradientKind::Linear { angle_deg: 135.0 },
+                    stops: vec![
+                        (0.0, rgba_from_gdk(&window.title_background_color_button().rgba())),
+                        (1.0, rgba_from_gdk(&window.title_background_color2_button().rgba())),
+                    ],
+                }),
+                _ => TextBackground::None,
+            };
+            let font_desc = window.title_font_button().font_desc().unwrap_or_else(pango::FontDescription::new);
+            let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
+
+            // The shadow has its own dedicated handlers below (mirroring
+            // the screenshot shadow's preset-vs-geometry split), so it's
+            // carried over unchanged here rather than rebuilt from
+            // controls this closure doesn't read.
+            let shadow = state_ref.document.title.shadow;
+            let background_padding = state_ref.document.title.background_padding;
+
+            let new = TextElement {
+                enabled: window.title_enabled_row().is_active(),
+                content: window.title_content_row().text().to_string(),
+                position,
+                typography: Typography {
+                    font_family,
+                    font_size,
+                    weight,
+                    italic,
+                    color: rgba_from_gdk(&window.title_color_button().rgba()),
+                    alignment: text_align_for_index(window.title_alignment_row().selected()),
+                    opacity: window.title_opacity_row().value() / 100.0,
+                    letter_spacing: window.title_letter_spacing_row().value(),
+                    line_spacing: window.title_line_spacing_row().value(),
+                    wrap: false,
+                },
+                background,
+                corner_radius: CornerRadius::uniform(window.title_corner_radius_row().value()),
+                background_padding,
+                shadow,
+            };
+            if state_ref.document.title == new {
                 return;
             }
-            let old = state_ref.document.text_overlay.clone();
+            let old = state_ref.document.title.clone();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetTextOverlay { old, new }), document);
+            undo_stack.apply(Box::new(SetTitle { old, new }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     );
-    text_enabled_row.connect_active_notify(glib::clone!(
+
+    window.title_enabled_row().connect_active_notify(glib::clone!(
         #[weak]
         window,
         #[strong]
-        apply_text_overlay,
+        apply_title,
         move |row| {
             let enabled = row.is_active();
-            window.text_content_row().set_sensitive(enabled);
-            window.text_x_row().set_sensitive(enabled);
-            window.text_y_row().set_sensitive(enabled);
-            window.text_font_size_row().set_sensitive(enabled);
-            window.text_color_row().set_sensitive(enabled);
-            apply_text_overlay();
+            for widget in [
+                window.title_content_row().upcast::<gtk4::Widget>(),
+                window.title_position_mode_row().upcast(),
+                window.title_horizontal_row().upcast(),
+                window.title_vertical_row().upcast(),
+                window.title_padding_row().upcast(),
+                window.title_x_row().upcast(),
+                window.title_y_row().upcast(),
+                window.title_background_row().upcast(),
+                window.title_background_color_row().upcast(),
+                window.title_background_color2_row().upcast(),
+                window.title_corner_radius_row().upcast(),
+                window.title_font_row().upcast(),
+                window.title_alignment_row().upcast(),
+                window.title_letter_spacing_row().upcast(),
+                window.title_line_spacing_row().upcast(),
+                window.title_color_row().upcast(),
+                window.title_opacity_row().upcast(),
+                window.title_shadow_row().upcast(),
+            ] {
+                widget.set_sensitive(enabled);
+            }
+            let shadow_geometry_enabled = enabled && window.title_shadow_row().selected() != 0;
+            window.title_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
+            window.title_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
+            window.title_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+            apply_title();
         }
     ));
-    text_content_row.connect_changed(glib::clone!(
+    window.title_content_row().connect_changed(glib::clone!(
         #[strong]
-        apply_text_overlay,
-        move |_| apply_text_overlay()
+        apply_title,
+        move |_| apply_title()
     ));
-    text_x_row.connect_value_notify(glib::clone!(
+    window.title_position_mode_row().connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
         #[strong]
-        apply_text_overlay,
-        move |_| apply_text_overlay()
+        apply_title,
+        move |row| {
+            let is_absolute = row.selected() == 1;
+            window.title_horizontal_row().set_visible(!is_absolute);
+            window.title_vertical_row().set_visible(!is_absolute);
+            window.title_padding_row().set_visible(!is_absolute);
+            window.title_x_row().set_visible(is_absolute);
+            window.title_y_row().set_visible(is_absolute);
+            apply_title();
+        }
     ));
-    text_y_row.connect_value_notify(glib::clone!(
+    window.title_horizontal_row().connect_selected_notify(glib::clone!(
         #[strong]
-        apply_text_overlay,
-        move |_| apply_text_overlay()
+        apply_title,
+        move |_| apply_title()
     ));
-    text_font_size_row.connect_value_notify(glib::clone!(
+    window.title_vertical_row().connect_selected_notify(glib::clone!(
         #[strong]
-        apply_text_overlay,
-        move |_| apply_text_overlay()
+        apply_title,
+        move |_| apply_title()
     ));
-    text_color_button.connect_rgba_notify(glib::clone!(
+    window.title_padding_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_text_overlay,
-        move |_| apply_text_overlay()
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_x_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_y_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_background_row().connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        apply_title,
+        move |row| {
+            let selected = row.selected();
+            window.title_background_color_row().set_visible(selected != 0);
+            window.title_background_color2_row().set_visible(selected == 2);
+            apply_title();
+        }
+    ));
+    window.title_background_color_button().connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_background_color2_button().connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_corner_radius_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_font_button().connect_font_desc_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_alignment_row().connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_letter_spacing_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_line_spacing_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_color_button().connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+    window.title_opacity_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title,
+        move |_| apply_title()
+    ));
+
+    // Shadow preset dropdown: mirrors the screenshot shadow preset handler
+    // exactly (`ShadowParams::with_preset` preserves the angle; the
+    // syncing_controls save/restore guards against a reentrant partial-
+    // state undo push while distance/blur are updated below) but commits
+    // directly via `SetTitle` rather than routing through `apply_title`,
+    // since `apply_title` deliberately doesn't touch the shadow at all.
+    window.title_shadow_row().connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |row| {
+            let preset = shadow_preset_for_index(row.selected());
+            let mut state_ref = state.borrow_mut();
+            let was_syncing = state_ref.syncing_controls;
+            let current_shadow = state_ref.document.title.shadow;
+            let new_shadow = current_shadow.with_preset(preset);
+            state_ref.syncing_controls = true;
+            drop(state_ref);
+
+            window.title_shadow_distance_row().set_value(new_shadow.angle_and_distance().1);
+            window.title_shadow_blur_row().set_value(new_shadow.blur);
+            window.title_shadow_angle_row().set_sensitive(new_shadow.enabled);
+            window.title_shadow_distance_row().set_sensitive(new_shadow.enabled);
+            window.title_shadow_blur_row().set_sensitive(new_shadow.enabled);
+
+            let mut state_ref = state.borrow_mut();
+            state_ref.syncing_controls = was_syncing;
+            if was_syncing {
+                return;
+            }
+            let mut new_title = state_ref.document.title.clone();
+            new_title.shadow = new_shadow;
+            if state_ref.document.title == new_title {
+                return;
+            }
+            let old = state_ref.document.title.clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetTitle { old, new: new_title }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    let apply_title_shadow_geometry = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move || {
+            let mut state_ref = state.borrow_mut();
+            if state_ref.syncing_controls {
+                return;
+            }
+            let angle = window.title_shadow_angle_row().value();
+            let distance = window.title_shadow_distance_row().value();
+            let blur = window.title_shadow_blur_row().value();
+            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(angle, distance);
+
+            let mut new_title = state_ref.document.title.clone();
+            new_title.shadow.offset_x = offset_x;
+            new_title.shadow.offset_y = offset_y;
+            new_title.shadow.blur = blur;
+            if state_ref.document.title == new_title {
+                return;
+            }
+            let old = state_ref.document.title.clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetTitle { old, new: new_title }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+    window.title_shadow_angle_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title_shadow_geometry,
+        move |_| apply_title_shadow_geometry()
+    ));
+    window.title_shadow_distance_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title_shadow_geometry,
+        move |_| apply_title_shadow_geometry()
+    ));
+    window.title_shadow_blur_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_title_shadow_geometry,
+        move |_| apply_title_shadow_geometry()
     ));
 }
 
@@ -1391,6 +1537,294 @@ fn register_background_image_controls(window: &Window, canvas: &Canvas, state: &
     ));
 }
 
+/// Wires the "Automatische Farben" gradient button (spec: "Generate from
+/// screenshots" / "Regenerate" — one button doing both, since a repeat
+/// click naturally reads as "try another one").
+fn register_gradient_auto_colors_control(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    window.gradient_generate_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| generate_gradient_from_screenshots(&window, &canvas, &state)
+    ));
+}
+
+/// Analyzes every currently visible screenshot's decoded pixels and
+/// replaces the background with a suggested complementary gradient (spec
+/// §3), preserving whichever of Linear/Radial the user currently has
+/// selected. A no-op if nothing is imported yet — there's nothing to
+/// analyze, and generating a plausible palette from zero screenshots would
+/// just be an arbitrary color.
+fn generate_gradient_from_screenshots(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let mut state_ref = state.borrow_mut();
+
+    // Decode-on-demand into `image_cache` (self-healing/shared with every
+    // other consumer — see its doc comment), then collect owned handles
+    // (cheap: `DecodedImage` wraps an `Arc<[u8]>`) so the borrow of
+    // `image_cache` ends before `PixelSample`s borrow from them below.
+    let paths: Vec<PathBuf> = state_ref
+        .document
+        .elements
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match &e.source {
+            ImageSource::Path(path) => Some(path.clone()),
+            ImageSource::Embedded { .. } => None,
+        })
+        .collect();
+    let images: Vec<DecodedImage> =
+        paths.iter().filter_map(|path| get_or_decode(&mut state_ref.image_cache, path).cloned()).collect();
+    if images.is_empty() {
+        return;
+    }
+
+    let seed = state_ref.gradient_auto_seed;
+    state_ref.gradient_auto_seed = seed.wrapping_add(1);
+
+    let samples: Vec<screenforge_core::palette::PixelSample> =
+        images.iter().map(|image| screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height }).collect();
+    let mut spec = screenforge_core::palette::suggest_gradient(&samples, seed);
+    // A suggestion is always computed as a linear gradient (an angle only
+    // means something for Linear) -- if the user has Radial selected,
+    // keep the same two suggested colors but center them, rather than
+    // silently switching their chosen gradient kind back to Linear.
+    if window.background_type_row().selected() == 2 {
+        spec.kind = GradientKind::Radial { center_x: 0.5, center_y: 0.5 };
+    }
+    let new = Background::Gradient(spec);
+
+    let old = state_ref.document.background.clone();
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new: new.clone() }), document);
+    drop(state_ref);
+
+    // The generated colors didn't come from the color/angle controls (the
+    // usual source of truth for `apply_background_from_controls`), so
+    // those controls need to be told what actually landed, the same way
+    // undo/redo/project-load does via `sync_background_controls` --
+    // guarded the same way, since e.g. `set_rgba` below would otherwise
+    // reentrantly fire `apply_background_from_controls` for each control.
+    state.borrow_mut().syncing_controls = true;
+    sync_background_controls(window, &new);
+    state.borrow_mut().syncing_controls = false;
+
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
+/// Wires every generator parameter control (style, color strategy, adapt-
+/// to-screenshots, the eight sliders, and directly editing the seed row)
+/// straight onto the current `GeneratedBackground` — live and undoable,
+/// but never re-resolving the palette or picking a new seed on its own;
+/// only `generate_background` (the "Generieren" button, or first
+/// switching the background type to "Generiert") does that. This mirrors
+/// `apply_title`/`apply_shadow_geometry`'s split elsewhere: cheap
+/// parameter edits stay separate from the one action that's meant to
+/// visibly reroll the composition.
+fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let apply = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move || {
+            let mut state_ref = state.borrow_mut();
+            if state_ref.syncing_controls {
+                return;
+            }
+            let Background::Generated(current) = &state_ref.document.background else { return };
+            let color_strategy = color_strategy_for_index(window.generator_color_strategy_row().selected());
+            let palette = if matches!(color_strategy, ColorStrategy::Manual) {
+                [
+                    window.generator_manual_color_button_1().rgba(),
+                    window.generator_manual_color_button_2().rgba(),
+                    window.generator_manual_color_button_3().rgba(),
+                    window.generator_manual_color_button_4().rgba(),
+                ]
+                .iter()
+                .map(rgba_from_gdk)
+                .collect()
+            } else {
+                current.palette.clone()
+            };
+            let new = GeneratedBackground {
+                seed: window.generator_seed_row().value() as u64,
+                color_strategy,
+                palette,
+                adapt_to_screenshots: window.generator_adapt_row().is_active(),
+                inverse_contrast: window.generator_inverse_contrast_row().value() / 100.0,
+                corner_bias: window.generator_corner_bias_row().value() / 100.0,
+                offset_x: window.generator_offset_x_row().value() / 100.0,
+                offset_y: window.generator_offset_y_row().value() / 100.0,
+                scale: window.generator_scale_row().value() / 100.0,
+                // No sliders for these — they're only ever redrawn from
+                // scratch by `generate_background`'s own randomization, so
+                // editing any *other* generator control must leave them
+                // exactly as they were.
+                density: current.density,
+                flow: current.flow,
+                variation: current.variation,
+                contrast: window.generator_contrast_row().value() / 100.0,
+                softness: current.softness,
+            };
+            if *current == new {
+                return;
+            }
+            let old = state_ref.document.background.clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetBackground { old, new: Background::Generated(new) }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+
+    window.generator_color_strategy_row().connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        apply,
+        move |row| {
+            sync_generator_color_strategy_visibility(&window, true, color_strategy_for_index(row.selected()));
+            apply();
+        }
+    ));
+    window.generator_manual_color_button_1().connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_manual_color_button_2().connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_manual_color_button_3().connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_manual_color_button_4().connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_adapt_row().connect_active_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_inverse_contrast_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_corner_bias_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_offset_x_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_offset_y_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_scale_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_contrast_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_seed_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+
+    window.generator_generate_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| generate_background(&window, &canvas, &state)
+    ));
+}
+
+/// Resolves a fresh palette (from the currently visible screenshots, per
+/// whatever color strategy is selected) and picks a new seed, then commits
+/// a `Background::Generated` built from the current controls — the
+/// "Generieren"/"Regenerate" action (spec: one button doing both, a repeat
+/// click reading naturally as "try another one", same as the earlier
+/// gradient auto-colors button). Also what switching the background type
+/// to "Generiert" calls, since there's nothing to render yet at that point
+/// either.
+fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let mut state_ref = state.borrow_mut();
+    if state_ref.syncing_controls {
+        // Reached via `background_type_row`'s own notify handler, which
+        // `sync_controls_from_document`'s `background_type_row.set_selected(5)`
+        // fires reentrantly while restoring a saved/undone `Generated`
+        // background. Regenerating here would discard the very seed and
+        // palette that call was trying to restore — exactly the
+        // reproducibility guarantee this whole feature exists for.
+        return;
+    }
+
+    let paths: Vec<PathBuf> = state_ref
+        .document
+        .elements
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match &e.source {
+            ImageSource::Path(path) => Some(path.clone()),
+            ImageSource::Embedded { .. } => None,
+        })
+        .collect();
+    let images: Vec<DecodedImage> =
+        paths.iter().filter_map(|path| get_or_decode(&mut state_ref.image_cache, path).cloned()).collect();
+
+    let previous_seed = match &state_ref.document.background {
+        Background::Generated(g) => g.seed,
+        _ => 0,
+    };
+    // A fresh seed each click, derived deterministically from the last one
+    // (plus a fixed salt) through the same `Rng` generation itself uses —
+    // this needs no external randomness source, and still gives a
+    // different-looking result practically every time.
+    let mut seed_source = screenforge_core::rng::Rng::new(previous_seed ^ 0x5EED_5EED_5EED_5EED);
+    let new_seed = seed_source.next_u64() % 1_000_000_000;
+    // Density/flow/variation/softness aren't exposed as sliders — spec:
+    // "immer wieder neu Zufallswerte erzeugen" (always generate fresh random
+    // values) rather than have the user tune them by hand. Drawing them from
+    // the same `seed_source` keeps a "Generieren" click's whole result
+    // (seed *and* these) deterministic from `previous_seed`, matching every
+    // other value derived here.
+    let density = seed_source.range(0.0, 1.0);
+    let flow = seed_source.range(0.0, 1.0);
+    let variation = seed_source.range(0.0, 1.0);
+    let softness = seed_source.range(0.0, 1.0);
+
+    let color_strategy = color_strategy_for_index(window.generator_color_strategy_row().selected());
+    let inverse_contrast = window.generator_inverse_contrast_row().value() / 100.0;
+    let palette = if matches!(color_strategy, ColorStrategy::Manual) {
+        [
+            window.generator_manual_color_button_1().rgba(),
+            window.generator_manual_color_button_2().rgba(),
+            window.generator_manual_color_button_3().rgba(),
+            window.generator_manual_color_button_4().rgba(),
+        ]
+        .iter()
+        .map(rgba_from_gdk)
+        .collect()
+    } else {
+        let samples: Vec<screenforge_core::palette::PixelSample> = images
+            .iter()
+            .map(|image| screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height })
+            .collect();
+        screenforge_core::palette::resolve_palette(&samples, color_strategy, inverse_contrast, new_seed)
+    };
+
+    let new = GeneratedBackground {
+        seed: new_seed,
+        color_strategy,
+        palette,
+        adapt_to_screenshots: window.generator_adapt_row().is_active(),
+        inverse_contrast,
+        corner_bias: window.generator_corner_bias_row().value() / 100.0,
+        offset_x: window.generator_offset_x_row().value() / 100.0,
+        offset_y: window.generator_offset_y_row().value() / 100.0,
+        scale: window.generator_scale_row().value() / 100.0,
+        density,
+        flow,
+        variation,
+        contrast: window.generator_contrast_row().value() / 100.0,
+        softness,
+    };
+
+    let old = state_ref.document.background.clone();
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new: Background::Generated(new.clone()) }), document);
+    drop(state_ref);
+
+    // The seed just changed; reflect it (and the freshly resolved
+    // strategy-driven visibility) back onto the controls the same guarded
+    // way `generate_gradient_from_screenshots` does.
+    state.borrow_mut().syncing_controls = true;
+    sync_generator_controls(window, &new);
+    state.borrow_mut().syncing_controls = false;
+
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
 fn export_format_for_index(index: u32) -> ExportFormat {
     match index {
         0 => ExportFormat::Png,
@@ -1422,6 +1856,7 @@ fn register_export_controls(window: &Window, state: &Rc<RefCell<EditorState>>) {
         width_row.set_value(canvas_settings.export_target_width as f64);
         format_row.set_selected(index_for_export_format(canvas_settings.export_format));
         quality_row.set_value(canvas_settings.export_quality as f64);
+        quality_row.set_sensitive(format_supports_quality(canvas_settings.export_format));
         update_export_height_display(window, canvas_settings);
     }
 
@@ -1443,15 +1878,34 @@ fn register_export_controls(window: &Window, state: &Rc<RefCell<EditorState>>) {
         }
     ));
     format_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        quality_row,
         #[strong]
         state,
-        move |row| state.borrow_mut().document.canvas.export_format = export_format_for_index(row.selected())
+        move |row| {
+            let format = export_format_for_index(row.selected());
+            state.borrow_mut().document.canvas.export_format = format;
+            // Updates immediately on every format change, per spec — not
+            // just at startup/undo-sync — so switching to PNG visibly
+            // disables the control right away rather than leaving a
+            // quality value that the encoder will just ignore.
+            quality_row.set_sensitive(format_supports_quality(format));
+        }
     ));
     quality_row.connect_value_notify(glib::clone!(
         #[strong]
         state,
         move |row| state.borrow_mut().document.canvas.export_quality = row.value() as u8
     ));
+}
+
+/// Whether `format`'s encoder in `export.rs` actually reads
+/// `CanvasSettings.export_quality` — PNG is lossless and ignores it
+/// entirely (see `export::render_and_write`'s `match`), so the Quality
+/// spin row must be disabled rather than implying a control that does
+/// nothing.
+fn format_supports_quality(format: ExportFormat) -> bool {
+    !matches!(format, ExportFormat::Png)
 }
 
 fn extension_for_format(format: ExportFormat) -> &'static str {
@@ -1578,7 +2032,7 @@ async fn save_project_as(window: &Window, state: &Rc<RefCell<EditorState>>) {
 /// here only because ScreenForge itself never saves a document with
 /// per-element shadow/radius variation; that assumption would need
 /// revisiting if per-element controls are added later.
-fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>) {
     state.borrow_mut().syncing_controls = true;
 
     let doc = state.borrow().document.clone();
@@ -1590,10 +2044,7 @@ fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefC
     sync_background_controls(window, &doc.background);
 
     if let Some(first) = doc.elements.first() {
-        let presets =
-            [ShadowParams::none(), ShadowParams::subtle(), ShadowParams::standard(), ShadowParams::strong(), ShadowParams::floating()];
-        let index = presets.iter().position(|p| *p == first.shadow).unwrap_or(0) as u32;
-        window.shadow_row().set_selected(index);
+        window.shadow_row().set_selected(shadow_preset_index_for(&first.shadow));
         let (angle, distance) = first.shadow.angle_and_distance();
         window.shadow_angle_row().set_value(angle);
         window.shadow_distance_row().set_value(distance);
@@ -1608,21 +2059,11 @@ fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefC
     update_export_height_display(window, doc.canvas);
     window.export_format_row().set_selected(index_for_export_format(doc.canvas.export_format));
     window.export_quality_row().set_value(doc.canvas.export_quality as f64);
+    window.export_quality_row().set_sensitive(format_supports_quality(doc.canvas.export_format));
 
-    window.text_enabled_row().set_active(doc.text_overlay.enabled);
-    window.text_content_row().set_text(&doc.text_overlay.content);
-    window.text_x_row().set_value(doc.text_overlay.x);
-    window.text_y_row().set_value(doc.text_overlay.y);
-    window.text_font_size_row().set_value(doc.text_overlay.font_size);
-    window.text_color_button().set_rgba(&gdk_rgba_from(&doc.text_overlay.color));
-    window.text_content_row().set_sensitive(doc.text_overlay.enabled);
-    window.text_x_row().set_sensitive(doc.text_overlay.enabled);
-    window.text_y_row().set_sensitive(doc.text_overlay.enabled);
-    window.text_font_size_row().set_sensitive(doc.text_overlay.enabled);
-    window.text_color_row().set_sensitive(doc.text_overlay.enabled);
+    sync_title_controls(window, &doc.title);
 
     state.borrow_mut().syncing_controls = false;
-    rebuild_custom_shapes_ui(window, canvas, state);
 }
 
 /// `win.save`, `win.save-as` and `win.open-project` — the `.screenforge`
@@ -1725,7 +2166,7 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
                             state_ref.undo_stack = UndoStack::new();
                         }
                         refresh_canvas(&window, &canvas, &state);
-                        sync_controls_from_document(&window, &canvas, &state);
+                        sync_controls_from_document(&window, &state);
                         update_undo_redo_sensitivity(&window, &state);
 
                         let toast = if missing > 0 {
@@ -1848,7 +2289,7 @@ fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCel
                     undo_stack.apply(Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, new }), document);
                 }
                 refresh_canvas(&window, &canvas, &state);
-                sync_controls_from_document(&window, &canvas, &state);
+                sync_controls_from_document(&window, &state);
                 update_undo_redo_sensitivity(&window, &state);
                 window.toast_overlay().add_toast(adw::Toast::new("Vorlage angewendet"));
             });
@@ -1939,7 +2380,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.undo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &canvas, &state);
+            sync_controls_from_document(&window, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1962,7 +2403,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.redo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &canvas, &state);
+            sync_controls_from_document(&window, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -2160,6 +2601,10 @@ fn build_context_menu() -> gio::Menu {
     order_section.append(Some("Ganz nach hinten"), Some("win.send-to-back"));
     menu.append_section(None, &order_section);
 
+    let label_section = gio::Menu::new();
+    label_section.append(Some("Beschriftung…"), Some("win.edit-screenshot-label"));
+    menu.append_section(None, &label_section);
+
     let transform_section = gio::Menu::new();
     transform_section.append(Some("Um 90° drehen"), Some("win.rotate-screenshot"));
     transform_section.append(Some("Horizontal spiegeln"), Some("win.flip-horizontal"));
@@ -2285,6 +2730,548 @@ fn register_replace_action(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
 /// Right-click on a screenshot opens a `GtkPopoverMenu` with per-element
 /// actions (spec §21). `context_target` remembers which element it was
 /// opened for, since GAction activation carries no click-position payload.
+/// Opens a small live-editing dialog for one screenshot's own label (spec
+/// §11-§14), reached via the context menu's "Beschriftung…" rather than
+/// living in the main sidebar — most screenshots don't have one, and the
+/// sidebar already carries a very similar control set for the
+/// composition-wide title (`register_title_controls`). Edits apply live
+/// and undoably as controls change, the same as every other control in
+/// this app, rather than needing an OK/Cancel of their own. Looked up by
+/// `element_id` rather than index so the dialog stays valid even if
+/// reordering/undo shifts indices while it's open.
+fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::SpinRow {
+    let adjustment = gtk4::Adjustment::new(value, lower, upper, 1.0, 10.0, 0.0);
+    let row = adw::SpinRow::new(Some(&adjustment), 1.0, 1);
+    row.set_title(title);
+    row
+}
+
+fn open_label_editor(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, element_id: Uuid) {
+    let Some(label) = state.borrow().document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) else { return };
+
+    let dialog = adw::PreferencesDialog::new();
+    dialog.set_title("Beschriftung");
+    dialog.set_content_width(420);
+
+    let page = adw::PreferencesPage::new();
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Beschriftung");
+    group.set_description(Some("Bewegt und skaliert sich mit diesem Screenshot"));
+
+    let enabled_row = adw::SwitchRow::new();
+    enabled_row.set_title("Beschriftung anzeigen");
+    group.add(&enabled_row);
+
+    let content_row = adw::EntryRow::new();
+    content_row.set_title("Text");
+    group.add(&content_row);
+
+    let position_mode_row = adw::ComboRow::new();
+    position_mode_row.set_title("Position");
+    position_mode_row.set_model(Some(&gtk4::StringList::new(&["Automatisch", "Manuell (X/Y)"])));
+    group.add(&position_mode_row);
+
+    let horizontal_row = adw::ComboRow::new();
+    horizontal_row.set_title("Horizontal");
+    horizontal_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
+    group.add(&horizontal_row);
+
+    let vertical_row = adw::ComboRow::new();
+    vertical_row.set_title("Vertikal");
+    vertical_row.set_model(Some(&gtk4::StringList::new(&["Oben", "Mitte", "Unten"])));
+    group.add(&vertical_row);
+
+    let padding_row = spin_row("Randabstand", 0.0, 500.0, 16.0);
+    group.add(&padding_row);
+
+    let x_row = spin_row("X-Position", 0.0, 8000.0, 0.0);
+    x_row.set_subtitle("In Pixeln, relativ zum Screenshot");
+    x_row.set_visible(false);
+    group.add(&x_row);
+
+    let y_row = spin_row("Y-Position", 0.0, 8000.0, 0.0);
+    y_row.set_subtitle("In Pixeln, relativ zum Screenshot");
+    y_row.set_visible(false);
+    group.add(&y_row);
+
+    let background_row = adw::ComboRow::new();
+    background_row.set_title("Hintergrund");
+    background_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
+    group.add(&background_row);
+
+    let background_color_row = adw::ActionRow::new();
+    background_color_row.set_title("Hintergrundfarbe");
+    let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+    background_color_button.set_valign(gtk4::Align::Center);
+    background_color_row.add_suffix(&background_color_button);
+    group.add(&background_color_row);
+
+    let background_color2_row = adw::ActionRow::new();
+    background_color2_row.set_title("Hintergrundfarbe 2");
+    let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+    background_color2_button.set_valign(gtk4::Align::Center);
+    background_color2_row.add_suffix(&background_color2_button);
+    group.add(&background_color2_row);
+
+    let corner_radius_row = spin_row("Eckenradius", 0.0, 200.0, 0.0);
+    group.add(&corner_radius_row);
+
+    let font_row = adw::ActionRow::new();
+    font_row.set_title("Schrift");
+    let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
+    font_button.set_valign(gtk4::Align::Center);
+    font_row.add_suffix(&font_button);
+    group.add(&font_row);
+
+    let color_row = adw::ActionRow::new();
+    color_row.set_title("Textfarbe");
+    let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
+    color_button.set_valign(gtk4::Align::Center);
+    color_row.add_suffix(&color_button);
+    group.add(&color_row);
+
+    let letter_spacing_row = adw::SpinRow::new(Some(&gtk4::Adjustment::new(0.0, -5.0, 50.0, 0.5, 2.0, 0.0)), 0.5, 1);
+    letter_spacing_row.set_title("Zeichenabstand");
+    letter_spacing_row.set_subtitle("In Pixeln");
+    group.add(&letter_spacing_row);
+
+    let line_spacing_row = adw::SpinRow::new(Some(&gtk4::Adjustment::new(1.2, 0.5, 3.0, 0.1, 0.5, 0.0)), 0.1, 2);
+    line_spacing_row.set_title("Zeilenabstand");
+    line_spacing_row.set_subtitle("Faktor, 1,0 = normal");
+    group.add(&line_spacing_row);
+
+    let opacity_row = spin_row("Deckkraft (%)", 0.0, 100.0, 100.0);
+    group.add(&opacity_row);
+
+    let shadow_row = adw::ComboRow::new();
+    shadow_row.set_title("Schatten");
+    shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating"])));
+    group.add(&shadow_row);
+
+    let shadow_angle_row = spin_row("Schatten-Winkel", 0.0, 360.0, 90.0);
+    group.add(&shadow_angle_row);
+    let shadow_distance_row = spin_row("Schatten-Distanz", 0.0, 300.0, 6.0);
+    group.add(&shadow_distance_row);
+    let shadow_blur_row = spin_row("Weichzeichner", 0.0, 150.0, 16.0);
+    group.add(&shadow_blur_row);
+
+    page.add(&group);
+    dialog.add(&page);
+
+    // -- reflect the label's current value onto every row --
+    let sync_from = |label: &TextElement| {
+        enabled_row.set_active(label.enabled);
+        content_row.set_text(&label.content);
+        let is_absolute = matches!(label.position, TextPosition::Absolute { .. });
+        position_mode_row.set_selected(if is_absolute { 1 } else { 0 });
+        horizontal_row.set_visible(!is_absolute);
+        vertical_row.set_visible(!is_absolute);
+        padding_row.set_visible(!is_absolute);
+        x_row.set_visible(is_absolute);
+        y_row.set_visible(is_absolute);
+        match label.position {
+            TextPosition::Semantic { horizontal, vertical, padding } => {
+                horizontal_row.set_selected(index_for_horizontal_anchor(horizontal));
+                vertical_row.set_selected(index_for_vertical_anchor(vertical));
+                padding_row.set_value(padding);
+            }
+            TextPosition::Absolute { x, y } => {
+                x_row.set_value(x);
+                y_row.set_value(y);
+            }
+        }
+
+        let background_index = match &label.background {
+            TextBackground::None => 0,
+            TextBackground::Solid(_) => 1,
+            TextBackground::Gradient(_) => 2,
+        };
+        background_row.set_selected(background_index);
+        background_color_row.set_visible(background_index != 0);
+        background_color2_row.set_visible(background_index == 2);
+        match &label.background {
+            TextBackground::Solid(color) => background_color_button.set_rgba(&gdk_rgba_from(color)),
+            TextBackground::Gradient(spec) => {
+                if let Some((_, color)) = spec.stops.first() {
+                    background_color_button.set_rgba(&gdk_rgba_from(color));
+                }
+                if let Some((_, color)) = spec.stops.get(1) {
+                    background_color2_button.set_rgba(&gdk_rgba_from(color));
+                }
+            }
+            TextBackground::None => {}
+        }
+
+        corner_radius_row.set_value(label.corner_radius.top_left);
+        font_button.set_font_desc(&font_desc_from_typography(&label.typography));
+        color_button.set_rgba(&gdk_rgba_from(&label.typography.color));
+        letter_spacing_row.set_value(label.typography.letter_spacing);
+        line_spacing_row.set_value(label.typography.line_spacing);
+        opacity_row.set_value(label.typography.opacity * 100.0);
+
+        shadow_row.set_selected(shadow_preset_index_for(&label.shadow));
+        let (angle, distance) = label.shadow.angle_and_distance();
+        shadow_angle_row.set_value(angle);
+        shadow_distance_row.set_value(distance);
+        shadow_blur_row.set_value(label.shadow.blur);
+
+        let enabled = label.enabled;
+        for widget in [
+            content_row.clone().upcast::<gtk4::Widget>(),
+            position_mode_row.clone().upcast(),
+            horizontal_row.clone().upcast(),
+            vertical_row.clone().upcast(),
+            padding_row.clone().upcast(),
+            x_row.clone().upcast(),
+            y_row.clone().upcast(),
+            background_row.clone().upcast(),
+            background_color_row.clone().upcast(),
+            background_color2_row.clone().upcast(),
+            corner_radius_row.clone().upcast(),
+            font_row.clone().upcast(),
+            color_row.clone().upcast(),
+            letter_spacing_row.clone().upcast(),
+            line_spacing_row.clone().upcast(),
+            opacity_row.clone().upcast(),
+            shadow_row.clone().upcast(),
+        ] {
+            widget.set_sensitive(enabled);
+        }
+        let shadow_geometry_enabled = enabled && label.shadow.enabled;
+        shadow_angle_row.set_sensitive(shadow_geometry_enabled);
+        shadow_distance_row.set_sensitive(shadow_geometry_enabled);
+        shadow_blur_row.set_sensitive(shadow_geometry_enabled);
+    };
+    sync_from(&label);
+
+    // Guards the sync above (and the shadow preset handler's own display-
+    // only writes below) against reentrantly pushing a spurious partial
+    // undo command the same way `register_title_controls` does — this
+    // dialog doesn't share `EditorState.syncing_controls` (it isn't
+    // touching the sidebar), so it keeps its own tiny local flag instead.
+    let syncing = Rc::new(Cell::new(false));
+
+    let apply = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        syncing,
+        #[weak]
+        enabled_row,
+        #[weak]
+        content_row,
+        #[weak]
+        position_mode_row,
+        #[weak]
+        horizontal_row,
+        #[weak]
+        vertical_row,
+        #[weak]
+        padding_row,
+        #[weak]
+        x_row,
+        #[weak]
+        y_row,
+        #[weak]
+        background_row,
+        #[weak]
+        background_color_button,
+        #[weak]
+        background_color2_button,
+        #[weak]
+        corner_radius_row,
+        #[weak]
+        font_button,
+        #[weak]
+        color_button,
+        #[weak]
+        letter_spacing_row,
+        #[weak]
+        line_spacing_row,
+        #[weak]
+        opacity_row,
+        move || {
+            if syncing.get() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) else { return };
+
+            let background = match background_row.selected() {
+                1 => TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba())),
+                2 => TextBackground::Gradient(GradientSpec {
+                    kind: GradientKind::Linear { angle_deg: 135.0 },
+                    stops: vec![(0.0, rgba_from_gdk(&background_color_button.rgba())), (1.0, rgba_from_gdk(&background_color2_button.rgba()))],
+                }),
+                _ => TextBackground::None,
+            };
+            let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
+            let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
+
+            let position = if position_mode_row.selected() == 1 {
+                TextPosition::Absolute { x: x_row.value(), y: y_row.value() }
+            } else {
+                TextPosition::Semantic {
+                    horizontal: horizontal_anchor_for_index(horizontal_row.selected()),
+                    vertical: vertical_anchor_for_index(vertical_row.selected()),
+                    padding: padding_row.value(),
+                }
+            };
+
+            let new = TextElement {
+                enabled: enabled_row.is_active(),
+                content: content_row.text().to_string(),
+                position,
+                typography: Typography {
+                    font_family,
+                    font_size,
+                    weight,
+                    italic,
+                    color: rgba_from_gdk(&color_button.rgba()),
+                    alignment: current.typography.alignment,
+                    opacity: opacity_row.value() / 100.0,
+                    letter_spacing: letter_spacing_row.value(),
+                    line_spacing: line_spacing_row.value(),
+                    wrap: current.typography.wrap,
+                },
+                background,
+                corner_radius: CornerRadius::uniform(corner_radius_row.value()),
+                background_padding: current.background_padding,
+                shadow: current.shadow,
+            };
+            if current == new {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+
+    enabled_row.connect_active_notify(glib::clone!(
+        #[strong]
+        state,
+        #[strong]
+        apply,
+        #[weak]
+        enabled_row,
+        #[weak]
+        content_row,
+        #[weak]
+        position_mode_row,
+        #[weak]
+        horizontal_row,
+        #[weak]
+        vertical_row,
+        #[weak]
+        padding_row,
+        #[weak]
+        x_row,
+        #[weak]
+        y_row,
+        #[weak]
+        background_row,
+        #[weak]
+        background_color_row,
+        #[weak]
+        background_color2_row,
+        #[weak]
+        corner_radius_row,
+        #[weak]
+        font_row,
+        #[weak]
+        color_row,
+        #[weak]
+        letter_spacing_row,
+        #[weak]
+        line_spacing_row,
+        #[weak]
+        opacity_row,
+        #[weak]
+        shadow_row,
+        #[weak]
+        shadow_angle_row,
+        #[weak]
+        shadow_distance_row,
+        #[weak]
+        shadow_blur_row,
+        move |_| {
+            let enabled = enabled_row.is_active();
+            if let Some(label) = state.borrow().document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) {
+                let shadow_geometry_enabled = enabled && label.shadow.enabled;
+                shadow_angle_row.set_sensitive(shadow_geometry_enabled);
+                shadow_distance_row.set_sensitive(shadow_geometry_enabled);
+                shadow_blur_row.set_sensitive(shadow_geometry_enabled);
+            }
+            for widget in [
+                content_row.clone().upcast::<gtk4::Widget>(),
+                position_mode_row.clone().upcast(),
+                horizontal_row.clone().upcast(),
+                vertical_row.clone().upcast(),
+                padding_row.clone().upcast(),
+                x_row.clone().upcast(),
+                y_row.clone().upcast(),
+                background_row.clone().upcast(),
+                background_color_row.clone().upcast(),
+                background_color2_row.clone().upcast(),
+                corner_radius_row.clone().upcast(),
+                font_row.clone().upcast(),
+                color_row.clone().upcast(),
+                letter_spacing_row.clone().upcast(),
+                line_spacing_row.clone().upcast(),
+                opacity_row.clone().upcast(),
+                shadow_row.clone().upcast(),
+            ] {
+                widget.set_sensitive(enabled);
+            }
+            apply();
+        }
+    ));
+    content_row.connect_changed(glib::clone!(#[strong] apply, move |_| apply()));
+    position_mode_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        horizontal_row,
+        #[weak]
+        vertical_row,
+        #[weak]
+        padding_row,
+        #[weak]
+        x_row,
+        #[weak]
+        y_row,
+        #[strong]
+        apply,
+        move |row| {
+            let is_absolute = row.selected() == 1;
+            horizontal_row.set_visible(!is_absolute);
+            vertical_row.set_visible(!is_absolute);
+            padding_row.set_visible(!is_absolute);
+            x_row.set_visible(is_absolute);
+            y_row.set_visible(is_absolute);
+            apply();
+        }
+    ));
+    x_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    y_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    horizontal_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    vertical_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    padding_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    background_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        background_color_row,
+        #[weak]
+        background_color2_row,
+        #[strong]
+        apply,
+        move |row| {
+            let selected = row.selected();
+            background_color_row.set_visible(selected != 0);
+            background_color2_row.set_visible(selected == 2);
+            apply();
+        }
+    ));
+    background_color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    background_color2_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    corner_radius_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    font_button.connect_font_desc_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    letter_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    line_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    opacity_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+
+    shadow_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        state,
+        #[strong]
+        syncing,
+        #[weak]
+        shadow_angle_row,
+        #[weak]
+        shadow_distance_row,
+        #[weak]
+        shadow_blur_row,
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        move |row| {
+            let preset = shadow_preset_for_index(row.selected());
+            let mut state_ref = state.borrow_mut();
+            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let new_shadow = current.label.shadow.with_preset(preset);
+
+            syncing.set(true);
+            shadow_distance_row.set_value(new_shadow.angle_and_distance().1);
+            shadow_blur_row.set_value(new_shadow.blur);
+            shadow_angle_row.set_sensitive(new_shadow.enabled);
+            shadow_distance_row.set_sensitive(new_shadow.enabled);
+            shadow_blur_row.set_sensitive(new_shadow.enabled);
+            syncing.set(false);
+
+            let mut new_label = current.label.clone();
+            new_label.shadow = new_shadow;
+            let old_label = current.label.clone();
+            if old_label == new_label {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: old_label, new: new_label }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    let apply_shadow_geometry = glib::clone!(
+        #[strong]
+        state,
+        #[strong]
+        syncing,
+        #[weak]
+        shadow_angle_row,
+        #[weak]
+        shadow_distance_row,
+        #[weak]
+        shadow_blur_row,
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        move || {
+            if syncing.get() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(shadow_angle_row.value(), shadow_distance_row.value());
+            let mut new_label = current.label.clone();
+            new_label.shadow.offset_x = offset_x;
+            new_label.shadow.offset_y = offset_y;
+            new_label.shadow.blur = shadow_blur_row.value();
+            let old_label = current.label.clone();
+            if old_label == new_label {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: old_label, new: new_label }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+    shadow_angle_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+    shadow_distance_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+    shadow_blur_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+
+    dialog.present(Some(window));
+}
+
 fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let context_target: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
 
@@ -2366,6 +3353,24 @@ fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Ed
     });
 
     register_replace_action(window, canvas, state, &context_target);
+
+    let edit_label_action = gio::SimpleAction::new("edit-screenshot-label", None);
+    edit_label_action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        context_target,
+        move |_, _| {
+            let Some(index) = context_target.get() else { return };
+            let Some(element_id) = state.borrow().document.elements.get(index).map(|e| e.id) else { return };
+            open_label_editor(&window, &canvas, &state, element_id);
+        }
+    ));
+    window.add_action(&edit_label_action);
 }
 
 /// `win.paste` (`Ctrl+V`, spec §1: "Screenshot aus der Zwischenablage
