@@ -79,13 +79,22 @@ impl Canvas {
         self.imp().set_context_menu_callback(f);
     }
 
-    /// Called at the end of a `LayoutMode::Free` drag that actually moved an
-    /// element (its index into `Document.elements`, and its new x/y in
-    /// document space) — spec §8 manual positioning. Never fires outside
-    /// Free mode, or for a drag that starts on empty canvas space, or one
-    /// that ends back where it started.
-    pub fn connect_move<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+    /// Called at the end of a `LayoutMode::Free` drag that actually moved
+    /// one or more elements (each entry: element id, new x/y in document
+    /// space) — spec §8 manual positioning, extended by spec §5 to move a
+    /// whole multi-selection together when the dragged element is part of
+    /// one. Never fires outside Free mode, or for a drag that starts on
+    /// empty canvas space, or one that ends back where it started.
+    pub fn connect_move<F: Fn(Vec<(Uuid, f64, f64)>) + 'static>(&self, f: F) {
         self.imp().set_move_callback(f);
+    }
+
+    /// The ids of the currently selected elements (spec §5: multi-select).
+    /// Selection is this widget's own transient UI state, not part of the
+    /// undoable `Document` — clicking, Shift-clicking or marquee-dragging
+    /// updates it directly, with no undo step of its own.
+    pub fn selected_ids(&self) -> std::collections::HashSet<Uuid> {
+        self.imp().selected.borrow().clone()
     }
 
     /// Called at the end of a `LayoutMode::Free` corner-handle drag that
@@ -107,9 +116,10 @@ impl Default for Canvas {
 
 mod imp {
     use std::cell::{Cell, RefCell};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use gtk4::cairo;
+    use gtk4::gdk;
     use gtk4::glib;
     use gtk4::graphene;
     use gtk4::prelude::*;
@@ -121,11 +131,12 @@ mod imp {
 
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
     type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
-    type MoveCallback = Box<dyn Fn(usize, f64, f64)>;
+    type MoveCallback = Box<dyn Fn(Vec<(Uuid, f64, f64)>)>;
     type ResizeCallback = Box<dyn Fn(usize, Transform)>;
-    /// `(drag-start point, dragged element's original x/y)`, both in
-    /// document space.
-    type FreeDragOrigin = ((f64, f64), (f64, f64));
+    /// `(drag-start point, moved elements' own (id, original x, original y))`
+    /// — one entry per element for a multi-selection group move, or a
+    /// single entry for an ordinary single-element move.
+    type MoveDragOrigin = ((f64, f64), Vec<(Uuid, f64, f64)>);
     /// `(corner grabbed, dragged element's original transform, drag-start
     /// point in document space)`.
     type ResizeDragOrigin = (Corner, Transform, (f64, f64));
@@ -173,19 +184,36 @@ mod imp {
         drag_hover: Cell<Option<usize>>,
         /// Set instead of `drag_hover` when the drag that picked up
         /// `drag_from` is a `LayoutMode::Free` move rather than a reorder:
-        /// the document-space point where the drag began, and the dragged
-        /// element's own transform.x/y at that moment. Together they turn
-        /// the gesture's cumulative offset into an absolute new position.
-        free_drag_origin: Cell<Option<FreeDragOrigin>>,
-        /// Set instead of `free_drag_origin` when the drag that picked up
+        /// the document-space point where the drag began, and the moved
+        /// elements' own transform.x/y at that moment (one entry, or one
+        /// per selected element for a group move). Together they turn the
+        /// gesture's cumulative offset into each element's absolute new
+        /// position.
+        move_drag_origin: RefCell<Option<MoveDragOrigin>>,
+        /// Set instead of `move_drag_origin` when the drag that picked up
         /// `drag_from` grabbed one of that element's corner handles —
         /// checked first, so grabbing near a corner always resizes rather
         /// than moves.
         resize_drag_origin: Cell<Option<ResizeDragOrigin>>,
         /// Alignment guides from the current Free-mode move drag, drawn by
         /// `snapshot()`; empty outside of a move drag that's actually
-        /// snapped to something.
+        /// snapped to something. Only a single-element move snaps — a
+        /// group move's relative positions would make "snap to another
+        /// selected element" ambiguous, so it's skipped for those.
         active_guides: RefCell<Vec<Guide>>,
+        /// Ids of the currently selected elements (spec §5: multi-select).
+        /// Transient UI state owned entirely by this widget, not the
+        /// document — see `Canvas::selected_ids`.
+        pub(super) selected: RefCell<HashSet<Uuid>>,
+        /// Document-space start/current points of an in-progress
+        /// empty-space drag that selects every element it overlaps on
+        /// release (spec §5: marquee select). `None` outside such a drag.
+        marquee_start: Cell<Option<(f64, f64)>>,
+        marquee_current: Cell<Option<(f64, f64)>>,
+        /// Whether Shift was held when the marquee drag began — an
+        /// additive marquee extends the existing selection instead of
+        /// replacing it.
+        marquee_additive: Cell<bool>,
         reorder_callback: RefCell<Option<ReorderCallback>>,
         context_menu_callback: RefCell<Option<ContextMenuCallback>>,
         move_callback: RefCell<Option<MoveCallback>>,
@@ -206,9 +234,13 @@ mod imp {
                 last_scale: Cell::new(1.0),
                 drag_from: Cell::new(None),
                 drag_hover: Cell::new(None),
-                free_drag_origin: Cell::new(None),
+                move_drag_origin: RefCell::new(None),
                 resize_drag_origin: Cell::new(None),
                 active_guides: RefCell::new(Vec::new()),
+                selected: RefCell::new(HashSet::new()),
+                marquee_start: Cell::new(None),
+                marquee_current: Cell::new(None),
+                marquee_additive: Cell::new(false),
                 reorder_callback: RefCell::new(None),
                 context_menu_callback: RefCell::new(None),
                 move_callback: RefCell::new(None),
@@ -233,7 +265,10 @@ mod imp {
             drag.connect_drag_begin(glib::clone!(
                 #[weak]
                 obj,
-                move |_, x, y| obj.imp().on_drag_begin(x, y)
+                move |gesture, x, y| {
+                    let shift = gesture.current_event_state().contains(gdk::ModifierType::SHIFT_MASK);
+                    obj.imp().on_drag_begin(x, y, shift);
+                }
             ));
             drag.connect_drag_update(glib::clone!(
                 #[weak]
@@ -332,10 +367,37 @@ mod imp {
                     let _ = ctx.stroke();
                 }
 
+                // Selection highlight (spec §5) — drawn in every layout
+                // mode, not just Free, since selecting/deleting several
+                // screenshots at once is useful regardless of how they're
+                // arranged.
+                {
+                    let doc = self.document.borrow();
+                    let selected = self.selected.borrow();
+                    if !selected.is_empty() {
+                        let scale = self.last_scale.get();
+                        let placements = self.last_placements.borrow();
+                        for (el, p) in doc.elements.iter().zip(placements.iter()) {
+                            if !selected.contains(&el.id) {
+                                continue;
+                            }
+                            let inset = 3.0;
+                            let sx = offset_x + p.x * scale - inset;
+                            let sy = offset_y + p.y * scale - inset;
+                            let sw = p.width * scale + inset * 2.0;
+                            let sh = p.height * scale + inset * 2.0;
+                            ctx.rectangle(sx, sy, sw, sh);
+                            ctx.set_source_rgba(0.95, 0.6, 0.1, 0.95);
+                            ctx.set_line_width(2.5);
+                            let _ = ctx.stroke();
+                        }
+                    }
+                }
+
                 // Resize handles at every element's corners — only in Free
                 // mode, where dragging one actually does something (spec
-                // §8). There's no per-element selection yet, so every
-                // element gets its handles drawn, not just a chosen one.
+                // §8). Drawn for every element regardless of selection —
+                // any element can still be resized individually.
                 if self.document.borrow().layout.mode == LayoutMode::Free {
                     let scale = self.last_scale.get();
                     for p in self.last_placements.borrow().iter() {
@@ -377,6 +439,24 @@ mod imp {
                     }
                 }
                 let _ = ctx.stroke();
+
+                // The marquee-select rectangle, if a select-drag is in
+                // progress (spec §5) — drawn last so it stays on top of
+                // everything else.
+                if let (Some((sx0, sy0)), Some((sx1, sy1))) = (self.marquee_start.get(), self.marquee_current.get()) {
+                    let (x0, x1) = (sx0.min(sx1), sx0.max(sx1));
+                    let (y0, y1) = (sy0.min(sy1), sy0.max(sy1));
+                    let rx = offset_x + x0 * scale;
+                    let ry = offset_y + y0 * scale;
+                    let rw = (x1 - x0) * scale;
+                    let rh = (y1 - y0) * scale;
+                    ctx.rectangle(rx, ry, rw, rh);
+                    ctx.set_source_rgba(0.29, 0.56, 0.89, 0.15);
+                    let _ = ctx.fill_preserve();
+                    ctx.set_source_rgba(0.29, 0.56, 0.89, 0.9);
+                    ctx.set_line_width(1.5);
+                    let _ = ctx.stroke();
+                }
             }
 
             if self.drag_active.get() {
@@ -396,6 +476,12 @@ mod imp {
             resolved_images: HashMap<Uuid, cairo::ImageSurface>,
             background_image: Option<cairo::ImageSurface>,
         ) {
+            // Drop selected ids the new document no longer has (deleted,
+            // or undone/redone past their existence) — otherwise a stale
+            // id could linger in `selected` forever, invisible but still
+            // affecting a later group move.
+            let valid_ids: HashSet<Uuid> = document.elements.iter().map(|e| e.id).collect();
+            self.selected.borrow_mut().retain(|id| valid_ids.contains(id));
             *self.document.borrow_mut() = document;
             *self.resolved_images.borrow_mut() = resolved_images;
             *self.background_image.borrow_mut() = background_image;
@@ -419,7 +505,7 @@ mod imp {
             *self.context_menu_callback.borrow_mut() = Some(Box::new(f));
         }
 
-        pub fn set_move_callback<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+        pub fn set_move_callback<F: Fn(Vec<(Uuid, f64, f64)>) + 'static>(&self, f: F) {
             *self.move_callback.borrow_mut() = Some(Box::new(f));
         }
 
@@ -538,6 +624,17 @@ mod imp {
             None
         }
 
+        /// Mutates one element's live position in place during a move drag
+        /// (looked up by id, since a group move touches several elements
+        /// at once and their positions in `Document.elements` aren't
+        /// necessarily contiguous or known up front).
+        fn apply_live_position(&self, id: Uuid, x: f64, y: f64) {
+            if let Some(el) = self.document.borrow_mut().elements.iter_mut().find(|e| e.id == id) {
+                el.transform.x = x;
+                el.transform.y = y;
+            }
+        }
+
         /// Where `doc_x` would be inserted among the current placements, as
         /// a position in `0..=last_placements.len()` (not yet adjusted for
         /// the removal of the dragged element — see `on_drag_end`).
@@ -579,30 +676,74 @@ mod imp {
             (result.x, result.y)
         }
 
-        pub(super) fn on_drag_begin(&self, x: f64, y: f64) {
+        pub(super) fn on_drag_begin(&self, x: f64, y: f64, shift: bool) {
             self.active_guides.borrow_mut().clear();
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
+            let free_mode = self.document.borrow().layout.mode == LayoutMode::Free;
 
-            if self.document.borrow().layout.mode == LayoutMode::Free {
+            if free_mode {
                 if let Some((index, corner)) = self.corner_handle_at(doc_x, doc_y) {
                     let original = self.document.borrow().elements[index].transform;
                     self.drag_from.set(Some(index));
                     self.resize_drag_origin.set(Some((corner, original, (doc_x, doc_y))));
                     return;
                 }
-
-                let hit = self.element_index_at(doc_x, doc_y);
-                self.drag_from.set(hit);
-                if let Some(index) = hit {
-                    let origin = self.document.borrow().elements[index].transform;
-                    self.free_drag_origin.set(Some(((doc_x, doc_y), (origin.x, origin.y))));
-                }
-                return;
             }
 
             let hit = self.element_index_at(doc_x, doc_y);
-            self.drag_from.set(hit);
-            self.drag_hover.set(hit);
+
+            let Some(index) = hit else {
+                // Empty canvas space: start a marquee-select drag rather
+                // than any move/resize/reorder (spec §5).
+                self.drag_from.set(None);
+                self.marquee_start.set(Some((doc_x, doc_y)));
+                self.marquee_current.set(Some((doc_x, doc_y)));
+                self.marquee_additive.set(shift);
+                return;
+            };
+            let id = self.document.borrow().elements[index].id;
+
+            if shift {
+                // A Shift-click purely toggles selection membership — it
+                // never also starts a move/reorder/resize, so a
+                // deselecting click can't simultaneously drag the element
+                // away.
+                let mut selected = self.selected.borrow_mut();
+                if !selected.remove(&id) {
+                    selected.insert(id);
+                }
+                drop(selected);
+                self.drag_from.set(None);
+                self.obj().queue_draw();
+                return;
+            }
+
+            let already_in_group = {
+                let selected = self.selected.borrow();
+                selected.contains(&id) && selected.len() > 1
+            };
+            if !already_in_group {
+                *self.selected.borrow_mut() = std::iter::once(id).collect();
+            }
+            self.obj().queue_draw();
+
+            if free_mode {
+                let moving_ids: Vec<Uuid> =
+                    if already_in_group { self.selected.borrow().iter().copied().collect() } else { vec![id] };
+                let origins: Vec<(Uuid, f64, f64)> = {
+                    let doc = self.document.borrow();
+                    moving_ids
+                        .iter()
+                        .filter_map(|mid| doc.elements.iter().find(|e| e.id == *mid).map(|e| (*mid, e.transform.x, e.transform.y)))
+                        .collect()
+                };
+                self.drag_from.set(Some(index));
+                *self.move_drag_origin.borrow_mut() = Some(((doc_x, doc_y), origins));
+                return;
+            }
+
+            self.drag_from.set(Some(index));
+            self.drag_hover.set(Some(index));
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
@@ -618,16 +759,34 @@ mod imp {
                 return;
             }
 
-            if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.get() {
-                let Some(index) = self.drag_from.get() else { return };
+            if let Some(((start_x, start_y), origins)) = self.move_drag_origin.borrow().clone() {
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
-                    let proposed = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
-                    let (new_x, new_y) = self.snapped_move(index, proposed);
-                    if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
-                        el.transform.x = new_x;
-                        el.transform.y = new_y;
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    if origins.len() == 1 {
+                        let (id, orig_x, orig_y) = origins[0];
+                        let index = self.drag_from.get();
+                        let proposed = (orig_x + dx, orig_y + dy);
+                        let (new_x, new_y) = index.map(|i| self.snapped_move(i, proposed)).unwrap_or(proposed);
+                        self.apply_live_position(id, new_x, new_y);
+                    } else {
+                        // A group move skips snapping (see `active_guides`'
+                        // doc comment) but still needs the guides cleared,
+                        // since a single-element move earlier in the same
+                        // drag session may have left some behind.
+                        self.active_guides.borrow_mut().clear();
+                        for (id, orig_x, orig_y) in &origins {
+                            self.apply_live_position(*id, orig_x + dx, orig_y + dy);
+                        }
                     }
                     self.content_dirty.set(true);
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
+            if self.marquee_start.get().is_some() {
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    self.marquee_current.set(Some((doc_x, doc_y)));
                     self.obj().queue_draw();
                 }
                 return;
@@ -656,17 +815,53 @@ mod imp {
                 return;
             }
 
-            if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.take() {
-                let Some(index) = self.drag_from.take() else { return };
+            if let Some(((start_x, start_y), origins)) = self.move_drag_origin.take() {
+                let index = self.drag_from.take();
                 self.active_guides.borrow_mut().clear();
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
-                    let proposed = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
-                    let (new_x, new_y) = self.snapped_move(index, proposed);
-                    if new_x != orig_x || new_y != orig_y {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    let finals: Vec<(Uuid, f64, f64)> = if origins.len() == 1 {
+                        let (id, orig_x, orig_y) = origins[0];
+                        let proposed = (orig_x + dx, orig_y + dy);
+                        let (new_x, new_y) = index.map(|i| self.snapped_move(i, proposed)).unwrap_or(proposed);
+                        if new_x == orig_x && new_y == orig_y { Vec::new() } else { vec![(id, new_x, new_y)] }
+                    } else if dx == 0.0 && dy == 0.0 {
+                        Vec::new()
+                    } else {
+                        origins.iter().map(|(id, orig_x, orig_y)| (*id, orig_x + dx, orig_y + dy)).collect()
+                    };
+                    if !finals.is_empty() {
                         if let Some(cb) = self.move_callback.borrow().as_ref() {
-                            cb(index, new_x, new_y);
+                            cb(finals);
                         }
                     }
+                }
+                self.obj().queue_draw();
+                return;
+            }
+
+            if let Some((sx, sy)) = self.marquee_start.take() {
+                let additive = self.marquee_additive.get();
+                self.marquee_current.set(None);
+                if let Some((ex, ey)) = self.widget_to_document(abs_x, abs_y) {
+                    let (x0, x1) = (sx.min(ex), sx.max(ex));
+                    let (y0, y1) = (sy.min(ey), sy.max(ey));
+                    let doc = self.document.borrow();
+                    let placements = self.last_placements.borrow();
+                    let hits: Vec<Uuid> = doc
+                        .elements
+                        .iter()
+                        .zip(placements.iter())
+                        .filter(|(_, p)| p.x < x1 && p.x + p.width > x0 && p.y < y1 && p.y + p.height > y0)
+                        .map(|(el, _)| el.id)
+                        .collect();
+                    drop(placements);
+                    drop(doc);
+                    let mut selected = self.selected.borrow_mut();
+                    if !additive {
+                        selected.clear();
+                    }
+                    selected.extend(hits);
                 }
                 self.obj().queue_draw();
                 return;
@@ -703,17 +898,18 @@ mod imp {
             self.active_guides.borrow_mut().clear();
             let index = self.drag_from.take();
             let resize_origin = self.resize_drag_origin.take();
-            let free_origin = self.free_drag_origin.take();
+            let move_origin = self.move_drag_origin.take();
+            self.marquee_start.set(None);
+            self.marquee_current.set(None);
 
             if let (Some(index), Some((_, original, _))) = (index, resize_origin) {
                 if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
                     el.transform = original;
                 }
                 self.content_dirty.set(true);
-            } else if let (Some(index), Some((_, (orig_x, orig_y)))) = (index, free_origin) {
-                if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
-                    el.transform.x = orig_x;
-                    el.transform.y = orig_y;
+            } else if let Some((_, origins)) = move_origin {
+                for (id, orig_x, orig_y) in origins {
+                    self.apply_live_position(id, orig_x, orig_y);
                 }
                 self.content_dirty.set(true);
             }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-02
+
+### Added
+
+- Multi-select: click a screenshot to select it, Shift-click to add or
+  remove another, or drag across empty canvas space to marquee-select
+  everything it overlaps. Selected screenshots are outlined, and:
+  - `Delete`/`Backspace` removes every selected screenshot as one undo
+    step (the right-click context menu's "Löschen" still targets only
+    whichever screenshot it was opened on, independent of the selection).
+  - In `LayoutMode::Free`, dragging any screenshot that's part of a
+    multi-selection moves the whole selection together, as one undo
+    step.
+
 ## [0.15.0] - 2026-09-02
 
 ### Added

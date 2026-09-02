@@ -21,6 +21,10 @@ PNG, JPEG or WebP image.
   (aspect-locked by default). The canvas always resizes to fit its
   content automatically — nothing is ever cropped off.
 - **Reordering** by dragging screenshots directly on the canvas.
+- **Multi-select**: click, Shift-click, or marquee-drag across empty
+  canvas space to select several screenshots at once (outlined on
+  screen), then delete them all in one step, or — in Free layout — drag
+  any of them to move the whole selection together.
 - **Per-screenshot context menu**: duplicate, replace, delete, bring
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
 - **Backgrounds**: solid color, linear gradient, radial gradient, an
@@ -83,8 +87,8 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: multi-select, and freeform vector shapes (only
-the two background patterns above exist so far).
+history. Not yet implemented: freeform vector shapes (only the two
+background patterns above exist so far).
 
 ## License
 

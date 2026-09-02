@@ -15,9 +15,9 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
-    AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, ReorderScreenshot,
+    AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, RemoveScreenshots, ReorderScreenshot,
     ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing,
-    SetTextOverlay, SetTransform, UndoStack,
+    SetTextOverlay, SetTransform, SetTransforms, UndoStack,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
@@ -139,6 +139,7 @@ fn build_ui(app: &adw::Application) {
     register_move(&window, &canvas, &state);
     register_resize(&window, &canvas, &state);
     register_context_menu(&window, &canvas, &state);
+    register_delete_selected(app, &window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
 
     window.present();
@@ -1644,8 +1645,51 @@ fn register_reorder(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorS
     ));
 }
 
+/// `win.delete-selected` (`Delete`/`BackSpace`): removes every currently
+/// selected screenshot as one undo step (spec §5: multi-select delete).
+/// Independent of the context menu's single-target `win.delete-screenshot`
+/// — right-clicking a screenshot and choosing "Löschen" always acts on
+/// just that one, regardless of the current selection.
+fn register_delete_selected(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("delete-selected", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, _| {
+            let selected = canvas.selected_ids();
+            if selected.is_empty() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let removed: Vec<(usize, ScreenshotElement)> = state_ref
+                .document
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| selected.contains(&e.id))
+                .map(|(index, e)| (index, e.clone()))
+                .collect();
+            if removed.is_empty() {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(RemoveScreenshots { removed }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+    window.add_action(&action);
+    app.set_accels_for_action("win.delete-selected", &["Delete", "BackSpace"]);
+}
+
 /// Wires the canvas's `LayoutMode::Free` move-drag to an undoable
-/// [`SetTransform`] (spec §8: manual positioning).
+/// [`SetTransforms`] (spec §8: manual positioning, extended by spec §5 to
+/// move a multi-selection together as one undo step).
 fn register_move(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     canvas.connect_move(glib::clone!(
         #[weak]
@@ -1654,16 +1698,24 @@ fn register_move(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorStat
         canvas,
         #[strong]
         state,
-        move |index, new_x, new_y| {
+        move |new_positions: Vec<(Uuid, f64, f64)>| {
             let mut state_ref = state.borrow_mut();
-            let Some(element) = state_ref.document.elements.get(index) else { return };
-            let old = element.transform;
-            let mut new = old;
-            new.x = new_x;
-            new.y = new_y;
-            let element_id = element.id;
+            let transforms: Vec<(Uuid, screenforge_core::model::Transform, screenforge_core::model::Transform)> = new_positions
+                .into_iter()
+                .filter_map(|(id, new_x, new_y)| {
+                    let element = state_ref.document.elements.iter().find(|e| e.id == id)?;
+                    let old = element.transform;
+                    let mut new = old;
+                    new.x = new_x;
+                    new.y = new_y;
+                    Some((id, old, new))
+                })
+                .collect();
+            if transforms.is_empty() {
+                return;
+            }
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);
+            undo_stack.apply(Box::new(SetTransforms { transforms }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);

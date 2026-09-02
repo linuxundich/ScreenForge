@@ -150,6 +150,66 @@ impl Command for RemoveScreenshot {
     }
 }
 
+/// Deletes several elements as one undo step (spec §5: multi-select
+/// delete). `removed` is `(index, element)` pairs captured from the
+/// document *before* any of them are removed — `apply` removes
+/// highest-index-first so earlier indices stay valid as later removals
+/// happen, and `undo` re-inserts lowest-index-first for the same reason.
+#[derive(Debug)]
+pub struct RemoveScreenshots {
+    pub removed: Vec<(usize, ScreenshotElement)>,
+}
+
+impl Command for RemoveScreenshots {
+    fn apply(&self, doc: &mut Document) {
+        let mut indices: Vec<usize> = self.removed.iter().map(|(i, _)| *i).collect();
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        for index in indices {
+            if index < doc.elements.len() {
+                doc.elements.remove(index);
+            }
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        let mut removed = self.removed.clone();
+        removed.sort_unstable_by_key(|(index, _)| *index);
+        for (index, element) in removed {
+            let index = index.min(doc.elements.len());
+            doc.elements.insert(index, element);
+        }
+    }
+}
+
+/// Sets several elements' transforms as one undo step — used for a
+/// `LayoutMode::Free` drag that moves a multi-selection together (spec
+/// §5/§8), and for a single-element move once one is selected alone. Looks
+/// elements up by id like [`SetTransform`], rather than assuming a fixed
+/// index, since the id is the only thing stable across the elements
+/// referenced by different entries of `transforms`.
+#[derive(Debug)]
+pub struct SetTransforms {
+    pub transforms: Vec<(Uuid, Transform, Transform)>,
+}
+
+impl Command for SetTransforms {
+    fn apply(&self, doc: &mut Document) {
+        for (id, _old, new) in &self.transforms {
+            if let Some(element) = doc.elements.iter_mut().find(|e| e.id == *id) {
+                element.transform = *new;
+            }
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        for (id, old, _new) in &self.transforms {
+            if let Some(element) = doc.elements.iter_mut().find(|e| e.id == *id) {
+                element.transform = *old;
+            }
+        }
+    }
+}
+
 /// Inserts a pre-built duplicate right after the element it was copied from
 /// (spec §2/§21: "Duplizieren"). The caller builds `duplicate` (same
 /// properties, a fresh id) since generating a new id is an app-layer
@@ -793,5 +853,60 @@ mod tests {
         assert_eq!(doc.background, old_background);
         assert!(doc.elements.iter().all(|e| e.shadow == ShadowParams::none()));
         assert!(doc.elements.iter().all(|e| e.corner_radius == CornerRadius::none()));
+    }
+
+    #[test]
+    fn remove_screenshots_deletes_all_given_indices_as_one_step() {
+        let mut doc = Document::new();
+        doc.elements = vec![
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0),
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("b.png")), 100.0, 200.0),
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("c.png")), 100.0, 200.0),
+        ];
+        let ids: Vec<_> = doc.elements.iter().map(|e| e.id).collect();
+        // Removing indices 0 and 2 (deliberately unordered/descending in
+        // the input, to check `apply` doesn't assume a sort order) should
+        // leave only the middle element.
+        let removed = vec![(2, doc.elements[2].clone()), (0, doc.elements[0].clone())];
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(RemoveScreenshots { removed }), &mut doc);
+        let after: Vec<_> = doc.elements.iter().map(|e| e.id).collect();
+        assert_eq!(after, vec![ids[1]]);
+
+        stack.undo(&mut doc);
+        let restored: Vec<_> = doc.elements.iter().map(|e| e.id).collect();
+        assert_eq!(restored, ids);
+
+        stack.redo(&mut doc);
+        let after_redo: Vec<_> = doc.elements.iter().map(|e| e.id).collect();
+        assert_eq!(after_redo, vec![ids[1]]);
+    }
+
+    #[test]
+    fn set_transforms_moves_every_given_element_and_undoes_cleanly() {
+        let mut doc = Document::new();
+        doc.elements = vec![
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0),
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("b.png")), 100.0, 200.0),
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("c.png")), 100.0, 200.0),
+        ];
+        doc.elements[0].transform = Transform { x: 10.0, y: 10.0, ..doc.elements[0].transform };
+        doc.elements[1].transform = Transform { x: 50.0, y: 50.0, ..doc.elements[1].transform };
+        let (id0, id1, id2) = (doc.elements[0].id, doc.elements[1].id, doc.elements[2].id);
+        let (old0, old1) = (doc.elements[0].transform, doc.elements[1].transform);
+        let new0 = Transform { x: 30.0, y: 30.0, ..old0 };
+        let new1 = Transform { x: 70.0, y: 70.0, ..old1 };
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(SetTransforms { transforms: vec![(id0, old0, new0), (id1, old1, new1)] }), &mut doc);
+        assert_eq!(doc.elements[0].transform, new0);
+        assert_eq!(doc.elements[1].transform, new1);
+        // The element not part of the group move is untouched.
+        assert_eq!(doc.elements[2].id, id2);
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.elements[0].transform, old0);
+        assert_eq!(doc.elements[1].transform, old1);
     }
 }
