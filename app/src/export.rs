@@ -33,12 +33,13 @@ pub enum ExportError {
     Import(#[from] import::ImportError),
 }
 
-/// Renders `doc` at its configured export size and writes it to `path` in
-/// its configured format. Intended to run off the main thread — takes only
-/// `Send` types (see [`DecodedImage`]) and builds every `cairo::ImageSurface`
-/// it needs internally, so none has to be shared with the caller's thread.
-/// `background_image` is only consulted when `doc.background` is
-/// `Background::Image`.
+/// Renders `doc` scaled to its configured target export width (height
+/// following proportionally — see `CanvasSettings::export_target_width`)
+/// and writes it to `path` in its configured format. Intended to run off
+/// the main thread — takes only `Send` types (see [`DecodedImage`]) and
+/// builds every `cairo::ImageSurface` it needs internally, so none has to
+/// be shared with the caller's thread. `background_image` is only
+/// consulted when `doc.background` is `Background::Image`.
 pub fn render_and_write(
     doc: &Document,
     decoded_images: &HashMap<Uuid, DecodedImage>,
@@ -51,9 +52,17 @@ pub fn render_and_write(
         .collect::<Result<_, import::ImportError>>()?;
     let background_surface = background_image.map(import::surface_from_decoded).transpose()?;
 
-    let mut target =
-        cairo::ImageSurface::create(cairo::Format::ARgb32, doc.canvas.export_width as i32, doc.canvas.export_height as i32)?;
-    screenforge_core::render::compose(doc, &target, 1.0, &surfaces, background_surface.as_ref())?;
+    // The canvas's own width/height are the composition's native, content-
+    // fitted size (see `screenforge_core::layout::fit_canvas_to_content`);
+    // scaling to the user-chosen target width — instead of rendering
+    // straight at export_width/export_height — is what lets that target be
+    // freely edited without ever cropping or distorting the content.
+    let scale = doc.canvas.export_target_width as f64 / doc.canvas.export_width.max(1) as f64;
+    let out_width = doc.canvas.export_target_width.max(1);
+    let out_height = ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32;
+
+    let mut target = cairo::ImageSurface::create(cairo::Format::ARgb32, out_width as i32, out_height as i32)?;
+    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref())?;
 
     match doc.canvas.export_format {
         ExportFormat::Png => {
@@ -127,6 +136,7 @@ mod tests {
             let mut doc = Document::new();
             doc.canvas.export_width = 32;
             doc.canvas.export_height = 24;
+            doc.canvas.export_target_width = 32; // no scaling -- keep the test surfaces tiny
             doc.canvas.export_format = format;
 
             let path = std::env::temp_dir().join(format!("screenforge-export-test-{format:?}.bin"));

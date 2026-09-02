@@ -49,7 +49,14 @@ pub fn load(path: &Path) -> Result<Document, ProjectError> {
     let content = std::fs::read_to_string(path)?;
     let project: ProjectFile = serde_json::from_str(&content)?;
     match project.version {
-        1 => Ok(project.document),
+        1 => {
+            let mut document = project.document;
+            // Re-fit rather than trust the saved canvas size: it's a
+            // derived value (see `fit_canvas_to_content`), and trusting a
+            // stale one here is exactly how content used to end up cropped.
+            crate::layout::fit_canvas_to_content(&mut document);
+            Ok(document)
+        }
         other => Err(ProjectError::UnsupportedVersion { found: other, supported: CURRENT_VERSION }),
     }
 }

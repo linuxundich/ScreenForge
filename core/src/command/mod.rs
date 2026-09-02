@@ -32,9 +32,14 @@ impl UndoStack {
 
     /// Applies `cmd` to `doc`, pushes it onto the undo history, and clears
     /// the redo history (a fresh action invalidates any previously undone
-    /// branch).
+    /// branch). Re-fits the canvas to content afterward (see
+    /// `crate::layout::fit_canvas_to_content`) — centralized here rather
+    /// than in each `Command::apply`, so every mutation path (including
+    /// undo/redo below) keeps that invariant with no risk of a command
+    /// forgetting to maintain it itself.
     pub fn apply(&mut self, cmd: Box<dyn Command>, doc: &mut Document) {
         cmd.apply(doc);
+        crate::layout::fit_canvas_to_content(doc);
         self.done.push(cmd);
         self.undone.clear();
     }
@@ -43,6 +48,7 @@ impl UndoStack {
         match self.done.pop() {
             Some(cmd) => {
                 cmd.undo(doc);
+                crate::layout::fit_canvas_to_content(doc);
                 self.undone.push(cmd);
                 true
             }
@@ -54,6 +60,7 @@ impl UndoStack {
         match self.undone.pop() {
             Some(cmd) => {
                 cmd.apply(doc);
+                crate::layout::fit_canvas_to_content(doc);
                 self.done.push(cmd);
                 true
             }
@@ -435,6 +442,37 @@ mod tests {
 
         stack.redo(&mut doc);
         assert_eq!(doc.elements.len(), 3);
+    }
+
+    /// Regression test for a real bug report: importing a tall portrait
+    /// screenshot (e.g. a 1080x2424 phone screenshot) used to leave the
+    /// canvas at its 1080-tall default, cropping the bottom off. `UndoStack`
+    /// now re-fits the canvas to content after every mutation, so this
+    /// exercises the fix through the exact path the app actually uses —
+    /// `win.open`'s `AddScreenshots` via `undo_stack.apply` — not just
+    /// `fit_canvas_to_content` in isolation.
+    #[test]
+    fn importing_a_tall_portrait_screenshot_grows_the_canvas_to_fit() {
+        let mut doc = Document::new();
+        assert_eq!(doc.canvas.export_height, 1080); // the pre-fix default that used to crop
+
+        let portrait = ScreenshotElement::new(ImageSource::Path(PathBuf::from("phone.png")), 1080.0, 2424.0);
+        let margin = doc.layout.margin_px;
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(AddScreenshots { elements: vec![portrait] }), &mut doc);
+
+        assert_eq!(doc.canvas.export_width, (1080.0 + margin * 2.0) as u32);
+        assert_eq!(doc.canvas.export_height, (2424.0 + margin * 2.0) as u32);
+
+        // Undoing removes the last visible element, so `fit_canvas_to_content`
+        // is a no-op (by design — see its own doc comment) and the canvas
+        // stays at its last fitted size rather than jumping back to the
+        // pre-fix default.
+        let fitted = doc.canvas;
+        stack.undo(&mut doc);
+        assert!(doc.elements.is_empty());
+        assert_eq!(doc.canvas, fitted);
     }
 
     #[test]

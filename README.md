@@ -18,7 +18,8 @@ PNG, JPEG or WebP image.
   margin), or free — drag any screenshot anywhere on the canvas to
   position it (snapping into alignment with other screenshots and the
   canvas edges/center), and its corner handles to resize it
-  (aspect-locked by default).
+  (aspect-locked by default). The canvas always resizes to fit its
+  content automatically — nothing is ever cropped off.
 - **Reordering** by dragging screenshots directly on the canvas.
 - **Per-screenshot context menu**: duplicate, replace, delete, bring
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
@@ -28,8 +29,9 @@ PNG, JPEG or WebP image.
   rounded corners.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
 - **Undo/redo** for every edit.
-- **Export** to PNG, JPEG, WebP or AVIF at a freely chosen resolution,
-  rendered off the UI thread so the app never blocks.
+- **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target
+  width (height always following proportionally), rendered off the UI
+  thread so the app never blocks.
 - **Projects**: save/load as `.screenforge` files (versioned JSON,
   image references kept as paths — originals are never modified).
 

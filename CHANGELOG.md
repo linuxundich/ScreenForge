@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-02
+
+### Fixed
+
+- The canvas now always automatically resizes to fit its content — every
+  screenshot plus spacing and margin — instead of staying at a fixed
+  default size. Previously, a tall portrait screenshot (e.g. a phone's
+  1080×2424 screenshot) could get cropped at the bottom because the
+  canvas stayed at its 1920×1080 default regardless of what was imported.
+
+### Changed
+
+- Export size is now a single "Zielbreite" (target width): the
+  composition renders scaled so its width matches it, with height always
+  following proportionally — never distorted, never cropped. The old
+  independent width/height fields are gone; height is shown read-only.
+
 ## [0.9.0] - 2026-09-02
 
 ### Added

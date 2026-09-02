@@ -297,16 +297,40 @@ pub enum ExportFormat {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CanvasSettings {
+    /// The composition's native size in content pixels — always kept equal
+    /// to the current layout's actual extent (every visible element plus
+    /// spacing/margin) by [`crate::layout::fit_canvas_to_content`], called
+    /// after every undo-tracked mutation and on project load. Not
+    /// user-editable: there's deliberately no UI control bound to these
+    /// two fields directly, since editing them independently of the
+    /// content is exactly what used to let content get cropped off.
     pub export_width: u32,
     pub export_height: u32,
+    /// The user-facing export knob: renders the composition scaled so its
+    /// width equals this, height following proportionally so nothing is
+    /// ever stretched or cropped (`#[serde(default)]` so a project saved
+    /// before this field existed still loads, falling back to no scaling
+    /// relative to whatever `export_width` it carries).
+    #[serde(default = "default_export_target_width")]
+    pub export_target_width: u32,
     pub export_format: ExportFormat,
     /// `0..=100`, ignored for [`ExportFormat::Png`] (lossless).
     pub export_quality: u8,
 }
 
+fn default_export_target_width() -> u32 {
+    1920
+}
+
 impl Default for CanvasSettings {
     fn default() -> Self {
-        Self { export_width: 1920, export_height: 1080, export_format: ExportFormat::Png, export_quality: 90 }
+        Self {
+            export_width: 1920,
+            export_height: 1080,
+            export_target_width: default_export_target_width(),
+            export_format: ExportFormat::Png,
+            export_quality: 90,
+        }
     }
 }
 

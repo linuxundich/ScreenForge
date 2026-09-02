@@ -100,7 +100,7 @@ fn build_ui(app: &adw::Application) {
     let canvas = window.canvas();
 
     let state = Rc::new(RefCell::new(EditorState::new()));
-    refresh_canvas(&canvas, &state);
+    refresh_canvas(&window, &canvas, &state);
 
     register_open_action(app, &window, &canvas, &state);
     register_drop_target(&window, &canvas, &state);
@@ -123,8 +123,11 @@ fn build_ui(app: &adw::Application) {
 /// Builds a fresh `cairo::ImageSurface` per *currently referenced* image
 /// (decoding on demand via `image_cache`, so this also self-heals after
 /// undoing/redoing a "replace screenshot") and hands the result to the
-/// canvas widget.
-fn refresh_canvas(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+/// canvas widget. Also refreshes the export sidebar's read-only computed-
+/// height display, since `document.canvas` (the content-fitted native
+/// size — see `fit_canvas_to_content`) can change on essentially any edit,
+/// not just the ones that go through `sync_controls_from_document`.
+fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let mut state_ref = state.borrow_mut();
     let EditorState { document, image_cache, .. } = &mut *state_ref;
     let mut surfaces = HashMap::new();
@@ -139,7 +142,20 @@ fn refresh_canvas(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let background_image = background_image_path(&document.background)
         .and_then(|path| get_or_decode(image_cache, &path))
         .and_then(|image| import::surface_from_decoded(image).ok());
+    let canvas_settings = document.canvas;
     canvas.set_document(document.clone(), surfaces, background_image);
+    drop(state_ref);
+
+    update_export_height_display(window, canvas_settings);
+}
+
+/// The output height that results from scaling `canvas_settings`'s
+/// content-fitted native size to its target export width, shown read-only
+/// in the sidebar (see `export_height_row`'s `sensitive: false`).
+fn update_export_height_display(window: &Window, canvas_settings: screenforge_core::model::CanvasSettings) {
+    let scale = canvas_settings.export_target_width as f64 / canvas_settings.export_width.max(1) as f64;
+    let height = (canvas_settings.export_height as f64 * scale).round().max(1.0);
+    window.export_height_row().set_value(height);
 }
 
 /// The path to decode for `Background::Image`, if the background is that
@@ -173,7 +189,7 @@ fn import_paths(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState
     undo_stack.apply(Box::new(AddScreenshots { elements: new_elements }), document);
     drop(state_ref);
 
-    refresh_canvas(canvas, state);
+    refresh_canvas(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
 }
 
@@ -342,7 +358,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(command, document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -364,7 +380,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetSpacing { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -385,7 +401,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetMargin { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -517,7 +533,7 @@ fn apply_background_from_controls(window: &Window, canvas: &Canvas, state: &Rc<R
     let EditorState { document, undo_stack, .. } = &mut *state_ref;
     undo_stack.apply(Box::new(SetBackground { old, new }), document);
     drop(state_ref);
-    refresh_canvas(canvas, state);
+    refresh_canvas(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
 }
 
@@ -608,7 +624,7 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetShadowForAllElements { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -632,7 +648,7 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetCornerRadiusForAllElements { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -692,7 +708,7 @@ fn register_background_image_controls(window: &Window, canvas: &Canvas, state: &
                 undo_stack.apply(Box::new(SetBackground { old, new }), document);
                 drop(state_ref);
                 window.background_image_row().set_subtitle(&background_image_subtitle(&ImageSource::Path(path)));
-                refresh_canvas(&canvas, &state);
+                refresh_canvas(&window, &canvas, &state);
                 update_undo_redo_sensitivity(&window, &state);
             });
         }
@@ -719,7 +735,7 @@ fn register_background_image_controls(window: &Window, canvas: &Canvas, state: &
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetBackground { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -745,7 +761,7 @@ fn register_background_image_controls(window: &Window, canvas: &Canvas, state: &
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetBackground { old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -774,27 +790,33 @@ fn index_for_export_format(format: ExportFormat) -> u32 {
 /// the eventual export resolution/encoding), just a direct mutation.
 fn register_export_controls(window: &Window, state: &Rc<RefCell<EditorState>>) {
     let width_row = window.export_width_row();
-    let height_row = window.export_height_row();
     let format_row = window.export_format_row();
     let quality_row = window.export_quality_row();
 
     {
         let canvas_settings = state.borrow().document.canvas;
-        width_row.set_value(canvas_settings.export_width as f64);
-        height_row.set_value(canvas_settings.export_height as f64);
+        width_row.set_value(canvas_settings.export_target_width as f64);
         format_row.set_selected(index_for_export_format(canvas_settings.export_format));
         quality_row.set_value(canvas_settings.export_quality as f64);
+        update_export_height_display(window, canvas_settings);
     }
 
+    // `export_height_row` is read-only (see its `sensitive: false` in the
+    // template) — it only ever gets `set_value`d, by `update_export_height_display`,
+    // never a change handler of its own.
     width_row.connect_value_notify(glib::clone!(
+        #[weak]
+        window,
         #[strong]
         state,
-        move |row| state.borrow_mut().document.canvas.export_width = row.value() as u32
-    ));
-    height_row.connect_value_notify(glib::clone!(
-        #[strong]
-        state,
-        move |row| state.borrow_mut().document.canvas.export_height = row.value() as u32
+        move |row| {
+            let canvas_settings = {
+                let mut state_ref = state.borrow_mut();
+                state_ref.document.canvas.export_target_width = row.value() as u32;
+                state_ref.document.canvas
+            };
+            update_export_height_display(&window, canvas_settings);
+        }
     ));
     format_row.connect_selected_notify(glib::clone!(
         #[strong]
@@ -951,8 +973,8 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
         window.corner_radius_row().set_value(first.corner_radius.top_left);
     }
 
-    window.export_width_row().set_value(doc.canvas.export_width as f64);
-    window.export_height_row().set_value(doc.canvas.export_height as f64);
+    window.export_width_row().set_value(doc.canvas.export_target_width as f64);
+    update_export_height_display(window, doc.canvas);
     window.export_format_row().set_selected(index_for_export_format(doc.canvas.export_format));
     window.export_quality_row().set_value(doc.canvas.export_quality as f64);
 
@@ -1058,7 +1080,7 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
                             // previous document would be surprising.
                             state_ref.undo_stack = UndoStack::new();
                         }
-                        refresh_canvas(&canvas, &state);
+                        refresh_canvas(&window, &canvas, &state);
                         sync_controls_from_document(&window, &state);
                         update_undo_redo_sensitivity(&window, &state);
 
@@ -1112,7 +1134,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 let EditorState { document, undo_stack, .. } = &mut *state_ref;
                 undo_stack.undo(document);
             }
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             sync_controls_from_document(&window, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
@@ -1135,7 +1157,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 let EditorState { document, undo_stack, .. } = &mut *state_ref;
                 undo_stack.redo(document);
             }
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             sync_controls_from_document(&window, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
@@ -1210,7 +1232,7 @@ fn register_reorder(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorS
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(ReorderScreenshot { from, to }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1237,7 +1259,7 @@ fn register_move(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorStat
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1261,7 +1283,7 @@ fn register_resize(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorSt
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1326,7 +1348,7 @@ fn register_element_action<F>(
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(cmd, document);
             drop(state_ref);
-            refresh_canvas(&canvas, &state);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1397,7 +1419,7 @@ fn register_replace_action(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
                 let EditorState { document, undo_stack, .. } = &mut *state_ref;
                 undo_stack.apply(Box::new(cmd), document);
                 drop(state_ref);
-                refresh_canvas(&canvas, &state);
+                refresh_canvas(&window, &canvas, &state);
                 update_undo_redo_sensitivity(&window, &state);
             });
         }
@@ -1533,7 +1555,7 @@ fn register_paste_action(app: &adw::Application, window: &Window, canvas: &Canva
                 let EditorState { document, undo_stack, .. } = &mut *state_ref;
                 undo_stack.apply(Box::new(AddScreenshots { elements: vec![element] }), document);
                 drop(state_ref);
-                refresh_canvas(&canvas, &state);
+                refresh_canvas(&window, &canvas, &state);
                 update_undo_redo_sensitivity(&window, &state);
             });
         }

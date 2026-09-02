@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::model::{LayoutMode, ScreenshotElement};
+use crate::model::{Document, LayoutMode, ScreenshotElement};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Placement {
@@ -144,6 +144,26 @@ pub fn extent_for(placements: &[Placement], margin_px: f64) -> CanvasExtent {
     CanvasExtent { width, height }
 }
 
+/// Resizes `doc.canvas` to exactly fit the current layout's content —
+/// every visible element plus spacing/margin — so the canvas always
+/// follows the content instead of the other way around (a fixed canvas
+/// size used to let tall/portrait screenshots get cropped off). A no-op
+/// while there are no visible elements, so a brand-new or emptied project
+/// keeps a sensible starting size instead of collapsing to just the
+/// margin. Called after every undo-tracked mutation (see
+/// `command::UndoStack`) and on project load — never something the UI
+/// calls directly, since there's no user-facing control for it anymore.
+pub fn fit_canvas_to_content(doc: &mut Document) {
+    let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
+    if visible.is_empty() {
+        return;
+    }
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+    let extent = extent_for(&placements, doc.layout.margin_px);
+    doc.canvas.export_width = extent.width.round().max(1.0) as u32;
+    doc.canvas.export_height = extent.height.round().max(1.0) as u32;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +233,52 @@ mod tests {
         // margin + 400 + 20 + 400 + margin
         assert_eq!(extent.width, 48.0 + 400.0 + 20.0 + 400.0 + 48.0);
         assert_eq!(extent.height, 48.0 + 800.0 + 48.0);
+    }
+
+    #[test]
+    fn fit_canvas_to_content_matches_the_layouts_extent() {
+        use crate::model::Document;
+
+        let mut doc = Document::new();
+        doc.layout.spacing_px = 20.0;
+        doc.layout.margin_px = 48.0;
+        // A tall portrait screenshot (spec scenario: 1080x2424) — the bug
+        // this guards against is the canvas staying at a fixed 1920x1080
+        // and cropping content like this off at the bottom.
+        doc.elements = vec![fixture(1080.0, 2424.0)];
+
+        crate::layout::fit_canvas_to_content(&mut doc);
+
+        assert_eq!(doc.canvas.export_width, (1080.0 + 48.0 * 2.0) as u32);
+        assert_eq!(doc.canvas.export_height, (2424.0 + 48.0 * 2.0) as u32);
+    }
+
+    #[test]
+    fn fit_canvas_to_content_is_a_noop_for_an_empty_document() {
+        use crate::model::{CanvasSettings, Document};
+
+        let mut doc = Document::new();
+        let before = doc.canvas;
+        crate::layout::fit_canvas_to_content(&mut doc);
+        assert_eq!(doc.canvas, before);
+        assert_eq!(doc.canvas, CanvasSettings::default());
+    }
+
+    #[test]
+    fn fit_canvas_to_content_ignores_hidden_elements() {
+        use crate::model::Document;
+
+        let mut doc = Document::new();
+        doc.layout.margin_px = 10.0;
+        let mut hidden = fixture(2000.0, 2000.0);
+        hidden.visible = false;
+        let visible = fixture(100.0, 100.0);
+        doc.elements = vec![hidden, visible];
+
+        crate::layout::fit_canvas_to_content(&mut doc);
+
+        assert_eq!(doc.canvas.export_width, 120);
+        assert_eq!(doc.canvas.export_height, 120);
     }
 
     #[test]

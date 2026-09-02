@@ -265,7 +265,8 @@
                         <property name="title" translatable="yes">Export</property>
                         <child>
                           <object class="AdwSpinRow" id="export_width_row">
-                            <property name="title" translatable="yes">Breite</property>
+                            <property name="title" translatable="yes">Zielbreite</property>
+                            <property name="subtitle" translatable="yes">Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die Ausgabegröße skaliert</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
@@ -281,11 +282,13 @@
                         <child>
                           <object class="AdwSpinRow" id="export_height_row">
                             <property name="title" translatable="yes">Höhe</property>
+                            <property name="subtitle" translatable="yes">Automatisch, behält das Seitenverhältnis bei</property>
+                            <property name="sensitive">false</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
-                                <property name="lower">100</property>
-                                <property name="upper">8000</property>
+                                <property name="lower">1</property>
+                                <property name="upper">100000</property>
                                 <property name="step-increment">10</property>
                                 <property name="page-increment">100</property>
                                 <property name="value">1080</property>
