@@ -11,7 +11,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::layout::compute_layout;
-use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, VectorShape};
+use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, TextOverlay, VectorShape};
 
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -91,6 +91,33 @@ pub fn compose(
         ctx.restore()?;
     }
 
+    if doc.text_overlay.enabled && !doc.text_overlay.content.is_empty() {
+        draw_text_overlay(&ctx, &doc.text_overlay)?;
+    }
+
+    Ok(())
+}
+
+/// Draws the document's text caption on top of everything else. Uses
+/// Cairo's "toy" text API (no Pango dependency) — adequate for a short,
+/// single-style caption; `content.lines()` gives basic multi-line support.
+/// `text.y` is the top of the text block, not the baseline Cairo itself
+/// expects, so each line's `move_to` adds `font_size` to land the first
+/// line's baseline there.
+fn draw_text_overlay(ctx: &Context, text: &TextOverlay) -> Result<(), RenderError> {
+    ctx.save()?;
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    ctx.set_font_size(text.font_size);
+    let c = text.color;
+    ctx.set_source_rgba(c.r, c.g, c.b, c.a);
+
+    let line_height = text.font_size * 1.2;
+    for (i, line) in text.content.lines().enumerate() {
+        ctx.move_to(text.x, text.y + text.font_size + (i as f64) * line_height);
+        ctx.show_text(line)?;
+    }
+
+    ctx.restore()?;
     Ok(())
 }
 
@@ -675,5 +702,75 @@ mod tests {
         // shadow darkness bled into it.
         let just_outside = read_pixel(&mut target, 160, 100);
         assert!(just_outside.0 < 0.99, "expected blur to darken the background past the sharp edge, got {just_outside:?}");
+    }
+
+    fn text_test_doc(text_overlay: crate::model::TextOverlay) -> Document {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Solid(Rgba::WHITE);
+        doc.text_overlay = text_overlay;
+        doc
+    }
+
+    /// Any non-background pixel within the caption's expected bounding
+    /// area -- exact glyph shapes depend on the system's installed fonts,
+    /// so this only checks that *some* ink landed roughly where expected,
+    /// not a pixel-perfect match.
+    fn any_ink_in_region(target: &mut ImageSurface, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (r, g, b, a) = read_pixel(target, x, y);
+                if a > 0.0 && (r, g, b) != (1.0, 1.0, 1.0) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn disabled_text_overlay_draws_nothing() {
+        let text_overlay = crate::model::TextOverlay {
+            enabled: false,
+            content: "Hallo".to_string(),
+            x: 10.0,
+            y: 10.0,
+            font_size: 24.0,
+            color: Rgba::BLACK,
+        };
+        let doc = text_test_doc(text_overlay);
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "a disabled overlay should draw no ink at all");
+    }
+
+    #[test]
+    fn empty_content_draws_nothing_even_when_enabled() {
+        let text_overlay =
+            crate::model::TextOverlay { enabled: true, content: String::new(), x: 10.0, y: 10.0, font_size: 24.0, color: Rgba::BLACK };
+        let doc = text_test_doc(text_overlay);
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "empty content should draw no ink");
+    }
+
+    #[test]
+    fn enabled_text_overlay_draws_ink_near_its_position() {
+        let text_overlay = crate::model::TextOverlay {
+            enabled: true,
+            content: "Hallo".to_string(),
+            x: 10.0,
+            y: 10.0,
+            font_size: 24.0,
+            color: Rgba::BLACK,
+        };
+        let doc = text_test_doc(text_overlay);
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert!(any_ink_in_region(&mut target, 5, 5, 120, 45), "expected the caption's glyphs somewhere near (10, 10)");
+        assert!(!any_ink_in_region(&mut target, 0, 60, 200, 100), "far from the caption, the background should stay untouched");
     }
 }

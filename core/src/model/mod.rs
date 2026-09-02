@@ -194,6 +194,32 @@ impl Default for ShadowParams {
     }
 }
 
+/// A single text caption drawn over the whole composition (e.g. a title
+/// above the arranged screenshots) — one per document, not per element,
+/// mirroring how shadow/corner radius apply document-wide rather than
+/// needing per-element selection yet (spec §9/§27).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextOverlay {
+    pub enabled: bool,
+    pub content: String,
+    pub x: f64,
+    pub y: f64,
+    pub font_size: f64,
+    pub color: Rgba,
+}
+
+impl TextOverlay {
+    pub fn none() -> Self {
+        Self { enabled: false, content: String::new(), x: 48.0, y: 24.0, font_size: 32.0, color: Rgba::BLACK }
+    }
+}
+
+impl Default for TextOverlay {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 /// A single imported screenshot placed on the canvas.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotElement {
@@ -365,6 +391,8 @@ pub struct Document {
     pub layout: LayoutSettings,
     pub background: Background,
     pub canvas: CanvasSettings,
+    #[serde(default)]
+    pub text_overlay: TextOverlay,
 }
 
 impl Document {
@@ -375,6 +403,7 @@ impl Document {
             layout: LayoutSettings::default(),
             background: Background::default(),
             canvas: CanvasSettings::default(),
+            text_overlay: TextOverlay::default(),
         }
     }
 }

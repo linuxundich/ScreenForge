@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-02
+
+### Added
+
+- Text captions ("Text-Overlay"): an optional single-line or multi-line
+  caption drawn over the whole composition, with adjustable position,
+  font size and color. Rendered via Cairo's text API directly (no Pango
+  dependency), on top of every element, and fully undoable.
+
 ## [0.14.0] - 2026-09-02
 
 ### Added

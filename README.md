@@ -28,6 +28,8 @@ PNG, JPEG or WebP image.
   a vector pattern (dot grid or diagonal stripes) in a chosen color.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
+- **Text overlay**: an optional caption drawn over the whole composition,
+  with adjustable position, font size and color.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
 - **Undo/redo** for every edit.
 - **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target
@@ -81,8 +83,8 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: multi-select, freeform vector shapes (only
-the two background patterns above exist so far), and text decorations.
+history. Not yet implemented: multi-select, and freeform vector shapes (only
+the two background patterns above exist so far).
 
 ## License
 

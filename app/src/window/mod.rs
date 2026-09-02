@@ -96,6 +96,34 @@ impl Window {
         self.imp().corner_radius_row.get().clone()
     }
 
+    pub fn text_enabled_row(&self) -> adw::SwitchRow {
+        self.imp().text_enabled_row.get().clone()
+    }
+
+    pub fn text_content_row(&self) -> adw::EntryRow {
+        self.imp().text_content_row.get().clone()
+    }
+
+    pub fn text_x_row(&self) -> adw::SpinRow {
+        self.imp().text_x_row.get().clone()
+    }
+
+    pub fn text_y_row(&self) -> adw::SpinRow {
+        self.imp().text_y_row.get().clone()
+    }
+
+    pub fn text_font_size_row(&self) -> adw::SpinRow {
+        self.imp().text_font_size_row.get().clone()
+    }
+
+    pub fn text_color_row(&self) -> adw::ActionRow {
+        self.imp().text_color_row.get().clone()
+    }
+
+    pub fn text_color_button(&self) -> gtk4::ColorDialogButton {
+        self.imp().text_color_button.get().clone()
+    }
+
     pub fn export_width_row(&self) -> adw::SpinRow {
         self.imp().export_width_row.get().clone()
     }
@@ -174,6 +202,20 @@ mod imp {
         pub shadow_blur_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub corner_radius_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub text_enabled_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub text_content_row: TemplateChild<adw::EntryRow>,
+        #[template_child]
+        pub text_x_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub text_y_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub text_font_size_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub text_color_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub text_color_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
         pub export_width_row: TemplateChild<adw::SpinRow>,
         #[template_child]

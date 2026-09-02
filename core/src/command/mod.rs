@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, Transform};
+use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextOverlay, Transform};
 
 /// A single reversible mutation of a [`Document`]. Implementations should
 /// store enough state to invert themselves cheaply (e.g. the old and new
@@ -373,6 +373,23 @@ impl Command for SetCornerRadiusForAllElements {
         for (element, old) in doc.elements.iter_mut().zip(self.old.iter()) {
             element.corner_radius = *old;
         }
+    }
+}
+
+/// Sets the document-wide text caption (spec's "text decorations").
+#[derive(Debug)]
+pub struct SetTextOverlay {
+    pub old: TextOverlay,
+    pub new: TextOverlay,
+}
+
+impl Command for SetTextOverlay {
+    fn apply(&self, doc: &mut Document) {
+        doc.text_overlay = self.new.clone();
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.text_overlay = self.old.clone();
     }
 }
 

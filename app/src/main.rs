@@ -17,11 +17,11 @@ use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, ReorderScreenshot,
     ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing,
-    SetTransform, UndoStack,
+    SetTextOverlay, SetTransform, UndoStack,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
-    LayoutMode, Rgba, ScreenshotElement, ShadowParams,
+    LayoutMode, Rgba, ScreenshotElement, ShadowParams, TextOverlay,
 };
 use uuid::Uuid;
 
@@ -605,6 +605,12 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
     let shadow_distance_row = window.shadow_distance_row();
     let shadow_blur_row = window.shadow_blur_row();
     let corner_radius_row = window.corner_radius_row();
+    let text_enabled_row = window.text_enabled_row();
+    let text_content_row = window.text_content_row();
+    let text_x_row = window.text_x_row();
+    let text_y_row = window.text_y_row();
+    let text_font_size_row = window.text_font_size_row();
+    let text_color_button = window.text_color_button();
 
     {
         let state_ref = state.borrow();
@@ -617,6 +623,19 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         shadow_angle_row.set_sensitive(shadow_geometry_enabled);
         shadow_distance_row.set_sensitive(shadow_geometry_enabled);
         shadow_blur_row.set_sensitive(shadow_geometry_enabled);
+
+        let text_overlay = &state_ref.document.text_overlay;
+        text_enabled_row.set_active(text_overlay.enabled);
+        text_content_row.set_text(&text_overlay.content);
+        text_x_row.set_value(text_overlay.x);
+        text_y_row.set_value(text_overlay.y);
+        text_font_size_row.set_value(text_overlay.font_size);
+        text_color_button.set_rgba(&gdk_rgba_from(&text_overlay.color));
+        text_content_row.set_sensitive(text_overlay.enabled);
+        text_x_row.set_sensitive(text_overlay.enabled);
+        text_y_row.set_sensitive(text_overlay.enabled);
+        text_font_size_row.set_sensitive(text_overlay.enabled);
+        window.text_color_row().set_sensitive(text_overlay.enabled);
     }
 
     sync_background_controls(window, &state.borrow().document.background);
@@ -787,6 +806,78 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
+    ));
+
+    let apply_text_overlay = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move || {
+            let mut state_ref = state.borrow_mut();
+            if state_ref.syncing_controls {
+                return;
+            }
+            let new = TextOverlay {
+                enabled: window.text_enabled_row().is_active(),
+                content: window.text_content_row().text().to_string(),
+                x: window.text_x_row().value(),
+                y: window.text_y_row().value(),
+                font_size: window.text_font_size_row().value(),
+                color: rgba_from_gdk(&window.text_color_button().rgba()),
+            };
+            if state_ref.document.text_overlay == new {
+                return;
+            }
+            let old = state_ref.document.text_overlay.clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetTextOverlay { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+    text_enabled_row.connect_active_notify(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        apply_text_overlay,
+        move |row| {
+            let enabled = row.is_active();
+            window.text_content_row().set_sensitive(enabled);
+            window.text_x_row().set_sensitive(enabled);
+            window.text_y_row().set_sensitive(enabled);
+            window.text_font_size_row().set_sensitive(enabled);
+            window.text_color_row().set_sensitive(enabled);
+            apply_text_overlay();
+        }
+    ));
+    text_content_row.connect_changed(glib::clone!(
+        #[strong]
+        apply_text_overlay,
+        move |_| apply_text_overlay()
+    ));
+    text_x_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_text_overlay,
+        move |_| apply_text_overlay()
+    ));
+    text_y_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_text_overlay,
+        move |_| apply_text_overlay()
+    ));
+    text_font_size_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_text_overlay,
+        move |_| apply_text_overlay()
+    ));
+    text_color_button.connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply_text_overlay,
+        move |_| apply_text_overlay()
     ));
 }
 
@@ -1120,6 +1211,18 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
     update_export_height_display(window, doc.canvas);
     window.export_format_row().set_selected(index_for_export_format(doc.canvas.export_format));
     window.export_quality_row().set_value(doc.canvas.export_quality as f64);
+
+    window.text_enabled_row().set_active(doc.text_overlay.enabled);
+    window.text_content_row().set_text(&doc.text_overlay.content);
+    window.text_x_row().set_value(doc.text_overlay.x);
+    window.text_y_row().set_value(doc.text_overlay.y);
+    window.text_font_size_row().set_value(doc.text_overlay.font_size);
+    window.text_color_button().set_rgba(&gdk_rgba_from(&doc.text_overlay.color));
+    window.text_content_row().set_sensitive(doc.text_overlay.enabled);
+    window.text_x_row().set_sensitive(doc.text_overlay.enabled);
+    window.text_y_row().set_sensitive(doc.text_overlay.enabled);
+    window.text_font_size_row().set_sensitive(doc.text_overlay.enabled);
+    window.text_color_row().set_sensitive(doc.text_overlay.enabled);
 
     state.borrow_mut().syncing_controls = false;
 }
