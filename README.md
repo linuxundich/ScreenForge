@@ -34,6 +34,9 @@ PNG, JPEG or WebP image.
   thread so the app never blocks.
 - **Projects**: save/load as `.screenforge` files (versioned JSON,
   image references kept as paths — originals are never modified).
+- **Templates**: save a composition's style (layout, spacing/margin,
+  background, shadow, corner radius) as a `.screenforge-template` file
+  and reapply it to a different set of screenshots later.
 
 ScreenForge works entirely offline. Nothing is ever uploaded anywhere.
 
@@ -71,7 +74,7 @@ GUI toolkit and is unit-testable on its own:
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
 history. Not yet implemented: multi-select, text and vector decorations,
-reusable templates, and a preferences page.
+and a preferences page.
 
 ## License
 

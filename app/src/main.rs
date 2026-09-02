@@ -15,8 +15,9 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
-    AddScreenshots, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, ReorderScreenshot, ReplaceScreenshotSource,
-    SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
+    AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, ReorderScreenshot,
+    ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing,
+    SetTransform, UndoStack,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
@@ -109,6 +110,7 @@ fn build_ui(app: &adw::Application) {
     register_export_controls(&window, &state);
     register_export_action(app, &window, &state);
     register_project_actions(app, &window, &canvas, &state);
+    register_template_actions(&window, &canvas, &state);
     register_undo_redo_actions(app, &window, &canvas, &state);
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
@@ -1099,6 +1101,118 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
         }
     ));
     window.add_action(&open_project_action);
+}
+
+/// `win.save-template`/`win.load-template`: a template captures everything
+/// that makes a composition *look* the way it does (layout mode/spacing/
+/// margin, background, shadow, corner radius) separately from the
+/// screenshots themselves, so it can be reapplied to a different set of
+/// images later. Saving never touches `Document.elements`; loading applies
+/// the saved style as one undoable [`ApplyTemplate`], mirroring how
+/// project-loading resyncs the sidebar afterward.
+fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let save_action = gio::SimpleAction::new("save-template", None);
+    save_action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        state,
+        move |_, _| {
+            let window = window.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let filter = gtk4::FileFilter::new();
+                filter.add_pattern("*.screenforge-template");
+                filter.set_name(Some("ScreenForge-Vorlagen"));
+
+                let dialog = gtk4::FileDialog::builder()
+                    .title("Vorlage speichern unter")
+                    .accept_label("Speichern")
+                    .initial_name("vorlage.screenforge-template")
+                    .default_filter(&filter)
+                    .build();
+
+                let file = match dialog.save_future(Some(&window)).await {
+                    Ok(file) => file,
+                    Err(err) => {
+                        if !err.matches(gtk4::DialogError::Dismissed) {
+                            eprintln!("ScreenForge: save-template dialog failed: {err}");
+                        }
+                        return;
+                    }
+                };
+                let Some(path) = file.path() else { return };
+
+                let template = screenforge_core::template::Template::from_document(&state.borrow().document);
+                let toast = match screenforge_core::template::save(&template, &path) {
+                    Ok(()) => adw::Toast::new("Vorlage gespeichert"),
+                    Err(err) => adw::Toast::new(&format!("Vorlage konnte nicht gespeichert werden: {err}")),
+                };
+                window.toast_overlay().add_toast(toast);
+            });
+        }
+    ));
+    window.add_action(&save_action);
+
+    let load_action = gio::SimpleAction::new("load-template", None);
+    load_action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, _| {
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let filter = gtk4::FileFilter::new();
+                filter.add_pattern("*.screenforge-template");
+                filter.set_name(Some("ScreenForge-Vorlagen"));
+
+                let dialog = gtk4::FileDialog::builder()
+                    .title("Vorlage laden")
+                    .accept_label("Laden")
+                    .default_filter(&filter)
+                    .build();
+
+                let file = match dialog.open_future(Some(&window)).await {
+                    Ok(file) => file,
+                    Err(err) => {
+                        if !err.matches(gtk4::DialogError::Dismissed) {
+                            eprintln!("ScreenForge: load-template dialog failed: {err}");
+                        }
+                        return;
+                    }
+                };
+                let Some(path) = file.path() else { return };
+
+                let new = match screenforge_core::template::load(&path) {
+                    Ok(template) => template,
+                    Err(err) => {
+                        window.toast_overlay().add_toast(adw::Toast::new(&format!("Vorlage konnte nicht geladen werden: {err}")));
+                        return;
+                    }
+                };
+
+                {
+                    let mut state_ref = state.borrow_mut();
+                    let old_layout = state_ref.document.layout;
+                    let old_background = state_ref.document.background.clone();
+                    let old_shadows: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
+                    let old_corner_radii: Vec<CornerRadius> = state_ref.document.elements.iter().map(|e| e.corner_radius).collect();
+                    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+                    undo_stack.apply(Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, new }), document);
+                }
+                refresh_canvas(&window, &canvas, &state);
+                sync_controls_from_document(&window, &state);
+                update_undo_redo_sensitivity(&window, &state);
+                window.toast_overlay().add_toast(adw::Toast::new("Vorlage angewendet"));
+            });
+        }
+    ));
+    window.add_action(&load_action);
 }
 
 /// Reflects `undo_stack.can_undo()/can_redo()` onto the `win.undo`/`win.redo`

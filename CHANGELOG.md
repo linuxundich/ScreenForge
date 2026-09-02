@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-02
+
+### Added
+
+- Reusable templates: save a composition's style (layout mode/spacing/
+  margin, background, shadow, corner radius — everything except the
+  screenshots themselves) as a `.screenforge-template` file, and load it
+  back later to reapply that look to a different set of screenshots.
+  Reachable from the "Öffnen" menu ("Vorlage speichern unter…" /
+  "Vorlage laden…"). Applying a template is undoable, like every other
+  edit.
+
 ## [0.10.0] - 2026-09-02
 
 ### Fixed

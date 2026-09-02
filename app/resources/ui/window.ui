@@ -353,14 +353,26 @@
     </child>
   </template>
   <menu id="open_menu">
-    <item>
-      <attribute name="label" translatable="yes">Screenshots importieren…</attribute>
-      <attribute name="action">win.open</attribute>
-    </item>
-    <item>
-      <attribute name="label" translatable="yes">Projekt öffnen…</attribute>
-      <attribute name="action">win.open-project</attribute>
-    </item>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Screenshots importieren…</attribute>
+        <attribute name="action">win.open</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Projekt öffnen…</attribute>
+        <attribute name="action">win.open-project</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Vorlage laden…</attribute>
+        <attribute name="action">win.load-template</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Vorlage speichern unter…</attribute>
+        <attribute name="action">win.save-template</attribute>
+      </item>
+    </section>
   </menu>
   <menu id="zoom_menu">
     <item>

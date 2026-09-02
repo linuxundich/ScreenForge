@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, ScreenshotElement, ShadowParams, Transform};
+use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, Transform};
 
 /// A single reversible mutation of a [`Document`]. Implementations should
 /// store enough state to invert themselves cheaply (e.g. the old and new
@@ -376,6 +376,42 @@ impl Command for SetCornerRadiusForAllElements {
     }
 }
 
+/// Applies a saved [`crate::template::Template`] — layout mode/spacing/
+/// margin, background, and shadow/corner radius for every element — as one
+/// undoable step. `old_*` are the caller's job to capture beforehand, same
+/// as `SetShadowForAllElements`/`SetCornerRadiusForAllElements`, since a
+/// command shouldn't need to reach back into the stack that dispatched it
+/// to know what it's reverting to.
+#[derive(Debug)]
+pub struct ApplyTemplate {
+    pub old_layout: LayoutSettings,
+    pub old_background: Background,
+    pub old_shadows: Vec<ShadowParams>,
+    pub old_corner_radii: Vec<CornerRadius>,
+    pub new: crate::template::Template,
+}
+
+impl Command for ApplyTemplate {
+    fn apply(&self, doc: &mut Document) {
+        doc.layout = self.new.layout;
+        doc.background = self.new.background.clone();
+        for element in &mut doc.elements {
+            element.shadow = self.new.shadow;
+            element.corner_radius = self.new.corner_radius;
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.layout = self.old_layout;
+        doc.background = self.old_background.clone();
+        for ((element, shadow), corner_radius) in doc.elements.iter_mut().zip(self.old_shadows.iter()).zip(self.old_corner_radii.iter())
+        {
+            element.shadow = *shadow;
+            element.corner_radius = *corner_radius;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,5 +730,51 @@ mod tests {
 
         stack.undo(&mut doc);
         assert_eq!(doc.elements[0].corner_radius, CornerRadius::none());
+    }
+
+    #[test]
+    fn apply_template_updates_layout_background_and_every_elements_shadow_and_radius() {
+        use crate::model::{Background, LayoutMode, Rgba};
+        use crate::template::Template;
+
+        let mut doc = Document::new();
+        doc.elements = vec![
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0),
+            ScreenshotElement::new(ImageSource::Path(PathBuf::from("b.png")), 100.0, 200.0),
+        ];
+        let old_layout = doc.layout;
+        let old_background = doc.background.clone();
+        let old_shadows: Vec<ShadowParams> = doc.elements.iter().map(|e| e.shadow).collect();
+        let old_corner_radii: Vec<CornerRadius> = doc.elements.iter().map(|e| e.corner_radius).collect();
+
+        let template = Template {
+            layout: LayoutSettings { mode: LayoutMode::Grid, spacing_px: 5.0, margin_px: 10.0 },
+            background: Background::Solid(Rgba::new(1.0, 0.0, 0.0, 1.0)),
+            shadow: ShadowParams::strong(),
+            corner_radius: CornerRadius::uniform(8.0),
+        };
+
+        let mut stack = UndoStack::new();
+        stack.apply(
+            Box::new(ApplyTemplate {
+                old_layout,
+                old_background: old_background.clone(),
+                old_shadows,
+                old_corner_radii,
+                new: template.clone(),
+            }),
+            &mut doc,
+        );
+
+        assert_eq!(doc.layout, template.layout);
+        assert_eq!(doc.background, template.background);
+        assert!(doc.elements.iter().all(|e| e.shadow == ShadowParams::strong()));
+        assert!(doc.elements.iter().all(|e| e.corner_radius == CornerRadius::uniform(8.0)));
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.layout, old_layout);
+        assert_eq!(doc.background, old_background);
+        assert!(doc.elements.iter().all(|e| e.shadow == ShadowParams::none()));
+        assert!(doc.elements.iter().all(|e| e.corner_radius == CornerRadius::none()));
     }
 }
