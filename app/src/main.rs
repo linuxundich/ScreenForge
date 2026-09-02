@@ -601,7 +601,23 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
     let gradient_color2_button = window.gradient_color2_button();
     let gradient_angle_row = window.gradient_angle_row();
     let shadow_row = window.shadow_row();
+    let shadow_angle_row = window.shadow_angle_row();
+    let shadow_distance_row = window.shadow_distance_row();
+    let shadow_blur_row = window.shadow_blur_row();
     let corner_radius_row = window.corner_radius_row();
+
+    {
+        let state_ref = state.borrow();
+        let shadow_geometry_enabled = state_ref.document.elements.first().is_some_and(|e| e.shadow.enabled);
+        let (angle, distance) = state_ref.document.elements.first().map(|e| e.shadow.angle_and_distance()).unwrap_or((90.0, 6.0));
+        let blur = state_ref.document.elements.first().map(|e| e.shadow.blur).unwrap_or(16.0);
+        shadow_angle_row.set_value(angle);
+        shadow_distance_row.set_value(distance);
+        shadow_blur_row.set_value(blur);
+        shadow_angle_row.set_sensitive(shadow_geometry_enabled);
+        shadow_distance_row.set_sensitive(shadow_geometry_enabled);
+        shadow_blur_row.set_sensitive(shadow_geometry_enabled);
+    }
 
     sync_background_controls(window, &state.borrow().document.background);
 
@@ -677,6 +693,14 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |row| {
             let new = shadow_preset_for_index(row.selected());
+            let (angle, distance) = new.angle_and_distance();
+            window.shadow_angle_row().set_value(angle);
+            window.shadow_distance_row().set_value(distance);
+            window.shadow_blur_row().set_value(new.blur);
+            window.shadow_angle_row().set_sensitive(new.enabled);
+            window.shadow_distance_row().set_sensitive(new.enabled);
+            window.shadow_blur_row().set_sensitive(new.enabled);
+
             let mut state_ref = state.borrow_mut();
             // See the background-color handler above for why this guard
             // against a reentrant sync-triggered no-op is needed.
@@ -690,6 +714,55 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
+    ));
+
+    let apply_shadow_geometry = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move || {
+            let mut state_ref = state.borrow_mut();
+            if state_ref.syncing_controls {
+                return;
+            }
+            let angle = window.shadow_angle_row().value();
+            let distance = window.shadow_distance_row().value();
+            let blur = window.shadow_blur_row().value();
+            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(angle, distance);
+
+            let Some(first) = state_ref.document.elements.first() else { return };
+            let mut new = first.shadow;
+            new.offset_x = offset_x;
+            new.offset_y = offset_y;
+            new.blur = blur;
+            if state_ref.document.elements.iter().all(|e| e.shadow == new) {
+                return;
+            }
+            let old: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetShadowForAllElements { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+    shadow_angle_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_shadow_geometry,
+        move |_| apply_shadow_geometry()
+    ));
+    shadow_distance_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_shadow_geometry,
+        move |_| apply_shadow_geometry()
+    ));
+    shadow_blur_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_shadow_geometry,
+        move |_| apply_shadow_geometry()
     ));
 
     corner_radius_row.connect_value_notify(glib::clone!(
@@ -1033,6 +1106,13 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
             [ShadowParams::none(), ShadowParams::subtle(), ShadowParams::standard(), ShadowParams::strong(), ShadowParams::floating()];
         let index = presets.iter().position(|p| *p == first.shadow).unwrap_or(0) as u32;
         window.shadow_row().set_selected(index);
+        let (angle, distance) = first.shadow.angle_and_distance();
+        window.shadow_angle_row().set_value(angle);
+        window.shadow_distance_row().set_value(distance);
+        window.shadow_blur_row().set_value(first.shadow.blur);
+        window.shadow_angle_row().set_sensitive(first.shadow.enabled);
+        window.shadow_distance_row().set_sensitive(first.shadow.enabled);
+        window.shadow_blur_row().set_sensitive(first.shadow.enabled);
         window.corner_radius_row().set_value(first.corner_radius.top_left);
     }
 

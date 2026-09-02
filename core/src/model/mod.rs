@@ -166,6 +166,26 @@ impl ShadowParams {
     pub const fn floating() -> Self {
         Self { enabled: true, offset_x: 0.0, offset_y: 24.0, blur: 40.0, opacity: 0.3, color: Rgba::BLACK }
     }
+
+    /// This shadow's direction and distance, derived from `offset_x`/
+    /// `offset_y` — the polar form the sidebar's "Schatten-Winkel"/
+    /// "Schatten-Distanz" controls edit, since a direction+length is a
+    /// more direct match for "cast a shadow this way, this far" than
+    /// raw x/y. Angle is in degrees, 0..360, using the same
+    /// clockwise-from-positive-x convention as `GradientKind::Linear`'s
+    /// angle (0° points right, 90° points down).
+    pub fn angle_and_distance(&self) -> (f64, f64) {
+        let distance = self.offset_x.hypot(self.offset_y);
+        let angle = self.offset_y.atan2(self.offset_x).to_degrees();
+        (if angle < 0.0 { angle + 360.0 } else { angle }, distance)
+    }
+
+    /// The inverse of `angle_and_distance`: the `(offset_x, offset_y)`
+    /// pair for a given direction (degrees) and distance (pixels).
+    pub fn offset_for_angle_and_distance(angle_deg: f64, distance: f64) -> (f64, f64) {
+        let rad = angle_deg.to_radians();
+        (distance * rad.cos(), distance * rad.sin())
+    }
 }
 
 impl Default for ShadowParams {
@@ -428,5 +448,49 @@ mod tests {
         let resized = original.resized_from_corner(Corner::BottomRight, 40.0, 9999.0);
         assert_eq!(resized.width, 240.0);
         assert_eq!(resized.height, 120.0);
+    }
+
+    #[test]
+    fn shadow_angle_and_distance_matches_known_offsets() {
+        // 0° points right (+x), 90° points down (+y) -- same convention as
+        // GradientKind::Linear's angle.
+        let mut shadow = ShadowParams::none();
+        shadow.offset_x = 10.0;
+        shadow.offset_y = 0.0;
+        assert_eq!(shadow.angle_and_distance(), (0.0, 10.0));
+
+        shadow.offset_x = 0.0;
+        shadow.offset_y = 10.0;
+        assert_eq!(shadow.angle_and_distance(), (90.0, 10.0));
+
+        shadow.offset_x = -10.0;
+        shadow.offset_y = 0.0;
+        assert_eq!(shadow.angle_and_distance(), (180.0, 10.0));
+
+        // atan2 alone would give a negative angle here -- confirms the
+        // 0..360 normalization.
+        shadow.offset_x = 0.0;
+        shadow.offset_y = -10.0;
+        assert_eq!(shadow.angle_and_distance(), (270.0, 10.0));
+    }
+
+    #[test]
+    fn shadow_offset_for_angle_and_distance_round_trips() {
+        for (angle, distance) in [(0.0, 12.0), (45.0, 20.0), (90.0, 6.0), (200.0, 50.0), (359.0, 8.0)] {
+            let (x, y) = ShadowParams::offset_for_angle_and_distance(angle, distance);
+            let mut shadow = ShadowParams::none();
+            shadow.offset_x = x;
+            shadow.offset_y = y;
+            let (round_tripped_angle, round_tripped_distance) = shadow.angle_and_distance();
+            assert!((round_tripped_angle - angle).abs() < 1e-9, "angle: {round_tripped_angle} vs {angle}");
+            assert!((round_tripped_distance - distance).abs() < 1e-9, "distance: {round_tripped_distance} vs {distance}");
+        }
+    }
+
+    #[test]
+    fn shadow_zero_distance_has_no_particular_angle_but_does_not_panic() {
+        let shadow = ShadowParams::none();
+        let (_, distance) = shadow.angle_and_distance();
+        assert_eq!(distance, 0.0);
     }
 }

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-02
+
+### Added
+
+- Adjustable shadow direction and length: the "Schatten-Winkel" (0–360°)
+  and "Schatten-Distanz" controls replace the fixed offsets baked into
+  each shadow preset, exposed as an intuitive angle/distance pair over
+  the existing Cartesian offset model.
+- Adjustable shadow blur ("Weichzeichner"): a box-blur approximation of
+  a Gaussian blur (three passes, horizontal+vertical sliding window),
+  applied to the shadow shape before compositing, replacing the
+  previously hard-edged shadow.
+- Selecting a shadow preset still sets sensible starting values for all
+  three controls, but they're now freely adjustable afterwards and
+  fully undoable like every other edit.
+
 ## [0.13.0] - 2026-09-02
 
 ### Added

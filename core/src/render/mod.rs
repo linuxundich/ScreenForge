@@ -11,12 +11,14 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::layout::compute_layout;
-use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, VectorShape};
+use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, VectorShape};
 
 #[derive(Debug, Error)]
 pub enum RenderError {
     #[error("cairo error: {0}")]
     Cairo(#[from] cairo::Error),
+    #[error("could not read shadow pixels for blurring: {0}")]
+    Borrow(#[from] cairo::BorrowError),
     #[error("missing decoded image for element {0}")]
     MissingImage(Uuid),
     #[error("missing decoded background image")]
@@ -63,13 +65,7 @@ pub fn compose(
         ctx.translate(-placement.width / 2.0, -placement.height / 2.0);
 
         if el.shadow.enabled {
-            ctx.save()?;
-            ctx.translate(el.shadow.offset_x, el.shadow.offset_y);
-            rounded_rect_path(&ctx, 0.0, 0.0, placement.width, placement.height, &el.corner_radius);
-            let c = el.shadow.color;
-            ctx.set_source_rgba(c.r, c.g, c.b, c.a * el.shadow.opacity);
-            ctx.fill()?;
-            ctx.restore()?;
+            draw_shadow(&ctx, placement.width, placement.height, &el.corner_radius, &el.shadow)?;
         }
 
         rounded_rect_path(&ctx, 0.0, 0.0, placement.width, placement.height, &el.corner_radius);
@@ -95,6 +91,49 @@ pub fn compose(
         ctx.restore()?;
     }
 
+    Ok(())
+}
+
+/// Draws one element's shadow: a rounded rect matching the element's own
+/// shape, offset by `shadow.offset_x`/`offset_y` and optionally blurred by
+/// `shadow.blur` pixels. Cairo has no native blur filter, so this renders
+/// the *unshifted* shape onto a separate, padded offscreen surface, blurs
+/// that surface's raw pixels in place, then composites it onto `ctx` at
+/// the offset — blurring in the shape's own unshifted space and only then
+/// translating gives the same result as blurring an already-offset shape,
+/// since translation commutes with convolution, and it means the surface
+/// only needs padding for the blur spread, not however far the offset is.
+fn draw_shadow(ctx: &Context, width: f64, height: f64, corner_radius: &CornerRadius, shadow: &ShadowParams) -> Result<(), RenderError> {
+    // Three box-blur passes each spread roughly `blur` pixels further, so
+    // padding by 3x (plus a small margin) comfortably keeps the blurred
+    // edge from ever reaching the surface's own boundary.
+    let pad = (shadow.blur.max(0.0) * 3.0 + 4.0).ceil() as i32;
+    let surface_w = width.ceil() as i32 + 2 * pad;
+    let surface_h = height.ceil() as i32 + 2 * pad;
+    if surface_w <= 0 || surface_h <= 0 {
+        return Ok(());
+    }
+
+    let mut shadow_surface = cairo::ImageSurface::create(cairo::Format::ARgb32, surface_w, surface_h)?;
+    {
+        let shadow_ctx = Context::new(&shadow_surface)?;
+        shadow_ctx.translate(pad as f64, pad as f64);
+        rounded_rect_path(&shadow_ctx, 0.0, 0.0, width, height, corner_radius);
+        let c = shadow.color;
+        shadow_ctx.set_source_rgba(c.r, c.g, c.b, c.a * shadow.opacity);
+        shadow_ctx.fill()?;
+    }
+
+    if shadow.blur > 0.0 {
+        let stride = shadow_surface.stride();
+        let mut data = shadow_surface.data()?;
+        crate::blur::box_blur(&mut data, surface_w, surface_h, stride, shadow.blur);
+    }
+
+    ctx.save()?;
+    ctx.set_source_surface(&shadow_surface, shadow.offset_x - pad as f64, shadow.offset_y - pad as f64)?;
+    ctx.paint()?;
+    ctx.restore()?;
     Ok(())
 }
 
@@ -557,5 +596,84 @@ mod tests {
 
         assert_close(read_pixel(&mut target, 20, 20), (1.0, 0.0, 0.0, 1.0));
         assert_close(read_pixel(&mut target, 80, 80), (0.0, 1.0, 0.0, 1.0));
+    }
+
+    fn shadow_test_doc(shadow: ShadowParams) -> (Document, uuid::Uuid) {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
+        doc.background = Background::Solid(Rgba::WHITE);
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+
+        let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
+        el.shadow = shadow;
+        let id = el.id;
+        doc.elements = vec![el];
+        (doc, id)
+    }
+
+    #[test]
+    fn shadow_offset_moves_it_away_from_the_element() {
+        let shadow = ShadowParams {
+            enabled: true,
+            offset_x: 20.0,
+            offset_y: 20.0,
+            blur: 0.0,
+            opacity: 1.0,
+            color: Rgba::new(0.0, 0.0, 0.0, 1.0),
+        };
+        let (doc, id) = shadow_test_doc(shadow);
+        let mut resolved = HashMap::new();
+        resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
+
+        // Element at [50,150)x[50,150), shadow shifted by (20, 20) to
+        // [70,170)x[70,170). (160, 160) is inside the shadow but past the
+        // element's own edge, so only the shadow (black) shows there.
+        assert_close(read_pixel(&mut target, 160, 160), (0.0, 0.0, 0.0, 1.0));
+        // The element itself still draws on top of its own shadow.
+        assert_close(read_pixel(&mut target, 100, 100), (0.0, 1.0, 0.0, 1.0));
+        // Clearly outside both, the white background is untouched.
+        assert_close(read_pixel(&mut target, 190, 190), (1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn shadow_without_blur_has_a_sharp_edge() {
+        let shadow =
+            ShadowParams { enabled: true, offset_x: 0.0, offset_y: 0.0, blur: 0.0, opacity: 1.0, color: Rgba::new(0.0, 0.0, 0.0, 1.0) };
+        let (doc, id) = shadow_test_doc(shadow);
+        let mut resolved = HashMap::new();
+        resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
+
+        // Element/shadow both at [50,150)x[50,150) (zero offset) -- just
+        // past the shared edge, the unblurred shadow leaves pure background.
+        assert_close(read_pixel(&mut target, 160, 100), (1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn shadow_blur_softens_and_extends_beyond_the_sharp_edge() {
+        let shadow = ShadowParams {
+            enabled: true,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            blur: 15.0,
+            opacity: 1.0,
+            color: Rgba::new(0.0, 0.0, 0.0, 1.0),
+        };
+        let (doc, id) = shadow_test_doc(shadow);
+        let mut resolved = HashMap::new();
+        resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
+
+        // Same point that stayed pure white with no blur now has some
+        // shadow darkness bled into it.
+        let just_outside = read_pixel(&mut target, 160, 100);
+        assert!(just_outside.0 < 0.99, "expected blur to darken the background past the sharp edge, got {just_outside:?}");
     }
 }

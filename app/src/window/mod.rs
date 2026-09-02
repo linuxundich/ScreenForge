@@ -80,6 +80,18 @@ impl Window {
         self.imp().shadow_row.get().clone()
     }
 
+    pub fn shadow_angle_row(&self) -> adw::SpinRow {
+        self.imp().shadow_angle_row.get().clone()
+    }
+
+    pub fn shadow_distance_row(&self) -> adw::SpinRow {
+        self.imp().shadow_distance_row.get().clone()
+    }
+
+    pub fn shadow_blur_row(&self) -> adw::SpinRow {
+        self.imp().shadow_blur_row.get().clone()
+    }
+
     pub fn corner_radius_row(&self) -> adw::SpinRow {
         self.imp().corner_radius_row.get().clone()
     }
@@ -154,6 +166,12 @@ mod imp {
         pub background_decoration_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub shadow_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub shadow_angle_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub shadow_distance_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub shadow_blur_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub corner_radius_row: TemplateChild<adw::SpinRow>,
         #[template_child]

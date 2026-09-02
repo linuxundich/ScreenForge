@@ -26,8 +26,8 @@ PNG, JPEG or WebP image.
 - **Backgrounds**: solid color, linear gradient, radial gradient, an
   image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), or
   a vector pattern (dot grid or diagonal stripes) in a chosen color.
-- **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) and
-  rounded corners.
+- **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
+  freely adjustable direction, length and blur, and rounded corners.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
 - **Undo/redo** for every edit.
 - **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target

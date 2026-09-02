@@ -265,6 +265,54 @@
                           </object>
                         </child>
                         <child>
+                          <object class="AdwSpinRow" id="shadow_angle_row">
+                            <property name="title" translatable="yes">Schatten-Winkel</property>
+                            <property name="subtitle" translatable="yes">Richtung des Schattenwurfs, in Grad</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">360</property>
+                                <property name="step-increment">5</property>
+                                <property name="page-increment">45</property>
+                                <property name="value">90</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="shadow_distance_row">
+                            <property name="title" translatable="yes">Schatten-Distanz</property>
+                            <property name="subtitle" translatable="yes">Länge des Schattenwurfs, in Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">300</property>
+                                <property name="step-increment">2</property>
+                                <property name="page-increment">20</property>
+                                <property name="value">6</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="shadow_blur_row">
+                            <property name="title" translatable="yes">Weichzeichner</property>
+                            <property name="subtitle" translatable="yes">Unschärfe des Schattens, in Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">150</property>
+                                <property name="step-increment">2</property>
+                                <property name="page-increment">10</property>
+                                <property name="value">16</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
                           <object class="AdwSpinRow" id="corner_radius_row">
                             <property name="title" translatable="yes">Eckenradius</property>
                             <property name="subtitle" translatable="yes">In Pixeln</property>
