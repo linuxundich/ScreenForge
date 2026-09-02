@@ -123,6 +123,7 @@
                                 <items>
                                   <item translatable="yes">Einfarbig</item>
                                   <item translatable="yes">Linearer Verlauf</item>
+                                  <item translatable="yes">Radialer Verlauf</item>
                                 </items>
                               </object>
                             </property>

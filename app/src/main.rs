@@ -374,9 +374,10 @@ fn sync_background_controls(window: &Window, background: &Background) {
             window.gradient_angle_row().set_visible(false);
         }
         Background::Gradient(spec) => {
-            window.background_type_row().set_selected(1);
+            let is_radial = matches!(spec.kind, GradientKind::Radial { .. });
+            window.background_type_row().set_selected(if is_radial { 2 } else { 1 });
             window.gradient_color2_row().set_visible(true);
-            window.gradient_angle_row().set_visible(true);
+            window.gradient_angle_row().set_visible(!is_radial);
             if let Some((_, color)) = spec.stops.first() {
                 window.background_color_button().set_rgba(&gdk_rgba_from(color));
             }
@@ -406,12 +407,23 @@ fn rgba_from_gdk(c: &gdk::RGBA) -> Rgba {
 /// the `Background` they currently describe.
 fn background_from_controls(window: &Window) -> Background {
     let color1 = rgba_from_gdk(&window.background_color_button().rgba());
-    if window.background_type_row().selected() == 1 {
-        let color2 = rgba_from_gdk(&window.gradient_color2_button().rgba());
-        let angle_deg = window.gradient_angle_row().value();
-        Background::Gradient(GradientSpec { kind: GradientKind::Linear { angle_deg }, stops: vec![(0.0, color1), (1.0, color2)] })
-    } else {
-        Background::Solid(color1)
+    match window.background_type_row().selected() {
+        1 => {
+            let color2 = rgba_from_gdk(&window.gradient_color2_button().rgba());
+            let angle_deg = window.gradient_angle_row().value();
+            Background::Gradient(GradientSpec { kind: GradientKind::Linear { angle_deg }, stops: vec![(0.0, color1), (1.0, color2)] })
+        }
+        2 => {
+            let color2 = rgba_from_gdk(&window.gradient_color2_button().rgba());
+            // No manual center control yet — radial gradients are centered
+            // on the composition (spec §8 leaves per-element/background
+            // positioning controls for later).
+            Background::Gradient(GradientSpec {
+                kind: GradientKind::Radial { center_x: 0.5, center_y: 0.5 },
+                stops: vec![(0.0, color1), (1.0, color2)],
+            })
+        }
+        _ => Background::Solid(color1),
     }
 }
 
@@ -458,9 +470,9 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         #[strong]
         state,
         move |row| {
-            let is_gradient = row.selected() == 1;
-            window.gradient_color2_row().set_visible(is_gradient);
-            window.gradient_angle_row().set_visible(is_gradient);
+            let selected = row.selected();
+            window.gradient_color2_row().set_visible(selected == 1 || selected == 2);
+            window.gradient_angle_row().set_visible(selected == 1);
             apply_background_from_controls(&window, &canvas, &state);
         }
     ));
