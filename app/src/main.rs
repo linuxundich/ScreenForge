@@ -19,8 +19,8 @@ use screenforge_core::command::{
     SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
 };
 use screenforge_core::model::{
-    Background, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement,
-    ShadowParams,
+    Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
+    LayoutMode, Rgba, ScreenshotElement, ShadowParams,
 };
 use uuid::Uuid;
 
@@ -134,7 +134,18 @@ fn refresh_canvas(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
             }
         }
     }
-    canvas.set_document(document.clone(), surfaces);
+    let background_image = background_image_path(&document.background)
+        .and_then(|path| get_or_decode(image_cache, &path))
+        .and_then(|image| import::surface_from_decoded(image).ok());
+    canvas.set_document(document.clone(), surfaces, background_image);
+}
+
+/// The path to decode for `Background::Image`, if the background is that
+/// variant and its source is (as always today) a plain file path.
+fn background_image_path(background: &Background) -> Option<PathBuf> {
+    let Background::Image(spec) = background else { return None };
+    let ImageSource::Path(path) = &spec.source else { return None };
+    Some(path.clone())
 }
 
 /// Decodes every path and appends the successful ones to `state` as one
@@ -366,18 +377,21 @@ fn shadow_preset_for_index(index: u32) -> ShadowParams {
 /// Reflects a `Background` value onto the type/color1/color2/angle controls
 /// (used for both the initial sync and after undo/redo/load).
 fn sync_background_controls(window: &Window, background: &Background) {
+    window.background_color1_row().set_visible(!matches!(background, Background::Image(_)));
+    window.gradient_color2_row().set_visible(matches!(background, Background::Gradient(_)));
+    window.gradient_angle_row().set_visible(matches!(background, Background::Gradient(spec) if matches!(spec.kind, GradientKind::Linear { .. })));
+    window.background_image_row().set_visible(matches!(background, Background::Image(_)));
+    window.background_image_fit_row().set_visible(matches!(background, Background::Image(_)));
+    window.background_image_opacity_row().set_visible(matches!(background, Background::Image(_)));
+
     match background {
         Background::Solid(color) => {
             window.background_type_row().set_selected(0);
             window.background_color_button().set_rgba(&gdk_rgba_from(color));
-            window.gradient_color2_row().set_visible(false);
-            window.gradient_angle_row().set_visible(false);
         }
         Background::Gradient(spec) => {
             let is_radial = matches!(spec.kind, GradientKind::Radial { .. });
             window.background_type_row().set_selected(if is_radial { 2 } else { 1 });
-            window.gradient_color2_row().set_visible(true);
-            window.gradient_angle_row().set_visible(!is_radial);
             if let Some((_, color)) = spec.stops.first() {
                 window.background_color_button().set_rgba(&gdk_rgba_from(color));
             }
@@ -388,10 +402,43 @@ fn sync_background_controls(window: &Window, background: &Background) {
                 window.gradient_angle_row().set_value(angle_deg);
             }
         }
-        Background::Image(_) | Background::Decoration(_) => {
-            // Not settable via this UI yet (spec §8 stubs) — leave controls
+        Background::Image(spec) => {
+            window.background_type_row().set_selected(3);
+            window.background_image_row().set_subtitle(&background_image_subtitle(&spec.source));
+            window.background_image_fit_row().set_selected(index_for_background_image_fit(spec.fit));
+            window.background_image_opacity_row().set_value(spec.opacity * 100.0);
+        }
+        Background::Decoration(_) => {
+            // Not settable via this UI yet (spec §8 stub) — leave controls
             // as they are rather than guessing a representative value.
         }
+    }
+}
+
+/// Display text for the "Bilddatei" row's subtitle: the file name, or a
+/// placeholder if the source isn't (as always today) a plain path.
+fn background_image_subtitle(source: &ImageSource) -> String {
+    match source {
+        ImageSource::Path(path) => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        ImageSource::Embedded { filename, .. } => filename.clone(),
+    }
+}
+
+fn background_image_fit_for_index(index: u32) -> BackgroundImageFit {
+    match index {
+        0 => BackgroundImageFit::Cover,
+        1 => BackgroundImageFit::Contain,
+        2 => BackgroundImageFit::Fill,
+        _ => BackgroundImageFit::Tile,
+    }
+}
+
+fn index_for_background_image_fit(fit: BackgroundImageFit) -> u32 {
+    match fit {
+        BackgroundImageFit::Cover => 0,
+        BackgroundImageFit::Contain => 1,
+        BackgroundImageFit::Fill => 2,
+        BackgroundImageFit::Tile => 3,
     }
 }
 
@@ -471,9 +518,18 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |row| {
             let selected = row.selected();
+            window.background_color1_row().set_visible(selected != 3);
             window.gradient_color2_row().set_visible(selected == 1 || selected == 2);
             window.gradient_angle_row().set_visible(selected == 1);
-            apply_background_from_controls(&window, &canvas, &state);
+            window.background_image_row().set_visible(selected == 3);
+            window.background_image_fit_row().set_visible(selected == 3);
+            window.background_image_opacity_row().set_visible(selected == 3);
+            // Selecting "Bild" only reveals the file picker — there's
+            // nothing to render until a file is actually chosen (below), so
+            // this doesn't push a command yet.
+            if selected != 3 {
+                apply_background_from_controls(&window, &canvas, &state);
+            }
         }
     ));
     background_color_button.connect_rgba_notify(glib::clone!(
@@ -503,6 +559,8 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |_| apply_background_from_controls(&window, &canvas, &state)
     ));
+
+    register_background_image_controls(window, canvas, state);
 
     shadow_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -546,6 +604,119 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             let old: Vec<CornerRadius> = state_ref.document.elements.iter().map(|e| e.corner_radius).collect();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetCornerRadiusForAllElements { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// Wires the "Bild" background's file picker, fit mode and opacity
+/// controls (spec §8). Picking a file is the only action that actually
+/// turns the background into `Background::Image` — selecting "Bild" in the
+/// type row alone just reveals these controls, since there's nothing to
+/// render without a file yet.
+fn register_background_image_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let button = window.background_image_button();
+    let fit_row = window.background_image_fit_row();
+    let opacity_row = window.background_image_opacity_row();
+
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| {
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let filter = gtk4::FileFilter::new();
+                filter.add_mime_type("image/png");
+                filter.add_mime_type("image/jpeg");
+                filter.add_mime_type("image/webp");
+                filter.set_name(Some("Bilder"));
+
+                let dialog =
+                    gtk4::FileDialog::builder().title("Hintergrundbild wählen").accept_label("Wählen").default_filter(&filter).build();
+
+                let file = match dialog.open_future(Some(&window)).await {
+                    Ok(file) => file,
+                    Err(err) => {
+                        if !err.matches(gtk4::DialogError::Dismissed) {
+                            eprintln!("ScreenForge: background image dialog failed: {err}");
+                        }
+                        return;
+                    }
+                };
+                let Some(path) = file.path() else { return };
+
+                let mut state_ref = state.borrow_mut();
+                if get_or_decode(&mut state_ref.image_cache, &path).is_none() {
+                    return;
+                }
+                let fit = background_image_fit_for_index(window.background_image_fit_row().selected());
+                let opacity = window.background_image_opacity_row().value() / 100.0;
+                let old = state_ref.document.background.clone();
+                let new = Background::Image(ImageBackgroundSpec { source: ImageSource::Path(path.clone()), fit, opacity });
+                let EditorState { document, undo_stack, .. } = &mut *state_ref;
+                undo_stack.apply(Box::new(SetBackground { old, new }), document);
+                drop(state_ref);
+                window.background_image_row().set_subtitle(&background_image_subtitle(&ImageSource::Path(path)));
+                refresh_canvas(&canvas, &state);
+                update_undo_redo_sensitivity(&window, &state);
+            });
+        }
+    ));
+
+    fit_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |row| {
+            let mut state_ref = state.borrow_mut();
+            let Background::Image(spec) = &state_ref.document.background else { return };
+            let new_fit = background_image_fit_for_index(row.selected());
+            if state_ref.syncing_controls || spec.fit == new_fit {
+                return;
+            }
+            let old = state_ref.document.background.clone();
+            let mut new_spec = spec.clone();
+            new_spec.fit = new_fit;
+            let new = Background::Image(new_spec);
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetBackground { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    opacity_row.connect_value_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |row| {
+            let mut state_ref = state.borrow_mut();
+            let Background::Image(spec) = &state_ref.document.background else { return };
+            let new_opacity = row.value() / 100.0;
+            if state_ref.syncing_controls || (spec.opacity - new_opacity).abs() < f64::EPSILON {
+                return;
+            }
+            let old = state_ref.document.background.clone();
+            let mut new_spec = spec.clone();
+            new_spec.opacity = new_opacity;
+            let new = Background::Image(new_spec);
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetBackground { old, new }), document);
             drop(state_ref);
             refresh_canvas(&canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
@@ -657,19 +828,25 @@ fn register_export_action(app: &adw::Application, window: &Window, state: &Rc<Re
                 export_button.set_sensitive(false);
 
                 let doc = state.borrow().document.clone();
-                let decoded_images = {
+                let (decoded_images, background_image) = {
                     let mut state_ref = state.borrow_mut();
                     let EditorState { document, image_cache, .. } = &mut *state_ref;
-                    document
+                    let decoded_images = document
                         .elements
                         .iter()
                         .filter_map(|el| {
                             let ImageSource::Path(path) = &el.source else { return None };
                             get_or_decode(image_cache, path).map(|image| (el.id, image.clone()))
                         })
-                        .collect::<HashMap<_, _>>()
+                        .collect::<HashMap<_, _>>();
+                    let background_image = background_image_path(&document.background)
+                        .and_then(|path| get_or_decode(image_cache, &path))
+                        .cloned();
+                    (decoded_images, background_image)
                 };
-                let result = gio::spawn_blocking(move || export::render_and_write(&doc, &decoded_images, &path)).await;
+                let result =
+                    gio::spawn_blocking(move || export::render_and_write(&doc, &decoded_images, background_image.as_ref(), &path))
+                        .await;
 
                 export_button.set_sensitive(true);
                 let toast = match result {

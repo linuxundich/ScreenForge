@@ -37,15 +37,23 @@ pub enum ExportError {
 /// its configured format. Intended to run off the main thread — takes only
 /// `Send` types (see [`DecodedImage`]) and builds every `cairo::ImageSurface`
 /// it needs internally, so none has to be shared with the caller's thread.
-pub fn render_and_write(doc: &Document, decoded_images: &HashMap<Uuid, DecodedImage>, path: &Path) -> Result<(), ExportError> {
+/// `background_image` is only consulted when `doc.background` is
+/// `Background::Image`.
+pub fn render_and_write(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+    path: &Path,
+) -> Result<(), ExportError> {
     let surfaces: HashMap<Uuid, cairo::ImageSurface> = decoded_images
         .iter()
         .map(|(id, image)| Ok((*id, import::surface_from_decoded(image)?)))
         .collect::<Result<_, import::ImportError>>()?;
+    let background_surface = background_image.map(import::surface_from_decoded).transpose()?;
 
     let mut target =
         cairo::ImageSurface::create(cairo::Format::ARgb32, doc.canvas.export_width as i32, doc.canvas.export_height as i32)?;
-    screenforge_core::render::compose(doc, &target, 1.0, &surfaces)?;
+    screenforge_core::render::compose(doc, &target, 1.0, &surfaces, background_surface.as_ref())?;
 
     match doc.canvas.export_format {
         ExportFormat::Png => {
@@ -122,7 +130,7 @@ mod tests {
             doc.canvas.export_format = format;
 
             let path = std::env::temp_dir().join(format!("screenforge-export-test-{format:?}.bin"));
-            render_and_write(&doc, &HashMap::new(), &path).unwrap_or_else(|err| panic!("{format:?} export failed: {err}"));
+            render_and_write(&doc, &HashMap::new(), None, &path).unwrap_or_else(|err| panic!("{format:?} export failed: {err}"));
 
             let bytes = std::fs::read(&path).unwrap();
             assert!(!bytes.is_empty(), "{format:?} export wrote an empty file");

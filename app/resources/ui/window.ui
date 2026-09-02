@@ -124,13 +124,14 @@
                                   <item translatable="yes">Einfarbig</item>
                                   <item translatable="yes">Linearer Verlauf</item>
                                   <item translatable="yes">Radialer Verlauf</item>
+                                  <item translatable="yes">Bild</item>
                                 </items>
                               </object>
                             </property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwActionRow">
+                          <object class="AdwActionRow" id="background_color1_row">
                             <property name="title" translatable="yes">Farbe 1</property>
                             <child type="suffix">
                               <object class="GtkColorDialogButton" id="background_color_button">
@@ -169,6 +170,52 @@
                                 <property name="step-increment">15</property>
                                 <property name="page-increment">45</property>
                                 <property name="value">90</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="background_image_row">
+                            <property name="title" translatable="yes">Bilddatei</property>
+                            <property name="subtitle" translatable="yes">Kein Bild ausgewählt</property>
+                            <property name="visible">false</property>
+                            <child type="suffix">
+                              <object class="GtkButton" id="background_image_button">
+                                <property name="valign">center</property>
+                                <property name="label" translatable="yes">Wählen…</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwComboRow" id="background_image_fit_row">
+                            <property name="title" translatable="yes">Passung</property>
+                            <property name="visible">false</property>
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Ausfüllen (zuschneiden)</item>
+                                  <item translatable="yes">Einpassen</item>
+                                  <item translatable="yes">Strecken</item>
+                                  <item translatable="yes">Kacheln</item>
+                                </items>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="background_image_opacity_row">
+                            <property name="title" translatable="yes">Deckkraft</property>
+                            <property name="subtitle" translatable="yes">In Prozent</property>
+                            <property name="visible">false</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">100</property>
+                                <property name="step-increment">5</property>
+                                <property name="page-increment">20</property>
+                                <property name="value">100</property>
                               </object>
                             </property>
                           </object>

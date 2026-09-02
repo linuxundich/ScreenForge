@@ -11,7 +11,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::layout::compute_layout;
-use crate::model::{Background, CornerRadius, Document, GradientKind, ScreenshotElement};
+use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement};
 
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -19,6 +19,8 @@ pub enum RenderError {
     Cairo(#[from] cairo::Error),
     #[error("missing decoded image for element {0}")]
     MissingImage(Uuid),
+    #[error("missing decoded background image")]
+    MissingBackgroundImage,
 }
 
 /// Renders `doc` onto `target`, at `scale` (1.0 = document pixels map 1:1 to
@@ -26,12 +28,15 @@ pub enum RenderError {
 /// full-resolution export of the same document). `resolved_images` must
 /// contain a decoded [`cairo::ImageSurface`] for every visible element,
 /// keyed by element id — decoding is the app layer's job, this function
-/// only composites already-decoded pixels.
+/// only composites already-decoded pixels. `background_image` is likewise a
+/// pre-decoded surface, needed only when `doc.background` is
+/// [`Background::Image`].
 pub fn compose(
     doc: &Document,
     target: &cairo::ImageSurface,
     scale: f64,
     resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
+    background_image: Option<&cairo::ImageSurface>,
 ) -> Result<(), RenderError> {
     let ctx = Context::new(target)?;
     ctx.scale(scale, scale);
@@ -41,6 +46,7 @@ pub fn compose(
         &doc.background,
         doc.canvas.export_width as f64,
         doc.canvas.export_height as f64,
+        background_image,
     )?;
 
     let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
@@ -92,7 +98,13 @@ pub fn compose(
     Ok(())
 }
 
-fn draw_background(ctx: &Context, background: &Background, width: f64, height: f64) -> Result<(), RenderError> {
+fn draw_background(
+    ctx: &Context,
+    background: &Background,
+    width: f64,
+    height: f64,
+    background_image: Option<&cairo::ImageSurface>,
+) -> Result<(), RenderError> {
     match background {
         Background::Solid(color) => {
             ctx.set_source_rgba(color.r, color.g, color.b, color.a);
@@ -127,7 +139,40 @@ fn draw_background(ctx: &Context, background: &Background, width: f64, height: f
                 }
             }
         }
-        Background::Image(_) => todo!("image backgrounds are not implemented yet"),
+        Background::Image(spec) => {
+            let image = background_image.ok_or(RenderError::MissingBackgroundImage)?;
+            let (img_w, img_h) = (image.width() as f64, image.height() as f64);
+            if img_w > 0.0 && img_h > 0.0 {
+                ctx.save()?;
+                ctx.rectangle(0.0, 0.0, width, height);
+                ctx.clip();
+                match spec.fit {
+                    BackgroundImageFit::Cover => {
+                        let s = (width / img_w).max(height / img_h);
+                        ctx.translate((width - img_w * s) / 2.0, (height - img_h * s) / 2.0);
+                        ctx.scale(s, s);
+                        ctx.set_source_surface(image, 0.0, 0.0)?;
+                    }
+                    BackgroundImageFit::Contain => {
+                        let s = (width / img_w).min(height / img_h);
+                        ctx.translate((width - img_w * s) / 2.0, (height - img_h * s) / 2.0);
+                        ctx.scale(s, s);
+                        ctx.set_source_surface(image, 0.0, 0.0)?;
+                    }
+                    BackgroundImageFit::Fill => {
+                        ctx.scale(width / img_w, height / img_h);
+                        ctx.set_source_surface(image, 0.0, 0.0)?;
+                    }
+                    BackgroundImageFit::Tile => {
+                        let pattern = cairo::SurfacePattern::create(image);
+                        pattern.set_extend(cairo::Extend::Repeat);
+                        ctx.set_source(&pattern)?;
+                    }
+                }
+                ctx.paint_with_alpha(spec.opacity)?;
+                ctx.restore()?;
+            }
+        }
         Background::Decoration(_) => todo!("vector decoration backgrounds are not implemented yet"),
     }
     Ok(())
@@ -202,7 +247,7 @@ mod tests {
         doc.background = Background::Solid(Rgba::new(0.2, 0.4, 0.6, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
 
         assert_close(read_pixel(&mut target, 5, 5), (0.2, 0.4, 0.6, 1.0));
         assert_close(read_pixel(&mut target, 195, 95), (0.2, 0.4, 0.6, 1.0));
@@ -218,7 +263,7 @@ mod tests {
         });
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
 
         let left = read_pixel(&mut target, 2, 50);
         let right = read_pixel(&mut target, 197, 50);
@@ -243,7 +288,7 @@ mod tests {
         resolved.insert(blue_id, solid_surface(100, 160, Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 300, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
 
         // First element: x in [20, 120), y in [20, 180).
         assert_close(read_pixel(&mut target, 60, 100), (1.0, 0.0, 0.0, 1.0));
@@ -259,7 +304,7 @@ mod tests {
         doc.elements = vec![ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0)];
         let target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
 
-        let err = compose(&doc, &target, 1.0, &HashMap::new()).unwrap_err();
+        let err = compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap_err();
         assert!(matches!(err, RenderError::MissingImage(_)));
     }
 
@@ -279,7 +324,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 0.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
 
         // The very corner pixel is outside the rounded-rect clip, so the
         // white canvas background should show through.
@@ -318,7 +363,7 @@ mod tests {
         resolved.insert(id, split_surface(100, 100, Rgba::new(1.0, 0.0, 0.0, 1.0), Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
 
         // Unflipped this would be red-left/blue-right; flipped it's reversed.
         assert_close(read_pixel(&mut target, 10, 50), (0.0, 0.0, 1.0, 1.0));
@@ -339,9 +384,99 @@ mod tests {
         resolved.insert(id, split_surface(100, 100, Rgba::new(1.0, 0.0, 0.0, 1.0), Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None).unwrap();
 
         assert_close(read_pixel(&mut target, 10, 50), (1.0, 0.0, 0.0, 1.0));
         assert_close(read_pixel(&mut target, 90, 50), (0.0, 0.0, 1.0, 1.0));
+    }
+
+    fn image_background(fit: crate::model::BackgroundImageFit, opacity: f64) -> Background {
+        Background::Image(crate::model::ImageBackgroundSpec {
+            source: ImageSource::Path(PathBuf::from("bg.png")),
+            fit,
+            opacity,
+        })
+    }
+
+    #[test]
+    fn image_background_without_a_decoded_surface_is_an_error() {
+        let mut doc = Document::new();
+        doc.background = image_background(crate::model::BackgroundImageFit::Cover, 1.0);
+        let target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+
+        let err = compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap_err();
+        assert!(matches!(err, RenderError::MissingBackgroundImage));
+    }
+
+    #[test]
+    fn cover_scales_up_to_fill_the_canvas_with_no_gaps() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = image_background(crate::model::BackgroundImageFit::Cover, 1.0);
+        let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
+
+        // A wider-than-tall image under "cover" scales until height matches,
+        // overflowing left/right — every corner should be fully painted.
+        assert_close(read_pixel(&mut target, 1, 1), (0.0, 1.0, 0.0, 1.0));
+        assert_close(read_pixel(&mut target, 98, 98), (0.0, 1.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn contain_leaves_letterbox_gaps_transparent() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = image_background(crate::model::BackgroundImageFit::Contain, 1.0);
+        let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
+
+        // Scaled to 100x50, centered: covers y in [25, 75), leaves top/bottom empty.
+        assert_close(read_pixel(&mut target, 50, 50), (0.0, 1.0, 0.0, 1.0));
+        assert_close(read_pixel(&mut target, 50, 5), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn fill_stretches_to_the_canvas_exactly() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = image_background(crate::model::BackgroundImageFit::Fill, 1.0);
+        let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
+
+        assert_close(read_pixel(&mut target, 1, 1), (0.0, 1.0, 0.0, 1.0));
+        assert_close(read_pixel(&mut target, 98, 98), (0.0, 1.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn tile_repeats_the_image_across_the_canvas() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = image_background(crate::model::BackgroundImageFit::Tile, 1.0);
+        let bg = solid_surface(10, 10, Rgba::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
+
+        assert_close(read_pixel(&mut target, 5, 5), (0.0, 1.0, 0.0, 1.0));
+        assert_close(read_pixel(&mut target, 95, 95), (0.0, 1.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn opacity_is_applied_to_the_background_image() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = image_background(crate::model::BackgroundImageFit::Fill, 0.5);
+        let bg = solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
+
+        assert_close(read_pixel(&mut target, 50, 50), (0.0, 1.0, 0.0, 0.5));
     }
 }

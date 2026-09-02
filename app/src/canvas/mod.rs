@@ -26,9 +26,15 @@ impl Canvas {
 
     /// Replaces the document and its decoded images, and forces a re-render
     /// on the next `snapshot()` regardless of whether the widget size
-    /// changed.
-    pub fn set_document(&self, document: Document, resolved_images: HashMap<Uuid, gtk4::cairo::ImageSurface>) {
-        self.imp().set_document(document, resolved_images);
+    /// changed. `background_image` is only consulted when the document's
+    /// background is `Background::Image`.
+    pub fn set_document(
+        &self,
+        document: Document,
+        resolved_images: HashMap<Uuid, gtk4::cairo::ImageSurface>,
+        background_image: Option<gtk4::cairo::ImageSurface>,
+    ) {
+        self.imp().set_document(document, resolved_images, background_image);
         self.queue_draw();
     }
 
@@ -99,6 +105,7 @@ mod imp {
     pub struct Canvas {
         document: RefCell<Document>,
         resolved_images: RefCell<HashMap<Uuid, cairo::ImageSurface>>,
+        background_image: RefCell<Option<cairo::ImageSurface>>,
         /// The last rendered composition, cached so `snapshot()` doesn't
         /// re-run `compose()` on every frame — only when content changes or
         /// the widget is resized (which changes the "fit to window" scale).
@@ -133,6 +140,7 @@ mod imp {
             Self {
                 document: RefCell::new(Document::new()),
                 resolved_images: RefCell::new(HashMap::new()),
+                background_image: RefCell::new(None),
                 cached: RefCell::new(None),
                 content_dirty: Cell::new(true),
                 drag_active: Cell::new(false),
@@ -274,9 +282,15 @@ mod imp {
     }
 
     impl Canvas {
-        pub fn set_document(&self, document: Document, resolved_images: HashMap<Uuid, cairo::ImageSurface>) {
+        pub fn set_document(
+            &self,
+            document: Document,
+            resolved_images: HashMap<Uuid, cairo::ImageSurface>,
+            background_image: Option<cairo::ImageSurface>,
+        ) {
             *self.document.borrow_mut() = document;
             *self.resolved_images.borrow_mut() = resolved_images;
+            *self.background_image.borrow_mut() = background_image;
             self.content_dirty.set(true);
         }
 
@@ -339,10 +353,12 @@ mod imp {
                 return;
             };
             let resolved = self.resolved_images.borrow();
-            if let Err(err) = screenforge_core::render::compose(&doc, &surface, scale, &resolved) {
+            let background_image = self.background_image.borrow();
+            if let Err(err) = screenforge_core::render::compose(&doc, &surface, scale, &resolved, background_image.as_ref()) {
                 eprintln!("ScreenForge: render error: {err}");
                 return;
             }
+            drop(background_image);
             drop(resolved);
 
             let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();

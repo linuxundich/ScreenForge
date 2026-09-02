@@ -18,7 +18,8 @@ PNG, JPEG or WebP image.
 - **Reordering** by dragging screenshots directly on the canvas.
 - **Per-screenshot context menu**: duplicate, replace, delete, bring
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
-- **Backgrounds**: solid color, linear gradient, or radial gradient.
+- **Backgrounds**: solid color, linear gradient, radial gradient, or an
+  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity).
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) and
   rounded corners.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
@@ -64,8 +65,8 @@ GUI toolkit and is unit-testable on its own:
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
 history. Not yet implemented: snap guides, free (manual) positioning,
-text and vector decorations, reusable templates, image backgrounds,
-per-element manual size/position controls, and a preferences page.
+text and vector decorations, reusable templates, per-element manual
+size/position controls, and a preferences page.
 
 ## License
 

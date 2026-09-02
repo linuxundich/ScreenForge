@@ -36,6 +36,10 @@ impl Window {
         self.imp().background_type_row.get().clone()
     }
 
+    pub fn background_color1_row(&self) -> adw::ActionRow {
+        self.imp().background_color1_row.get().clone()
+    }
+
     pub fn background_color_button(&self) -> gtk4::ColorDialogButton {
         self.imp().background_color_button.get().clone()
     }
@@ -50,6 +54,22 @@ impl Window {
 
     pub fn gradient_angle_row(&self) -> adw::SpinRow {
         self.imp().gradient_angle_row.get().clone()
+    }
+
+    pub fn background_image_row(&self) -> adw::ActionRow {
+        self.imp().background_image_row.get().clone()
+    }
+
+    pub fn background_image_button(&self) -> gtk4::Button {
+        self.imp().background_image_button.get().clone()
+    }
+
+    pub fn background_image_fit_row(&self) -> adw::ComboRow {
+        self.imp().background_image_fit_row.get().clone()
+    }
+
+    pub fn background_image_opacity_row(&self) -> adw::SpinRow {
+        self.imp().background_image_opacity_row.get().clone()
     }
 
     pub fn shadow_row(&self) -> adw::ComboRow {
@@ -109,6 +129,8 @@ mod imp {
         #[template_child]
         pub background_type_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub background_color1_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
         pub background_color_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
         pub gradient_color2_row: TemplateChild<adw::ActionRow>,
@@ -116,6 +138,14 @@ mod imp {
         pub gradient_color2_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
         pub gradient_angle_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub background_image_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub background_image_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub background_image_fit_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub background_image_opacity_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub shadow_row: TemplateChild<adw::ComboRow>,
         #[template_child]

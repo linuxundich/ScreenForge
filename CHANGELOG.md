@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-02
+
+### Added
+
+- Image backgrounds (spec §8): pick a file as the composition's
+  background, with Cover/Contain/Fill/Tile fitting and an opacity slider,
+  alongside solid and gradient backgrounds. Undoable, and rendered
+  identically in the live preview and the export.
+
 ## [0.5.0] - 2026-09-02
 
 ### Added
