@@ -16,10 +16,11 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddScreenshots, Command, DuplicateScreenshot, RemoveScreenshot, ReorderScreenshot, ReplaceScreenshotSource, SetBackground,
-    SetCornerRadiusForAllElements, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
+    SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
 };
 use screenforge_core::model::{
-    Background, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageSource, Rgba, ScreenshotElement, ShadowParams,
+    Background, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement,
+    ShadowParams,
 };
 use uuid::Uuid;
 
@@ -253,18 +254,60 @@ fn register_drop_target(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edi
     canvas.add_controller(target);
 }
 
-/// Wires the sidebar's spacing/margin rows to `Document.layout`, mutating it
-/// directly through the undo stack (spec §17: spacing/margin changes are
+fn layout_mode_for_index(index: u32) -> LayoutMode {
+    match index {
+        0 => LayoutMode::Horizontal,
+        1 => LayoutMode::Vertical,
+        _ => LayoutMode::Grid,
+    }
+}
+
+fn index_for_layout_mode(mode: LayoutMode) -> u32 {
+    match mode {
+        LayoutMode::Horizontal => 0,
+        LayoutMode::Vertical => 1,
+        LayoutMode::Grid => 2,
+        // "Free" positioning has no UI entry yet; fall back to Horizontal's slot.
+        LayoutMode::Free => 0,
+    }
+}
+
+/// Wires the sidebar's layout-mode/spacing/margin rows to `Document.layout`,
+/// mutating it directly through the undo stack (spec §17: layout changes are
 /// undoable).
 fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let layout_mode_row = window.layout_mode_row();
     let spacing_row = window.spacing_row();
     let margin_row = window.margin_row();
 
     {
         let state_ref = state.borrow();
+        layout_mode_row.set_selected(index_for_layout_mode(state_ref.document.layout.mode));
         spacing_row.set_value(state_ref.document.layout.spacing_px);
         margin_row.set_value(state_ref.document.layout.margin_px);
     }
+
+    layout_mode_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |row| {
+            let new = layout_mode_for_index(row.selected());
+            let mut state_ref = state.borrow_mut();
+            let old = state_ref.document.layout.mode;
+            if state_ref.syncing_controls || old == new {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetLayoutMode { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
 
     spacing_row.connect_value_notify(glib::clone!(
         #[weak]
@@ -675,6 +718,7 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
 
     let doc = state.borrow().document.clone();
 
+    window.layout_mode_row().set_selected(index_for_layout_mode(doc.layout.mode));
     window.spacing_row().set_value(doc.layout.spacing_px);
     window.margin_row().set_value(doc.layout.margin_px);
 
@@ -1101,6 +1145,15 @@ fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Ed
     let popover = gtk4::PopoverMenu::from_model(Some(&menu_model));
     popover.set_has_arrow(false);
     popover.set_parent(canvas);
+
+    // A popped-up popover's own native surface can otherwise still be
+    // attached when the window tears down, which trips GTK's "finalizing
+    // widget but it still has children left" diagnostic on quit.
+    window.connect_destroy(glib::clone!(
+        #[weak]
+        popover,
+        move |_| popover.unparent()
+    ));
 
     canvas.connect_context_menu(glib::clone!(
         #[strong]

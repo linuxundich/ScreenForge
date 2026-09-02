@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-02
+
+### Added
+
+- Vertical and grid layout modes, alongside the existing horizontal one,
+  selectable from a new "Art" row in the Layout section of the sidebar
+  (spec §4). Vertical stacks screenshots top-to-bottom scaled to a common
+  width; grid arranges them into a roughly square, row-scaled grid.
+  Switching modes is undoable, like every other edit.
+
+### Fixed
+
+- A `GtkPopoverMenu` used for the per-screenshot context menu could still
+  be attached to its parent widget when the window closed, producing a
+  harmless but noisy "finalizing widget but it still has children left"
+  warning on quit. It's now explicitly unparented on window destroy.
+
 ## [0.2.0] - 2026-09-01
 
 ### Added

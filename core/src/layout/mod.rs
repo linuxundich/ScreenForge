@@ -31,10 +31,60 @@ pub fn compute_layout(
 ) -> Vec<Placement> {
     match mode {
         LayoutMode::Horizontal => compute_horizontal_layout(elements, spacing_px, margin_px),
-        LayoutMode::Vertical | LayoutMode::Grid | LayoutMode::Free => {
-            todo!("layout mode {mode:?} is not implemented yet")
-        }
+        LayoutMode::Vertical => compute_vertical_layout(elements, spacing_px, margin_px),
+        LayoutMode::Grid => compute_grid_layout(elements, spacing_px, margin_px),
+        LayoutMode::Free => todo!("free positioning (manual per-element placement) is not implemented yet"),
     }
+}
+
+/// Scales every element to a common width (the smallest natural width in
+/// the set), stacks them top-to-bottom with `spacing_px` gaps starting at
+/// `margin_px` — the vertical mirror of [`compute_horizontal_layout`].
+pub fn compute_vertical_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_px: f64) -> Vec<Placement> {
+    if elements.is_empty() {
+        return Vec::new();
+    }
+
+    let target_width = elements.iter().map(|el| el.natural_width).fold(f64::INFINITY, f64::min);
+
+    let mut y = margin_px;
+    let mut placements = Vec::with_capacity(elements.len());
+    for el in elements {
+        let scale = if el.natural_width > 0.0 { target_width / el.natural_width } else { 1.0 };
+        let height = el.natural_height * scale;
+        placements.push(Placement { element_id: el.id, x: margin_px, y, width: target_width, height });
+        y += height + spacing_px;
+    }
+    placements
+}
+
+/// Arranges elements into a roughly square grid (`ceil(sqrt(n))` columns),
+/// scaling every element to one common height — the same scaling rule as
+/// [`compute_horizontal_layout`], just wrapped into rows — so columns don't
+/// necessarily align edge-to-edge when aspect ratios differ, but every row
+/// has uniform height.
+pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_px: f64) -> Vec<Placement> {
+    if elements.is_empty() {
+        return Vec::new();
+    }
+
+    let columns = (elements.len() as f64).sqrt().ceil() as usize;
+    let target_height = elements.iter().map(|el| el.natural_height).fold(f64::INFINITY, f64::min);
+
+    let mut x = margin_px;
+    let mut y = margin_px;
+    let mut placements = Vec::with_capacity(elements.len());
+    for (i, el) in elements.iter().enumerate() {
+        if i > 0 && i % columns == 0 {
+            x = margin_px;
+            y += target_height + spacing_px;
+        }
+        let scale = if el.natural_height > 0.0 { target_height / el.natural_height } else { 1.0 };
+        let width = el.natural_width * scale;
+        placements.push(Placement { element_id: el.id, x, y, width, height: target_height });
+        x += width + spacing_px;
+    }
+    placements
 }
 
 /// Scales every element to a common height (the smallest natural height in
@@ -148,8 +198,65 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn vertical_mode_is_not_yet_implemented() {
+    fn free_mode_is_not_yet_implemented() {
         let elements = [fixture(400.0, 800.0)];
-        compute_layout(LayoutMode::Vertical, &elements, 0.0, 0.0);
+        compute_layout(LayoutMode::Free, &elements, 0.0, 0.0);
+    }
+
+    #[test]
+    fn vertical_layout_stacks_top_to_bottom_scaled_to_common_width() {
+        // 400x800 (aspect 2.0) and 200x300 (aspect 1.5) -> common width 200.
+        let elements = [fixture(400.0, 800.0), fixture(200.0, 300.0)];
+        let placements = compute_vertical_layout(&elements, 10.0, 5.0);
+
+        assert_eq!(placements[0].x, 5.0);
+        assert_eq!(placements[0].y, 5.0);
+        assert_eq!(placements[0].width, 200.0);
+        // 800 * (200/400) = 400
+        assert_eq!(placements[0].height, 400.0);
+
+        assert_eq!(placements[1].x, 5.0);
+        // previous y (5) + previous height (400) + spacing (10)
+        assert_eq!(placements[1].y, 415.0);
+        assert_eq!(placements[1].width, 200.0);
+        assert_eq!(placements[1].height, 300.0);
+    }
+
+    #[test]
+    fn vertical_layout_of_empty_input_is_empty() {
+        assert_eq!(compute_vertical_layout(&[], 10.0, 5.0), Vec::new());
+    }
+
+    #[test]
+    fn grid_layout_wraps_after_ceil_sqrt_n_columns() {
+        // 4 elements -> ceil(sqrt(4)) = 2 columns, 2 rows.
+        let elements =
+            [fixture(100.0, 100.0), fixture(100.0, 100.0), fixture(100.0, 100.0), fixture(100.0, 100.0)];
+        let placements = compute_grid_layout(&elements, 10.0, 0.0);
+
+        assert_eq!(placements[0].x, 0.0);
+        assert_eq!(placements[0].y, 0.0);
+        assert_eq!(placements[1].x, 110.0);
+        assert_eq!(placements[1].y, 0.0);
+        // wraps to a new row after 2 elements
+        assert_eq!(placements[2].x, 0.0);
+        assert_eq!(placements[2].y, 110.0);
+        assert_eq!(placements[3].x, 110.0);
+        assert_eq!(placements[3].y, 110.0);
+    }
+
+    #[test]
+    fn grid_layout_scales_each_row_to_a_common_height() {
+        let elements = [fixture(100.0, 100.0), fixture(50.0, 50.0), fixture(100.0, 100.0)];
+        // ceil(sqrt(3)) = 2 columns.
+        let placements = compute_grid_layout(&elements, 0.0, 0.0);
+        for p in &placements {
+            assert_eq!(p.height, 50.0);
+        }
+    }
+
+    #[test]
+    fn grid_layout_of_empty_input_is_empty() {
+        assert_eq!(compute_grid_layout(&[], 10.0, 5.0), Vec::new());
     }
 }

@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use crate::model::{Background, CornerRadius, Document, ImageSource, ScreenshotElement, ShadowParams, Transform};
+use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, ScreenshotElement, ShadowParams, Transform};
 
 /// A single reversible mutation of a [`Document`]. Implementations should
 /// store enough state to invert themselves cheaply (e.g. the old and new
@@ -252,6 +252,22 @@ impl Command for SetMargin {
 
     fn undo(&self, doc: &mut Document) {
         doc.layout.margin_px = self.old;
+    }
+}
+
+#[derive(Debug)]
+pub struct SetLayoutMode {
+    pub old: LayoutMode,
+    pub new: LayoutMode,
+}
+
+impl Command for SetLayoutMode {
+    fn apply(&self, doc: &mut Document) {
+        doc.layout.mode = self.new;
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.layout.mode = self.old;
     }
 }
 
@@ -515,6 +531,19 @@ mod tests {
         stack.undo(&mut doc);
         assert_eq!(doc.elements[0].source, ImageSource::Path(PathBuf::from("old.png")));
         assert_eq!(doc.elements[0].natural_width, 100.0);
+    }
+
+    #[test]
+    fn set_layout_mode_round_trips() {
+        let mut doc = Document::new();
+        assert_eq!(doc.layout.mode, LayoutMode::Horizontal);
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(SetLayoutMode { old: LayoutMode::Horizontal, new: LayoutMode::Grid }), &mut doc);
+        assert_eq!(doc.layout.mode, LayoutMode::Grid);
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.layout.mode, LayoutMode::Horizontal);
     }
 
     #[test]

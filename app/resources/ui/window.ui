@@ -65,6 +65,20 @@
                       <object class="AdwPreferencesGroup">
                         <property name="title" translatable="yes">Layout</property>
                         <child>
+                          <object class="AdwComboRow" id="layout_mode_row">
+                            <property name="title" translatable="yes">Art</property>
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Horizontal</item>
+                                  <item translatable="yes">Vertikal</item>
+                                  <item translatable="yes">Raster</item>
+                                </items>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
                           <object class="AdwSpinRow" id="spacing_row">
                             <property name="title" translatable="yes">Abstand</property>
                             <property name="subtitle" translatable="yes">Zwischen den Screenshots, in Pixeln</property>

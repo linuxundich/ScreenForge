@@ -20,6 +20,10 @@ impl Window {
         self.imp().canvas.get().clone()
     }
 
+    pub fn layout_mode_row(&self) -> adw::ComboRow {
+        self.imp().layout_mode_row.get().clone()
+    }
+
     pub fn spacing_row(&self) -> adw::SpinRow {
         self.imp().spacing_row.get().clone()
     }
@@ -96,6 +100,8 @@ mod imp {
     pub struct Window {
         #[template_child]
         pub canvas: TemplateChild<Canvas>,
+        #[template_child]
+        pub layout_mode_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub spacing_row: TemplateChild<adw::SpinRow>,
         #[template_child]
