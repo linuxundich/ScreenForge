@@ -127,6 +127,71 @@
                       </object>
                     </child>
                     <child>
+                      <object class="AdwPreferencesGroup" id="alignment_group">
+                        <property name="title" translatable="yes">Ausrichtung</property>
+                        <property name="description" translatable="yes">Für mindestens 2 ausgewählte Screenshots im freien Layout</property>
+                        <property name="visible">false</property>
+                        <child>
+                          <object class="AdwActionRow">
+                            <property name="title" translatable="yes">Horizontal</property>
+                            <child type="suffix">
+                              <object class="GtkBox">
+                                <property name="spacing">6</property>
+                                <property name="valign">center</property>
+                                <child>
+                                  <object class="GtkButton" id="align_left_button">
+                                    <property name="label" translatable="yes">Links</property>
+                                    <property name="tooltip-text" translatable="yes">Linke Kanten ausrichten</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="align_center_h_button">
+                                    <property name="label" translatable="yes">Mitte</property>
+                                    <property name="tooltip-text" translatable="yes">Horizontal zentrieren</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="align_right_button">
+                                    <property name="label" translatable="yes">Rechts</property>
+                                    <property name="tooltip-text" translatable="yes">Rechte Kanten ausrichten</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow">
+                            <property name="title" translatable="yes">Vertikal</property>
+                            <child type="suffix">
+                              <object class="GtkBox">
+                                <property name="spacing">6</property>
+                                <property name="valign">center</property>
+                                <child>
+                                  <object class="GtkButton" id="align_top_button">
+                                    <property name="label" translatable="yes">Oben</property>
+                                    <property name="tooltip-text" translatable="yes">Obere Kanten ausrichten</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="align_center_v_button">
+                                    <property name="label" translatable="yes">Mitte</property>
+                                    <property name="tooltip-text" translatable="yes">Vertikal zentrieren</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="align_bottom_button">
+                                    <property name="label" translatable="yes">Unten</property>
+                                    <property name="tooltip-text" translatable="yes">Untere Kanten ausrichten</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
                       <object class="AdwPreferencesGroup" id="background_group">
                         <property name="title" translatable="yes">Hintergrund</property>
                         <child>
@@ -156,6 +221,13 @@
                                 </property>
                               </object>
                             </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="background_eyedropper_button">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -168,6 +240,13 @@
                                 <property name="dialog">
                                   <object class="GtkColorDialog"/>
                                 </property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="gradient_color2_eyedropper_button">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
                               </object>
                             </child>
                           </object>
@@ -276,6 +355,13 @@
                                 </property>
                               </object>
                             </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="generator_manual_eyedropper_button_1">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -288,6 +374,13 @@
                                 <property name="dialog">
                                   <object class="GtkColorDialog"/>
                                 </property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="generator_manual_eyedropper_button_2">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
                               </object>
                             </child>
                           </object>
@@ -304,6 +397,13 @@
                                 </property>
                               </object>
                             </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="generator_manual_eyedropper_button_3">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -316,6 +416,13 @@
                                 <property name="dialog">
                                   <object class="GtkColorDialog"/>
                                 </property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="generator_manual_eyedropper_button_4">
+                                <property name="valign">center</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
                               </object>
                             </child>
                           </object>

@@ -32,6 +32,34 @@ impl Window {
         self.imp().margin_row.get().clone()
     }
 
+    pub fn alignment_group(&self) -> adw::PreferencesGroup {
+        self.imp().alignment_group.get().clone()
+    }
+
+    pub fn align_left_button(&self) -> gtk4::Button {
+        self.imp().align_left_button.get().clone()
+    }
+
+    pub fn align_center_h_button(&self) -> gtk4::Button {
+        self.imp().align_center_h_button.get().clone()
+    }
+
+    pub fn align_right_button(&self) -> gtk4::Button {
+        self.imp().align_right_button.get().clone()
+    }
+
+    pub fn align_top_button(&self) -> gtk4::Button {
+        self.imp().align_top_button.get().clone()
+    }
+
+    pub fn align_center_v_button(&self) -> gtk4::Button {
+        self.imp().align_center_v_button.get().clone()
+    }
+
+    pub fn align_bottom_button(&self) -> gtk4::Button {
+        self.imp().align_bottom_button.get().clone()
+    }
+
     pub fn background_type_row(&self) -> adw::ComboRow {
         self.imp().background_type_row.get().clone()
     }
@@ -44,12 +72,20 @@ impl Window {
         self.imp().background_color_button.get().clone()
     }
 
+    pub fn background_eyedropper_button(&self) -> gtk4::Button {
+        self.imp().background_eyedropper_button.get().clone()
+    }
+
     pub fn gradient_color2_row(&self) -> adw::ActionRow {
         self.imp().gradient_color2_row.get().clone()
     }
 
     pub fn gradient_color2_button(&self) -> gtk4::ColorDialogButton {
         self.imp().gradient_color2_button.get().clone()
+    }
+
+    pub fn gradient_color2_eyedropper_button(&self) -> gtk4::Button {
+        self.imp().gradient_color2_eyedropper_button.get().clone()
     }
 
     pub fn gradient_angle_row(&self) -> adw::SpinRow {
@@ -92,12 +128,20 @@ impl Window {
         self.imp().generator_manual_color_button_1.get().clone()
     }
 
+    pub fn generator_manual_eyedropper_button_1(&self) -> gtk4::Button {
+        self.imp().generator_manual_eyedropper_button_1.get().clone()
+    }
+
     pub fn generator_manual_color_row_1(&self) -> adw::ActionRow {
         self.imp().generator_manual_color_row_1.get().clone()
     }
 
     pub fn generator_manual_color_button_2(&self) -> gtk4::ColorDialogButton {
         self.imp().generator_manual_color_button_2.get().clone()
+    }
+
+    pub fn generator_manual_eyedropper_button_2(&self) -> gtk4::Button {
+        self.imp().generator_manual_eyedropper_button_2.get().clone()
     }
 
     pub fn generator_manual_color_row_2(&self) -> adw::ActionRow {
@@ -108,12 +152,20 @@ impl Window {
         self.imp().generator_manual_color_button_3.get().clone()
     }
 
+    pub fn generator_manual_eyedropper_button_3(&self) -> gtk4::Button {
+        self.imp().generator_manual_eyedropper_button_3.get().clone()
+    }
+
     pub fn generator_manual_color_row_3(&self) -> adw::ActionRow {
         self.imp().generator_manual_color_row_3.get().clone()
     }
 
     pub fn generator_manual_color_button_4(&self) -> gtk4::ColorDialogButton {
         self.imp().generator_manual_color_button_4.get().clone()
+    }
+
+    pub fn generator_manual_eyedropper_button_4(&self) -> gtk4::Button {
+        self.imp().generator_manual_eyedropper_button_4.get().clone()
     }
 
     pub fn generator_manual_color_row_4(&self) -> adw::ActionRow {
@@ -335,15 +387,33 @@ mod imp {
         #[template_child]
         pub margin_row: TemplateChild<adw::SpinRow>,
         #[template_child]
+        pub alignment_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub align_left_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub align_center_h_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub align_right_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub align_top_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub align_center_v_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub align_bottom_button: TemplateChild<gtk4::Button>,
+        #[template_child]
         pub background_type_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub background_color1_row: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub background_color_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
+        pub background_eyedropper_button: TemplateChild<gtk4::Button>,
+        #[template_child]
         pub gradient_color2_row: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub gradient_color2_button: TemplateChild<gtk4::ColorDialogButton>,
+        #[template_child]
+        pub gradient_color2_eyedropper_button: TemplateChild<gtk4::Button>,
         #[template_child]
         pub gradient_angle_row: TemplateChild<adw::SpinRow>,
         #[template_child]
@@ -367,17 +437,25 @@ mod imp {
         #[template_child]
         pub generator_manual_color_button_1: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
+        pub generator_manual_eyedropper_button_1: TemplateChild<gtk4::Button>,
+        #[template_child]
         pub generator_manual_color_row_2: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub generator_manual_color_button_2: TemplateChild<gtk4::ColorDialogButton>,
+        #[template_child]
+        pub generator_manual_eyedropper_button_2: TemplateChild<gtk4::Button>,
         #[template_child]
         pub generator_manual_color_row_3: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub generator_manual_color_button_3: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
+        pub generator_manual_eyedropper_button_3: TemplateChild<gtk4::Button>,
+        #[template_child]
         pub generator_manual_color_row_4: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub generator_manual_color_button_4: TemplateChild<gtk4::ColorDialogButton>,
+        #[template_child]
+        pub generator_manual_eyedropper_button_4: TemplateChild<gtk4::Button>,
         #[template_child]
         pub generator_adapt_row: TemplateChild<adw::SwitchRow>,
         #[template_child]

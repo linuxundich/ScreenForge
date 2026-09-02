@@ -106,6 +106,13 @@ impl Canvas {
     pub fn connect_resize<F: Fn(usize, screenforge_core::model::Transform) + 'static>(&self, f: F) {
         self.imp().set_resize_callback(f);
     }
+
+    /// Samples the RGBA color currently rendered at a widget-space point —
+    /// the eyedropper tool. See `imp::Canvas::sample_color_at` for the pixel
+    /// math; `None` before anything has rendered or off the rendered area.
+    pub fn sample_color_at(&self, wx: f64, wy: f64) -> Option<screenforge_core::model::Rgba> {
+        self.imp().sample_color_at(wx, wy)
+    }
 }
 
 impl Default for Canvas {
@@ -125,7 +132,7 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::{Corner, Document, LayoutMode, Transform};
+    use screenforge_core::model::{Corner, Document, LayoutMode, Rgba, Transform};
     use screenforge_core::snap::{self, Guide};
     use uuid::Uuid;
 
@@ -595,6 +602,40 @@ mod imp {
             let offset_x = (widget.width() as f64 - render_w as f64) / 2.0;
             let offset_y = (widget.height() as f64 - render_h as f64) / 2.0;
             Some(((wx - offset_x) / scale, (wy - offset_y) / scale))
+        }
+
+        /// Samples the RGBA color currently rendered at a widget-space point
+        /// — the eyedropper tool's whole implementation, reading straight
+        /// out of the cached composited surface rather than re-rendering or
+        /// touching the document. `None` before anything has been rendered,
+        /// outside the rendered canvas bounds, or at a fully transparent
+        /// pixel (the letterboxed gap around a `Contain`-fit background
+        /// image, say — there's no meaningful color to pick there).
+        pub fn sample_color_at(&self, wx: f64, wy: f64) -> Option<Rgba> {
+            let widget = self.obj();
+            let mut cached = self.cached.borrow_mut();
+            let (surface, render_w, render_h) = cached.as_mut()?;
+            let offset_x = (widget.width() as f64 - *render_w as f64) / 2.0;
+            let offset_y = (widget.height() as f64 - *render_h as f64) / 2.0;
+            let px = (wx - offset_x).floor() as i32;
+            let py = (wy - offset_y).floor() as i32;
+            if px < 0 || py < 0 || px >= *render_w || py >= *render_h {
+                return None;
+            }
+            let stride = surface.stride();
+            let data = surface.data().ok()?;
+            // Premultiplied ARGB32, native-endian 0xAARRGGBB — byte order B,
+            // G, R, A on this little-endian target (see `render::compose`'s
+            // own pixel-reading code for the same convention).
+            let offset = (py * stride + px * 4) as usize;
+            let b = data[offset] as f64;
+            let g = data[offset + 1] as f64;
+            let r = data[offset + 2] as f64;
+            let a = data[offset + 3] as f64;
+            if a == 0.0 {
+                return None;
+            }
+            Some(Rgba::new((r / a).min(1.0), (g / a).min(1.0), (b / a).min(1.0), a / 255.0))
         }
 
         fn element_index_at(&self, doc_x: f64, doc_y: f64) -> Option<usize> {

@@ -162,11 +162,13 @@ fn build_ui(app: &adw::Application) {
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
     register_move(&window, &canvas, &state);
+    register_alignment_controls(&window, &canvas, &state);
     register_resize(&window, &canvas, &state);
     register_context_menu(&window, &canvas, &state);
     register_delete_selected(app, &window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
     register_hide_screenshots_toggle(&window, &canvas, &state);
+    register_eyedroppers(&window, &canvas);
 
     window.present();
 }
@@ -377,6 +379,16 @@ fn index_for_layout_mode(mode: LayoutMode) -> u32 {
     }
 }
 
+/// The alignment tool only does anything in `LayoutMode::Free` — every
+/// other mode recomputes each element's placement from spacing/margin on
+/// every render, so touching `Transform.x`/`.y` there would have no visible
+/// effect at all. Selection count isn't part of this check (see
+/// `align_selected`'s own guard) since it can change without the layout
+/// mode row itself firing.
+fn sync_alignment_group_visibility(window: &Window, mode: LayoutMode) {
+    window.alignment_group().set_visible(mode == LayoutMode::Free);
+}
+
 /// Wires the sidebar's layout-mode/spacing/margin rows to `Document.layout`,
 /// mutating it directly through the undo stack (spec §17: layout changes are
 /// undoable).
@@ -390,6 +402,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         layout_mode_row.set_selected(index_for_layout_mode(state_ref.document.layout.mode));
         spacing_row.set_value(state_ref.document.layout.spacing_px);
         margin_row.set_value(state_ref.document.layout.margin_px);
+        sync_alignment_group_visibility(window, state_ref.document.layout.mode);
     }
 
     layout_mode_row.connect_selected_notify(glib::clone!(
@@ -401,6 +414,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         state,
         move |row| {
             let new = layout_mode_for_index(row.selected());
+            sync_alignment_group_visibility(&window, new);
             let mut state_ref = state.borrow_mut();
             let old = state_ref.document.layout.mode;
             if state_ref.syncing_controls || old == new {
@@ -822,6 +836,70 @@ fn gdk_rgba_from(c: &Rgba) -> gdk::RGBA {
 
 fn rgba_from_gdk(c: &gdk::RGBA) -> Rgba {
     Rgba::new(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64)
+}
+
+/// Arms the eyedropper (spec: "Farbpipette") for one pick: the canvas's
+/// cursor becomes a crosshair, and the very next primary-button click on it
+/// samples that pixel's rendered color (`Canvas::sample_color_at`) straight
+/// into `target`'s `rgba`, exactly as if the user had picked it from
+/// `target`'s own color dialog — so every existing `connect_rgba_notify`
+/// wired to `target` elsewhere just fires normally, with no separate
+/// "apply a picked color" path to keep in sync.
+///
+/// Implemented as one temporary, capture-phase `GtkGestureClick` added to
+/// the canvas and removed again the moment it fires, rather than any
+/// change to the canvas's own selection/drag/resize gesture — capture
+/// phase runs before the canvas's own (unphased) click handling, and
+/// claiming the sequence stops that normal handling from also seeing the
+/// same click, so a pick behaves like a true modal tool without the canvas
+/// needing to know picking exists.
+fn start_color_picking(window: &Window, canvas: &Canvas, target: gtk4::ColorDialogButton) {
+    canvas.set_cursor_from_name(Some("crosshair"));
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    gesture.connect_pressed(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        target,
+        move |gesture, _n_press, x, y| {
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
+            canvas.set_cursor_from_name(None);
+            canvas.remove_controller(gesture);
+            match canvas.sample_color_at(x, y) {
+                Some(color) => target.set_rgba(&gdk_rgba_from(&color)),
+                None => {
+                    window.toast_overlay().add_toast(adw::Toast::new("An dieser Stelle wurde keine Farbe gefunden"));
+                }
+            }
+        }
+    ));
+    canvas.add_controller(gesture);
+}
+
+/// Wires every color-target's small eyedropper button (spec: "Farbpipette")
+/// to `start_color_picking`.
+fn register_eyedroppers(window: &Window, canvas: &Canvas) {
+    let pairs = [
+        (window.background_eyedropper_button(), window.background_color_button()),
+        (window.gradient_color2_eyedropper_button(), window.gradient_color2_button()),
+        (window.generator_manual_eyedropper_button_1(), window.generator_manual_color_button_1()),
+        (window.generator_manual_eyedropper_button_2(), window.generator_manual_color_button_2()),
+        (window.generator_manual_eyedropper_button_3(), window.generator_manual_color_button_3()),
+        (window.generator_manual_eyedropper_button_4(), window.generator_manual_color_button_4()),
+    ];
+    for (trigger, target) in pairs {
+        trigger.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            move |_| start_color_picking(&window, &canvas, target.clone())
+        ));
+    }
 }
 
 /// Reads the background controls (type/color1/color2/angle) and builds the
@@ -2040,6 +2118,7 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
     window.layout_mode_row().set_selected(index_for_layout_mode(doc.layout.mode));
     window.spacing_row().set_value(doc.layout.spacing_px);
     window.margin_row().set_value(doc.layout.margin_px);
+    sync_alignment_group_visibility(window, doc.layout.mode);
 
     sync_background_controls(window, &doc.background);
 
@@ -2523,6 +2602,103 @@ fn register_delete_selected(app: &adw::Application, window: &Window, canvas: &Ca
     ));
     window.add_action(&action);
     app.set_accels_for_action("win.delete-selected", &["Delete", "BackSpace"]);
+}
+
+/// One of the six ways `align_selected` can line up the current
+/// multi-selection's `Transform`s against each other.
+#[derive(Clone, Copy)]
+enum Alignment {
+    Left,
+    CenterHorizontal,
+    Right,
+    Top,
+    CenterVertical,
+    Bottom,
+}
+
+/// Aligns every currently selected screenshot's `Transform.x`/`.y` against
+/// the selection's own bounding box, as one undoable [`SetTransforms`] —
+/// e.g. `Alignment::Left` moves every selected element's left edge to the
+/// leftmost selected element's left edge, `Alignment::CenterHorizontal`
+/// centers each one within the selection's horizontal span. Only
+/// meaningful in `LayoutMode::Free` (the alignment buttons are hidden
+/// otherwise, see `sync_alignment_group_visibility`) and with at least two
+/// elements selected — selection lives entirely in the `Canvas` widget
+/// (`canvas.selected_ids()`), so unlike the layout mode this can go stale
+/// between clicks without any signal telling this function about it,
+/// hence the toast rather than a disabled button for the "too few
+/// selected" case.
+fn align_selected(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, alignment: Alignment) {
+    let selected = canvas.selected_ids();
+    if selected.len() < 2 {
+        window.toast_overlay().add_toast(adw::Toast::new("Mindestens 2 Screenshots auswählen, um sie auszurichten"));
+        return;
+    }
+    let mut state_ref = state.borrow_mut();
+
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for element in state_ref.document.elements.iter().filter(|e| selected.contains(&e.id)) {
+        let t = element.transform;
+        min_x = min_x.min(t.x);
+        min_y = min_y.min(t.y);
+        max_x = max_x.max(t.x + t.width);
+        max_y = max_y.max(t.y + t.height);
+    }
+
+    let transforms: Vec<(Uuid, screenforge_core::model::Transform, screenforge_core::model::Transform)> = state_ref
+        .document
+        .elements
+        .iter()
+        .filter(|e| selected.contains(&e.id))
+        .filter_map(|element| {
+            let old = element.transform;
+            let mut new = old;
+            match alignment {
+                Alignment::Left => new.x = min_x,
+                Alignment::CenterHorizontal => new.x = min_x + ((max_x - min_x) - old.width) / 2.0,
+                Alignment::Right => new.x = max_x - old.width,
+                Alignment::Top => new.y = min_y,
+                Alignment::CenterVertical => new.y = min_y + ((max_y - min_y) - old.height) / 2.0,
+                Alignment::Bottom => new.y = max_y - old.height,
+            }
+            (old != new).then_some((element.id, old, new))
+        })
+        .collect();
+    if transforms.is_empty() {
+        return;
+    }
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetTransforms { transforms }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
+/// Wires the sidebar's six alignment buttons (spec: "Ausrichtungswerkzeug")
+/// to `align_selected`.
+fn register_alignment_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let buttons = [
+        (window.align_left_button(), Alignment::Left),
+        (window.align_center_h_button(), Alignment::CenterHorizontal),
+        (window.align_right_button(), Alignment::Right),
+        (window.align_top_button(), Alignment::Top),
+        (window.align_center_v_button(), Alignment::CenterVertical),
+        (window.align_bottom_button(), Alignment::Bottom),
+    ];
+    for (button, alignment) in buttons {
+        button.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            move |_| align_selected(&window, &canvas, &state, alignment)
+        ));
+    }
 }
 
 /// Wires the canvas's `LayoutMode::Free` move-drag to an undoable

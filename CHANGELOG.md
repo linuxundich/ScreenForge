@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-03
+
+### Added
+
+- An alignment tool for `LayoutMode::Free`: a new "Ausrichtung" section in
+  the sidebar (visible only in free layout) with six buttons — Links/
+  Mitte/Rechts and Oben/Mitte/Unten — that align the current
+  multi-selection's screenshots against the selection's own bounding box,
+  as one undoable step. Requires at least two selected screenshots; a
+  toast explains the no-op otherwise, since selection lives entirely in
+  the canvas widget and can go stale between clicks.
+- An eyedropper ("Farbpipette") next to every color target that makes
+  sense to sample from an imported screenshot — background color 1,
+  gradient color 2, and all four manual generator colors. Clicking it
+  arms a crosshair cursor; the next click on the canvas reads that
+  pixel's actual rendered color straight out of the composited surface
+  and applies it to the target exactly as if picked from its own color
+  dialog, live preview included. Implemented as one temporary,
+  capture-phase click gesture added to the canvas and removed the moment
+  it fires, so it never touches the canvas's own selection/drag/resize
+  handling.
+
 ## [0.18.0] - 2026-09-02
 
 ### Changed
