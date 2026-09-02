@@ -72,6 +72,10 @@ impl Window {
         self.imp().background_image_opacity_row.get().clone()
     }
 
+    pub fn background_decoration_row(&self) -> adw::ComboRow {
+        self.imp().background_decoration_row.get().clone()
+    }
+
     pub fn shadow_row(&self) -> adw::ComboRow {
         self.imp().shadow_row.get().clone()
     }
@@ -146,6 +150,8 @@ mod imp {
         pub background_image_fit_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub background_image_opacity_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub background_decoration_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub shadow_row: TemplateChild<adw::ComboRow>,
         #[template_child]

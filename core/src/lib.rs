@@ -3,6 +3,7 @@
 //! boundary is what keeps the model and layout engine unit-testable.
 
 pub mod command;
+pub mod decoration;
 pub mod layout;
 pub mod model;
 pub mod project;

@@ -11,7 +11,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::layout::compute_layout;
-use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement};
+use crate::model::{Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, VectorShape};
 
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -173,7 +173,30 @@ fn draw_background(
                 ctx.restore()?;
             }
         }
-        Background::Decoration(_) => todo!("vector decoration backgrounds are not implemented yet"),
+        Background::Decoration(shapes) => {
+            // Deliberately no base fill: a decoration is just its shapes,
+            // drawn in order over whatever's beneath the composition (the
+            // canvas widget's own neutral fill in the live preview, or
+            // transparency in an exported PNG/WebP/AVIF — an exported JPEG
+            // has no alpha channel, so it flattens to black there, same as
+            // any other fully-transparent export would).
+            for shape in shapes {
+                match shape {
+                    VectorShape::Circle { cx, cy, radius, color } => {
+                        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
+                        ctx.arc(*cx, *cy, radius.max(0.0), 0.0, 2.0 * PI);
+                        ctx.fill()?;
+                    }
+                    VectorShape::Line { x1, y1, x2, y2, width: line_width, color } => {
+                        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
+                        ctx.set_line_width(line_width.max(0.0));
+                        ctx.move_to(*x1, *y1);
+                        ctx.line_to(*x2, *y2);
+                        ctx.stroke()?;
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -478,5 +501,61 @@ mod tests {
         compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg)).unwrap();
 
         assert_close(read_pixel(&mut target, 50, 50), (0.0, 1.0, 0.0, 0.5));
+    }
+
+    #[test]
+    fn decoration_draws_a_circle_at_its_own_position() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Decoration(vec![crate::model::VectorShape::Circle {
+            cx: 50.0,
+            cy: 50.0,
+            radius: 20.0,
+            color: Rgba::new(1.0, 0.0, 0.0, 1.0),
+        }]);
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert_close(read_pixel(&mut target, 50, 50), (1.0, 0.0, 0.0, 1.0));
+        // Outside the circle's radius, nothing was drawn -- transparent.
+        assert_close(read_pixel(&mut target, 5, 5), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn decoration_draws_a_line_between_its_two_points() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Decoration(vec![crate::model::VectorShape::Line {
+            x1: 0.0,
+            y1: 50.0,
+            x2: 100.0,
+            y2: 50.0,
+            width: 10.0,
+            color: Rgba::new(0.0, 0.0, 1.0, 1.0),
+        }]);
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert_close(read_pixel(&mut target, 50, 50), (0.0, 0.0, 1.0, 1.0));
+        // Well outside the line's width, nothing was drawn.
+        assert_close(read_pixel(&mut target, 50, 5), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn decoration_draws_multiple_shapes_in_order() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Decoration(vec![
+            crate::model::VectorShape::Circle { cx: 20.0, cy: 20.0, radius: 10.0, color: Rgba::new(1.0, 0.0, 0.0, 1.0) },
+            crate::model::VectorShape::Circle { cx: 80.0, cy: 80.0, radius: 10.0, color: Rgba::new(0.0, 1.0, 0.0, 1.0) },
+        ]);
+
+        let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None).unwrap();
+
+        assert_close(read_pixel(&mut target, 20, 20), (1.0, 0.0, 0.0, 1.0));
+        assert_close(read_pixel(&mut target, 80, 80), (0.0, 1.0, 0.0, 1.0));
     }
 }

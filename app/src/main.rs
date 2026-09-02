@@ -450,6 +450,7 @@ fn sync_background_controls(window: &Window, background: &Background) {
     window.background_image_row().set_visible(matches!(background, Background::Image(_)));
     window.background_image_fit_row().set_visible(matches!(background, Background::Image(_)));
     window.background_image_opacity_row().set_visible(matches!(background, Background::Image(_)));
+    window.background_decoration_row().set_visible(matches!(background, Background::Decoration(_)));
 
     match background {
         Background::Solid(color) => {
@@ -475,9 +476,20 @@ fn sync_background_controls(window: &Window, background: &Background) {
             window.background_image_fit_row().set_selected(index_for_background_image_fit(spec.fit));
             window.background_image_opacity_row().set_value(spec.opacity * 100.0);
         }
-        Background::Decoration(_) => {
-            // Not settable via this UI yet (spec §8 stub) — leave controls
-            // as they are rather than guessing a representative value.
+        Background::Decoration(shapes) => {
+            window.background_type_row().set_selected(4);
+            // The preset's shape kind is a reliable enough discriminator
+            // since Dots produces only circles and DiagonalLines only
+            // lines — no need to store which preset was picked separately.
+            let is_lines = matches!(shapes.first(), Some(screenforge_core::model::VectorShape::Line { .. }));
+            window.background_decoration_row().set_selected(if is_lines { 1 } else { 0 });
+            let color = shapes.first().map(|s| match s {
+                screenforge_core::model::VectorShape::Circle { color, .. } => *color,
+                screenforge_core::model::VectorShape::Line { color, .. } => *color,
+            });
+            if let Some(color) = color {
+                window.background_color_button().set_rgba(&gdk_rgba_from(&color));
+            }
         }
     }
 }
@@ -517,9 +529,21 @@ fn rgba_from_gdk(c: &gdk::RGBA) -> Rgba {
     Rgba::new(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64)
 }
 
-/// Reads the four background controls (type/color1/color2/angle) and builds
-/// the `Background` they currently describe.
-fn background_from_controls(window: &Window) -> Background {
+fn decoration_preset_for_index(index: u32) -> screenforge_core::decoration::DecorationPreset {
+    match index {
+        0 => screenforge_core::decoration::DecorationPreset::Dots,
+        _ => screenforge_core::decoration::DecorationPreset::DiagonalLines,
+    }
+}
+
+/// Reads the background controls (type/color1/color2/angle/pattern) and
+/// builds the `Background` they currently describe. `canvas_width`/
+/// `canvas_height` are only used for the "Vektor-Muster" preset, which is
+/// generated once at selection time rather than kept resolution-
+/// independent — it won't retroactively resize if the canvas's
+/// content-fitted size changes afterward (see `fit_canvas_to_content`),
+/// same simplification as every other one-shot preset in this app.
+fn background_from_controls(window: &Window, canvas_width: f64, canvas_height: f64) -> Background {
     let color1 = rgba_from_gdk(&window.background_color_button().rgba());
     match window.background_type_row().selected() {
         1 => {
@@ -537,6 +561,10 @@ fn background_from_controls(window: &Window) -> Background {
                 stops: vec![(0.0, color1), (1.0, color2)],
             })
         }
+        4 => {
+            let preset = decoration_preset_for_index(window.background_decoration_row().selected());
+            Background::Decoration(preset.shapes(canvas_width, canvas_height, color1))
+        }
         _ => Background::Solid(color1),
     }
 }
@@ -548,8 +576,9 @@ fn background_from_controls(window: &Window) -> Background {
 /// applied, which would otherwise re-fire this handler and wipe the redo
 /// history it was trying to restore.
 fn apply_background_from_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let new = background_from_controls(window);
     let mut state_ref = state.borrow_mut();
+    let (canvas_width, canvas_height) = (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64);
+    let new = background_from_controls(window, canvas_width, canvas_height);
     if state_ref.syncing_controls || state_ref.document.background == new {
         return;
     }
@@ -591,6 +620,7 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             window.background_image_row().set_visible(selected == 3);
             window.background_image_fit_row().set_visible(selected == 3);
             window.background_image_opacity_row().set_visible(selected == 3);
+            window.background_decoration_row().set_visible(selected == 4);
             // Selecting "Bild" only reveals the file picker — there's
             // nothing to render until a file is actually chosen (below), so
             // this doesn't push a command yet.
@@ -618,6 +648,15 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         move |_| apply_background_from_controls(&window, &canvas, &state)
     ));
     gradient_angle_row.connect_value_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| apply_background_from_controls(&window, &canvas, &state)
+    ));
+    window.background_decoration_row().connect_selected_notify(glib::clone!(
         #[weak]
         window,
         #[weak]
