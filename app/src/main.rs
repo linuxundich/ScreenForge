@@ -60,15 +60,29 @@ struct EditorState {
 }
 
 impl EditorState {
+    /// A fresh document seeded from the user's saved preferences (default
+    /// spacing/margin/export quality) rather than `LayoutSettings`'s own
+    /// hardcoded defaults — see `app_settings()`.
     fn new() -> Self {
-        Self {
-            document: Document::new(),
-            image_cache: HashMap::new(),
-            project_path: None,
-            undo_stack: UndoStack::new(),
-            syncing_controls: false,
-        }
+        let settings = app_settings();
+        let mut document = Document::new();
+        document.layout.spacing_px = settings.double("default-spacing");
+        document.layout.margin_px = settings.double("default-margin");
+        document.canvas.export_quality = settings.double("default-export-quality").round().clamp(1.0, 100.0) as u8;
+        Self { document, image_cache: HashMap::new(), project_path: None, undo_stack: UndoStack::new(), syncing_controls: false }
     }
+}
+
+/// The app's `GSettings` handle (spec: a preferences page backed by
+/// GSettings). There's no packaged/installed build yet that would put the
+/// compiled schema where GLib normally looks
+/// (`$XDG_DATA_DIRS/glib-2.0/schemas/`), so `main()` points
+/// `GSETTINGS_SCHEMA_DIR` at the copy `build.rs` compiles into `OUT_DIR`
+/// before this is ever called — confirmed empirically that GLib treats
+/// that env var as an additional search path, not a replacement, so this
+/// needs no system-wide installation for `cargo run`.
+fn app_settings() -> gio::Settings {
+    gio::Settings::new(APP_ID)
 }
 
 /// Looks up `path` in `cache`, decoding and inserting it on first use.
@@ -89,9 +103,17 @@ fn get_or_decode<'a>(cache: &'a mut HashMap<PathBuf, DecodedImage>, path: &Path)
 }
 
 fn main() -> glib::ExitCode {
+    // Safety: called before any thread that could race on the environment
+    // exists (the very first thing `main` does), and before any GSettings
+    // use — see `app_settings()` for why this is here at all.
+    unsafe {
+        std::env::set_var("GSETTINGS_SCHEMA_DIR", concat!(env!("OUT_DIR"), "/schemas"));
+    }
+
     gio::resources_register_include!("screenforge.gresource").expect("failed to register GResource bundle");
 
     let app = adw::Application::builder().application_id(APP_ID).build();
+    register_preferences_action(&app);
     app.connect_activate(build_ui);
     app.run()
 }
@@ -1213,6 +1235,54 @@ fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCel
         }
     ));
     window.add_action(&load_action);
+}
+
+/// `app.preferences` (`Ctrl+,`): a `GSettings`-backed preferences dialog
+/// with defaults applied to every *newly created* document (see
+/// `EditorState::new`) — changing a preference never touches the document
+/// currently open, only what a fresh one starts with. Each row binds
+/// straight to its `GSettings` key via `Settings::bind`, so there's no
+/// manual load/save glue: GLib keeps the setting and the widget in sync
+/// both ways for as long as the dialog is open.
+fn register_preferences_action(app: &adw::Application) {
+    let action = gio::SimpleAction::new("preferences", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            let settings = app_settings();
+
+            let spacing_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
+            spacing_row.set_title("Abstand");
+            spacing_row.set_subtitle("Zwischen den Screenshots, in Pixeln");
+            settings.bind("default-spacing", &spacing_row, "value").build();
+
+            let margin_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
+            margin_row.set_title("Außenrand");
+            margin_row.set_subtitle("Rand um die Komposition, in Pixeln");
+            settings.bind("default-margin", &margin_row, "value").build();
+
+            let quality_row = adw::SpinRow::with_range(1.0, 100.0, 5.0);
+            quality_row.set_title("Export-Qualität");
+            quality_row.set_subtitle("Für JPEG/WebP/AVIF, in Prozent");
+            settings.bind("default-export-quality", &quality_row, "value").build();
+
+            let group = adw::PreferencesGroup::new();
+            group.set_title("Standardwerte für neue Projekte");
+            group.add(&spacing_row);
+            group.add(&margin_row);
+            group.add(&quality_row);
+
+            let page = adw::PreferencesPage::new();
+            page.add(&group);
+
+            let dialog = adw::PreferencesDialog::new();
+            dialog.add(&page);
+            dialog.present(app.active_window().as_ref());
+        }
+    ));
+    app.add_action(&action);
+    app.set_accels_for_action("app.preferences", &["<Ctrl>comma"]);
 }
 
 /// Reflects `undo_stack.can_undo()/can_redo()` onto the `win.undo`/`win.redo`

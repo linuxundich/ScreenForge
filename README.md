@@ -37,13 +37,20 @@ PNG, JPEG or WebP image.
 - **Templates**: save a composition's style (layout, spacing/margin,
   background, shadow, corner radius) as a `.screenforge-template` file
   and reapply it to a different set of screenshots later.
+- **Preferences** (`Ctrl+,`): default spacing, margin and export quality
+  for every newly created document.
 
 ScreenForge works entirely offline. Nothing is ever uploaded anywhere.
 
 ## Building
 
-Requires a Rust toolchain, GTK 4 (≥ 4.16) and libadwaita (≥ 1.5) development
-packages.
+Requires a Rust toolchain, GTK 4 (≥ 4.16), libadwaita (≥ 1.5) development
+packages, and `glib-compile-schemas` (for the preferences `GSettings`
+schema — `build.rs` compiles it into `$OUT_DIR` and points
+`GSETTINGS_SCHEMA_DIR` there at startup, so no system-wide schema
+installation is needed for `cargo build`/`cargo run`; a real packaged
+build's install step should compile it into the standard system location
+instead).
 
 ```sh
 cargo build --release
@@ -73,8 +80,7 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: multi-select, text and vector decorations,
-and a preferences page.
+history. Not yet implemented: multi-select and text/vector decorations.
 
 ## License
 

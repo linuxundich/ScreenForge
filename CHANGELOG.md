@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-02
+
+### Added
+
+- A `GSettings`-backed preferences dialog (`Ctrl+,` or the new primary
+  menu button), for the default spacing, margin and export quality used
+  for every newly created document. Changing a preference never touches
+  the document currently open.
+
 ## [0.11.0] - 2026-09-02
 
 ### Added

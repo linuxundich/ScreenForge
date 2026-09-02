@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="de.christophlangner.ScreenForge" path="/de/christophlangner/ScreenForge/">
+    <key name="default-spacing" type="d">
+      <default>24.0</default>
+      <summary>Default spacing</summary>
+      <description>
+        Spacing between screenshots, in pixels, used for every newly
+        created document.
+      </description>
+    </key>
+    <key name="default-margin" type="d">
+      <default>48.0</default>
+      <summary>Default margin</summary>
+      <description>
+        Outer margin around the composition, in pixels, used for every
+        newly created document.
+      </description>
+    </key>
+    <key name="default-export-quality" type="d">
+      <range min="1.0" max="100.0"/>
+      <default>90.0</default>
+      <summary>Default export quality</summary>
+      <description>
+        JPEG/WebP/AVIF export quality (1-100) used for every newly
+        created document. Ignored for PNG, which is always lossless.
+        Stored as a double (not an int) purely so it can bind directly
+        to AdwSpinRow's "value" property without a custom mapping.
+      </description>
+    </key>
+  </schema>
+</schemalist>
