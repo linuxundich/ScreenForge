@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-02
+
+### Added
+
+- Snap ("smart") guides while dragging a screenshot in Free mode: edges
+  and centers snap into exact alignment with other screenshots and with
+  the canvas's own edges/center, with a thin pink guide line drawn for
+  each active snap. Pure alignment math lives in `core::snap` and is
+  unit-tested independently of the canvas widget.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added

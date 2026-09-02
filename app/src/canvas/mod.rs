@@ -116,6 +116,7 @@ mod imp {
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
     use screenforge_core::model::{Corner, Document, LayoutMode, Transform};
+    use screenforge_core::snap::{self, Guide};
     use uuid::Uuid;
 
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
@@ -136,6 +137,10 @@ mod imp {
     /// Half the side length of the little squares `snapshot()` draws at
     /// each Free-mode element's corners.
     const HANDLE_DRAW_HALF_PX: f64 = 5.0;
+    /// How close (in *screen* pixels, regardless of zoom) a Free-mode move
+    /// has to come to another element's edge/center, or the canvas's own
+    /// edge/center, before it snaps into exact alignment.
+    const SNAP_THRESHOLD_PX: f64 = 8.0;
 
     pub struct Canvas {
         document: RefCell<Document>,
@@ -177,6 +182,10 @@ mod imp {
         /// checked first, so grabbing near a corner always resizes rather
         /// than moves.
         resize_drag_origin: Cell<Option<ResizeDragOrigin>>,
+        /// Alignment guides from the current Free-mode move drag, drawn by
+        /// `snapshot()`; empty outside of a move drag that's actually
+        /// snapped to something.
+        active_guides: RefCell<Vec<Guide>>,
         reorder_callback: RefCell<Option<ReorderCallback>>,
         context_menu_callback: RefCell<Option<ContextMenuCallback>>,
         move_callback: RefCell<Option<MoveCallback>>,
@@ -199,6 +208,7 @@ mod imp {
                 drag_hover: Cell::new(None),
                 free_drag_origin: Cell::new(None),
                 resize_drag_origin: Cell::new(None),
+                active_guides: RefCell::new(Vec::new()),
                 reorder_callback: RefCell::new(None),
                 context_menu_callback: RefCell::new(None),
                 move_callback: RefCell::new(None),
@@ -347,6 +357,26 @@ mod imp {
                         }
                     }
                 }
+
+                // Alignment guides from an in-progress Free-mode move.
+                let scale = self.last_scale.get();
+                ctx.set_source_rgba(0.95, 0.25, 0.55, 0.95);
+                ctx.set_line_width(1.0);
+                for guide in self.active_guides.borrow().iter() {
+                    match *guide {
+                        Guide::Vertical(doc_x) => {
+                            let sx = offset_x + doc_x * scale;
+                            ctx.move_to(sx, offset_y);
+                            ctx.line_to(sx, offset_y + render_h as f64);
+                        }
+                        Guide::Horizontal(doc_y) => {
+                            let sy = offset_y + doc_y * scale;
+                            ctx.move_to(offset_x, sy);
+                            ctx.line_to(offset_x + render_w as f64, sy);
+                        }
+                    }
+                }
+                let _ = ctx.stroke();
             }
 
             if self.drag_active.get() {
@@ -516,7 +546,41 @@ mod imp {
             placements.iter().position(|p| doc_x < p.x + p.width / 2.0).unwrap_or(placements.len())
         }
 
+        /// Snaps a Free-mode move's proposed `(x, y)` against every other
+        /// element and the canvas bounds/center, recording the resulting
+        /// guides for `snapshot()` to draw. `index` is excluded from its own
+        /// candidate set — an element obviously always aligns with itself.
+        fn snapped_move(&self, index: usize, proposed: (f64, f64)) -> (f64, f64) {
+            let scale = self.last_scale.get();
+            if scale <= 0.0 {
+                self.active_guides.borrow_mut().clear();
+                return proposed;
+            }
+
+            let doc = self.document.borrow();
+            let Some(moving_el) = doc.elements.get(index) else {
+                drop(doc);
+                self.active_guides.borrow_mut().clear();
+                return proposed;
+            };
+            let moving = snap::Rect { x: proposed.0, y: proposed.1, width: moving_el.transform.width, height: moving_el.transform.height };
+            let others: Vec<snap::Rect> = doc
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != index)
+                .map(|(_, el)| snap::Rect { x: el.transform.x, y: el.transform.y, width: el.transform.width, height: el.transform.height })
+                .collect();
+            let (canvas_w, canvas_h) = (doc.canvas.export_width as f64, doc.canvas.export_height as f64);
+            drop(doc);
+
+            let result = snap::snap_position(moving, &others, canvas_w, canvas_h, SNAP_THRESHOLD_PX / scale);
+            *self.active_guides.borrow_mut() = result.guides;
+            (result.x, result.y)
+        }
+
         pub(super) fn on_drag_begin(&self, x: f64, y: f64) {
+            self.active_guides.borrow_mut().clear();
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
 
             if self.document.borrow().layout.mode == LayoutMode::Free {
@@ -557,9 +621,11 @@ mod imp {
             if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.get() {
                 let Some(index) = self.drag_from.get() else { return };
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let proposed = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
+                    let (new_x, new_y) = self.snapped_move(index, proposed);
                     if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
-                        el.transform.x = orig_x + (doc_x - start_x);
-                        el.transform.y = orig_y + (doc_y - start_y);
+                        el.transform.x = new_x;
+                        el.transform.y = new_y;
                     }
                     self.content_dirty.set(true);
                     self.obj().queue_draw();
@@ -592,14 +658,17 @@ mod imp {
 
             if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.take() {
                 let Some(index) = self.drag_from.take() else { return };
+                self.active_guides.borrow_mut().clear();
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
-                    let (new_x, new_y) = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
+                    let proposed = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
+                    let (new_x, new_y) = self.snapped_move(index, proposed);
                     if new_x != orig_x || new_y != orig_y {
                         if let Some(cb) = self.move_callback.borrow().as_ref() {
                             cb(index, new_x, new_y);
                         }
                     }
                 }
+                self.obj().queue_draw();
                 return;
             }
 
@@ -631,6 +700,7 @@ mod imp {
             // indicator, the element's transform was mutated live during the
             // drag, and nothing else will put it back until the next
             // `set_document`.
+            self.active_guides.borrow_mut().clear();
             let index = self.drag_from.take();
             let resize_origin = self.resize_drag_origin.take();
             let free_origin = self.free_drag_origin.take();
