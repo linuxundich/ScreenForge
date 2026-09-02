@@ -21,7 +21,7 @@ use screenforge_core::command::{
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
-    LayoutMode, Rgba, ScreenshotElement, ShadowParams, TextOverlay,
+    LayoutMode, Rgba, ScreenshotElement, ShadowParams, TextOverlay, VectorShape,
 };
 use uuid::Uuid;
 
@@ -57,6 +57,12 @@ struct EditorState {
     /// and push a spurious undo command built from a mix of old and new
     /// values, corrupting the very history the sync was restoring.
     syncing_controls: bool,
+    /// The "Benutzerdefiniert" pattern's per-shape editor rows, dynamically
+    /// added to `background_group` by `rebuild_custom_shapes_ui` — tracked
+    /// here (rather than only as local variables) so a later rebuild can
+    /// find and remove exactly the rows a previous rebuild added, and
+    /// nothing else in the group.
+    custom_shape_rows: Vec<adw::ExpanderRow>,
 }
 
 impl EditorState {
@@ -69,7 +75,14 @@ impl EditorState {
         document.layout.spacing_px = settings.double("default-spacing");
         document.layout.margin_px = settings.double("default-margin");
         document.canvas.export_quality = settings.double("default-export-quality").round().clamp(1.0, 100.0) as u8;
-        Self { document, image_cache: HashMap::new(), project_path: None, undo_stack: UndoStack::new(), syncing_controls: false }
+        Self {
+            document,
+            image_cache: HashMap::new(),
+            project_path: None,
+            undo_stack: UndoStack::new(),
+            syncing_controls: false,
+            custom_shape_rows: Vec::new(),
+        }
     }
 }
 
@@ -479,14 +492,27 @@ fn sync_background_controls(window: &Window, background: &Background) {
         }
         Background::Decoration(shapes) => {
             window.background_type_row().set_selected(4);
-            // The preset's shape kind is a reliable enough discriminator
-            // since Dots produces only circles and DiagonalLines only
-            // lines — no need to store which preset was picked separately.
-            let is_lines = matches!(shapes.first(), Some(screenforge_core::model::VectorShape::Line { .. }));
-            window.background_decoration_row().set_selected(if is_lines { 1 } else { 0 });
+            // Dots/DiagonalLines each produce a many-shape grid of a
+            // single kind; anything smaller, mixed, or empty is treated
+            // as a hand-curated "Benutzerdefiniert" list instead — not a
+            // perfect round-trip (a tiny/coincidentally-uniform manual
+            // selection could misfire as a preset), but harmless since
+            // "Benutzerdefiniert" stays fully editable either way, and
+            // there's no separate field recording which preset (if any)
+            // actually produced the current shapes.
+            let all_circles = !shapes.is_empty() && shapes.iter().all(|s| matches!(s, VectorShape::Circle { .. }));
+            let all_lines = !shapes.is_empty() && shapes.iter().all(|s| matches!(s, VectorShape::Line { .. }));
+            let selected = if all_circles && shapes.len() > 8 {
+                0
+            } else if all_lines && shapes.len() > 8 {
+                1
+            } else {
+                2
+            };
+            window.background_decoration_row().set_selected(selected);
             let color = shapes.first().map(|s| match s {
-                screenforge_core::model::VectorShape::Circle { color, .. } => *color,
-                screenforge_core::model::VectorShape::Line { color, .. } => *color,
+                VectorShape::Circle { color, .. } => *color,
+                VectorShape::Line { color, .. } => *color,
             });
             if let Some(color) = color {
                 window.background_color_button().set_rgba(&gdk_rgba_from(&color));
@@ -563,8 +589,20 @@ fn background_from_controls(window: &Window, canvas_width: f64, canvas_height: f
             })
         }
         4 => {
-            let preset = decoration_preset_for_index(window.background_decoration_row().selected());
-            Background::Decoration(preset.shapes(canvas_width, canvas_height, color1))
+            // Index 2 ("Benutzerdefiniert") is edited entirely through
+            // `on_custom_shapes_selected`/`add_custom_shape`/
+            // `apply_shape_edit`, never through this function — but this
+            // arm still needs to produce *something* sane for it rather
+            // than falling into `decoration_preset_for_index`'s `_` catch-
+            // all (which would silently generate a `DiagonalLines` preset
+            // instead), in case some other control change re-triggers
+            // `apply_background_from_controls` while it's selected.
+            if window.background_decoration_row().selected() == 2 {
+                Background::Decoration(Vec::new())
+            } else {
+                let preset = decoration_preset_for_index(window.background_decoration_row().selected());
+                Background::Decoration(preset.shapes(canvas_width, canvas_height, color1))
+            }
         }
         _ => Background::Solid(color1),
     }
@@ -589,6 +627,317 @@ fn apply_background_from_controls(window: &Window, canvas: &Canvas, state: &Rc<R
     drop(state_ref);
     refresh_canvas(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
+    rebuild_custom_shapes_ui(window, canvas, state);
+}
+
+/// Switches the "Muster" combo to "Benutzerdefiniert" — unlike the Dots/
+/// DiagonalLines presets (which regenerate their shapes from scratch every
+/// time they're (re)selected), this preserves whatever shapes are already
+/// there if the background is already `Background::Decoration` (e.g.
+/// switching away and back, or starting from a preset to hand-edit it),
+/// and only resets to an empty list when switching in from a genuinely
+/// different background type.
+fn on_custom_shapes_selected(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let mut state_ref = state.borrow_mut();
+    if state_ref.syncing_controls {
+        return;
+    }
+    if matches!(state_ref.document.background, Background::Decoration(_)) {
+        drop(state_ref);
+        rebuild_custom_shapes_ui(window, canvas, state);
+        return;
+    }
+    let old = state_ref.document.background.clone();
+    let new = Background::Decoration(Vec::new());
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+    rebuild_custom_shapes_ui(window, canvas, state);
+}
+
+/// Appends one shape to the "Benutzerdefiniert" pattern's list as one
+/// undo step, starting from an empty list if the background isn't
+/// already `Background::Decoration` for some reason (shouldn't normally
+/// happen — the add-shape buttons are only visible once it is).
+fn add_custom_shape(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, shape: VectorShape) {
+    let mut state_ref = state.borrow_mut();
+    let old = state_ref.document.background.clone();
+    let mut shapes = match &old {
+        Background::Decoration(shapes) => shapes.clone(),
+        _ => Vec::new(),
+    };
+    shapes.push(shape);
+    let new = Background::Decoration(shapes);
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+    rebuild_custom_shapes_ui(window, canvas, state);
+}
+
+/// Removes one shape from the "Benutzerdefiniert" pattern's list (its
+/// delete button) as one undo step.
+fn delete_custom_shape(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize) {
+    let mut state_ref = state.borrow_mut();
+    let Background::Decoration(shapes) = &state_ref.document.background else { return };
+    if index >= shapes.len() {
+        return;
+    }
+    let old = state_ref.document.background.clone();
+    let mut new_shapes = shapes.clone();
+    new_shapes.remove(index);
+    let new = Background::Decoration(new_shapes);
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+    rebuild_custom_shapes_ui(window, canvas, state);
+}
+
+/// Replaces one shape in the "Benutzerdefiniert" pattern's list in place
+/// as one undo step — called by a shape row's own spin/color controls.
+/// Deliberately doesn't call `rebuild_custom_shapes_ui`: unlike add/
+/// delete, editing a value doesn't change how many rows there are, and
+/// tearing down/rebuilding the row the user is actively typing into on
+/// every keystroke would steal its own focus.
+fn apply_shape_edit(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize, new_shape: VectorShape) {
+    let mut state_ref = state.borrow_mut();
+    if state_ref.syncing_controls {
+        return;
+    }
+    let Background::Decoration(shapes) = &state_ref.document.background else { return };
+    match shapes.get(index) {
+        Some(current) if *current == new_shape => return,
+        Some(_) => {}
+        None => return,
+    }
+    let old = state_ref.document.background.clone();
+    let mut new_shapes = shapes.clone();
+    new_shapes[index] = new_shape;
+    let new = Background::Decoration(new_shapes);
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetBackground { old, new }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
+fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::SpinRow {
+    let adjustment = gtk4::Adjustment::new(value, lower, upper, 1.0, 10.0, 0.0);
+    let row = adw::SpinRow::new(Some(&adjustment), 1.0, 1);
+    row.set_title(title);
+    row
+}
+
+/// Builds one shape's `AdwExpanderRow` editor — position/size/color spin
+/// rows and color button matching its variant, plus a delete button in
+/// the header. Each control's own change handler reads every field back
+/// from these same widgets and pushes the whole shape as one
+/// `apply_shape_edit` call, rather than tracking incremental diffs.
+fn build_shape_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, index: usize, shape: &VectorShape) -> adw::ExpanderRow {
+    let expander = adw::ExpanderRow::new();
+    let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
+    delete_button.set_valign(gtk4::Align::Center);
+    delete_button.add_css_class("flat");
+    expander.add_suffix(&delete_button);
+
+    match *shape {
+        VectorShape::Circle { cx, cy, radius, color } => {
+            expander.set_title(&format!("Kreis {}", index + 1));
+            let cx_row = spin_row("Mitte X", 0.0, 8000.0, cx);
+            let cy_row = spin_row("Mitte Y", 0.0, 8000.0, cy);
+            let radius_row = spin_row("Radius", 1.0, 4000.0, radius);
+            let color_row = adw::ActionRow::new();
+            color_row.set_title("Farbe");
+            let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
+            color_button.set_valign(gtk4::Align::Center);
+            color_button.set_rgba(&gdk_rgba_from(&color));
+            color_row.add_suffix(&color_button);
+            expander.add_row(&cx_row);
+            expander.add_row(&cy_row);
+            expander.add_row(&radius_row);
+            expander.add_row(&color_row);
+
+            let apply = glib::clone!(
+                #[weak]
+                window,
+                #[weak]
+                canvas,
+                #[strong]
+                state,
+                #[weak]
+                cx_row,
+                #[weak]
+                cy_row,
+                #[weak]
+                radius_row,
+                #[weak]
+                color_button,
+                move || {
+                    let new_shape = VectorShape::Circle {
+                        cx: cx_row.value(),
+                        cy: cy_row.value(),
+                        radius: radius_row.value(),
+                        color: rgba_from_gdk(&color_button.rgba()),
+                    };
+                    apply_shape_edit(&window, &canvas, &state, index, new_shape);
+                }
+            );
+            cx_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            cy_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            radius_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            color_button.connect_rgba_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+        }
+        VectorShape::Line { x1, y1, x2, y2, width, color } => {
+            expander.set_title(&format!("Linie {}", index + 1));
+            let x1_row = spin_row("X1", 0.0, 8000.0, x1);
+            let y1_row = spin_row("Y1", 0.0, 8000.0, y1);
+            let x2_row = spin_row("X2", 0.0, 8000.0, x2);
+            let y2_row = spin_row("Y2", 0.0, 8000.0, y2);
+            let width_row = spin_row("Linienbreite", 1.0, 200.0, width);
+            let color_row = adw::ActionRow::new();
+            color_row.set_title("Farbe");
+            let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
+            color_button.set_valign(gtk4::Align::Center);
+            color_button.set_rgba(&gdk_rgba_from(&color));
+            color_row.add_suffix(&color_button);
+            expander.add_row(&x1_row);
+            expander.add_row(&y1_row);
+            expander.add_row(&x2_row);
+            expander.add_row(&y2_row);
+            expander.add_row(&width_row);
+            expander.add_row(&color_row);
+
+            let apply = glib::clone!(
+                #[weak]
+                window,
+                #[weak]
+                canvas,
+                #[strong]
+                state,
+                #[weak]
+                x1_row,
+                #[weak]
+                y1_row,
+                #[weak]
+                x2_row,
+                #[weak]
+                y2_row,
+                #[weak]
+                width_row,
+                #[weak]
+                color_button,
+                move || {
+                    let new_shape = VectorShape::Line {
+                        x1: x1_row.value(),
+                        y1: y1_row.value(),
+                        x2: x2_row.value(),
+                        y2: y2_row.value(),
+                        width: width_row.value(),
+                        color: rgba_from_gdk(&color_button.rgba()),
+                    };
+                    apply_shape_edit(&window, &canvas, &state, index, new_shape);
+                }
+            );
+            x1_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            y1_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            x2_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            y2_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            width_row.connect_value_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+            color_button.connect_rgba_notify(glib::clone!(
+                #[strong]
+                apply,
+                move |_| apply()
+            ));
+        }
+    }
+
+    delete_button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| delete_custom_shape(&window, &canvas, &state, index)
+    ));
+
+    expander
+}
+
+/// Rebuilds the "Benutzerdefiniert" pattern's per-shape editor rows to
+/// match `state.document.background`'s current shapes — called after
+/// every structural change (add/delete a shape, switch pattern/type,
+/// undo/redo, project load). Removes exactly the rows a previous call
+/// added (tracked in `EditorState::custom_shape_rows`) before adding
+/// fresh ones, so this is always safe to call repeatedly. A no-op list
+/// (but still updates `add_shape_row`'s visibility) whenever the combo
+/// isn't on "Benutzerdefiniert".
+fn rebuild_custom_shapes_ui(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let group = window.background_group();
+    let old_rows = std::mem::take(&mut state.borrow_mut().custom_shape_rows);
+    for row in old_rows {
+        group.remove(&row);
+    }
+
+    let is_custom = window.background_type_row().selected() == 4 && window.background_decoration_row().selected() == 2;
+    window.add_shape_row().set_visible(is_custom);
+    if !is_custom {
+        return;
+    }
+
+    let shapes = match &state.borrow().document.background {
+        Background::Decoration(shapes) => shapes.clone(),
+        _ => Vec::new(),
+    };
+
+    let mut new_rows = Vec::with_capacity(shapes.len());
+    for (index, shape) in shapes.iter().enumerate() {
+        let row = build_shape_row(window, canvas, state, index, shape);
+        group.add(&row);
+        new_rows.push(row);
+    }
+    state.borrow_mut().custom_shape_rows = new_rows;
 }
 
 /// Wires background (solid or linear gradient), shadow preset and
@@ -699,8 +1048,55 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         canvas,
         #[strong]
         state,
-        move |_| apply_background_from_controls(&window, &canvas, &state)
+        move |row| {
+            if row.selected() == 2 {
+                on_custom_shapes_selected(&window, &canvas, &state);
+            } else {
+                apply_background_from_controls(&window, &canvas, &state);
+            }
+        }
     ));
+    window.add_circle_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| {
+            let (w, h) = {
+                let state_ref = state.borrow();
+                (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64)
+            };
+            let radius = (w.min(h) * 0.1).max(10.0);
+            let shape = VectorShape::Circle { cx: w / 2.0, cy: h / 2.0, radius, color: Rgba::new(0.2, 0.2, 0.2, 0.5) };
+            add_custom_shape(&window, &canvas, &state, shape);
+        }
+    ));
+    window.add_line_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| {
+            let (w, h) = {
+                let state_ref = state.borrow();
+                (state_ref.document.canvas.export_width as f64, state_ref.document.canvas.export_height as f64)
+            };
+            let shape = VectorShape::Line {
+                x1: w * 0.25,
+                y1: h * 0.5,
+                x2: w * 0.75,
+                y2: h * 0.5,
+                width: 4.0,
+                color: Rgba::new(0.2, 0.2, 0.2, 0.5),
+            };
+            add_custom_shape(&window, &canvas, &state, shape);
+        }
+    ));
+    rebuild_custom_shapes_ui(window, canvas, state);
 
     register_background_image_controls(window, canvas, state);
 
@@ -1182,7 +1578,7 @@ async fn save_project_as(window: &Window, state: &Rc<RefCell<EditorState>>) {
 /// here only because ScreenForge itself never saves a document with
 /// per-element shadow/radius variation; that assumption would need
 /// revisiting if per-element controls are added later.
-fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>) {
+fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     state.borrow_mut().syncing_controls = true;
 
     let doc = state.borrow().document.clone();
@@ -1226,6 +1622,7 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
     window.text_color_row().set_sensitive(doc.text_overlay.enabled);
 
     state.borrow_mut().syncing_controls = false;
+    rebuild_custom_shapes_ui(window, canvas, state);
 }
 
 /// `win.save`, `win.save-as` and `win.open-project` — the `.screenforge`
@@ -1328,7 +1725,7 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
                             state_ref.undo_stack = UndoStack::new();
                         }
                         refresh_canvas(&window, &canvas, &state);
-                        sync_controls_from_document(&window, &state);
+                        sync_controls_from_document(&window, &canvas, &state);
                         update_undo_redo_sensitivity(&window, &state);
 
                         let toast = if missing > 0 {
@@ -1451,7 +1848,7 @@ fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCel
                     undo_stack.apply(Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, new }), document);
                 }
                 refresh_canvas(&window, &canvas, &state);
-                sync_controls_from_document(&window, &state);
+                sync_controls_from_document(&window, &canvas, &state);
                 update_undo_redo_sensitivity(&window, &state);
                 window.toast_overlay().add_toast(adw::Toast::new("Vorlage angewendet"));
             });
@@ -1542,7 +1939,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.undo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &state);
+            sync_controls_from_document(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1565,7 +1962,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.redo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &state);
+            sync_controls_from_document(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));

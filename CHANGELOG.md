@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-02
+
+### Added
+
+- Freeform vector shapes: the "Vektor-Muster" background gets a third
+  "Benutzerdefiniert" pattern alongside the Dots/DiagonalLines presets —
+  add individual circles or lines ("+ Kreis"/"+ Linie"), each with its
+  own position, size and color, editable in place and individually
+  deletable. Switching into it from an existing Dots/DiagonalLines
+  pattern starts from those shapes as an editable starting point, rather
+  than discarding them.
+
 ## [0.16.0] - 2026-09-02
 
 ### Added

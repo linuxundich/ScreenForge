@@ -76,6 +76,22 @@ impl Window {
         self.imp().background_decoration_row.get().clone()
     }
 
+    pub fn background_group(&self) -> adw::PreferencesGroup {
+        self.imp().background_group.get().clone()
+    }
+
+    pub fn add_shape_row(&self) -> adw::ActionRow {
+        self.imp().add_shape_row.get().clone()
+    }
+
+    pub fn add_circle_button(&self) -> gtk4::Button {
+        self.imp().add_circle_button.get().clone()
+    }
+
+    pub fn add_line_button(&self) -> gtk4::Button {
+        self.imp().add_line_button.get().clone()
+    }
+
     pub fn shadow_row(&self) -> adw::ComboRow {
         self.imp().shadow_row.get().clone()
     }
@@ -192,6 +208,14 @@ mod imp {
         pub background_image_opacity_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub background_decoration_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub background_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub add_shape_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub add_circle_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub add_line_button: TemplateChild<gtk4::Button>,
         #[template_child]
         pub shadow_row: TemplateChild<adw::ComboRow>,
         #[template_child]

@@ -121,7 +121,7 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwPreferencesGroup">
+                      <object class="AdwPreferencesGroup" id="background_group">
                         <property name="title" translatable="yes">Hintergrund</property>
                         <child>
                           <object class="AdwComboRow" id="background_type_row">
@@ -238,9 +238,28 @@
                                 <items>
                                   <item translatable="yes">Punkte</item>
                                   <item translatable="yes">Diagonale Linien</item>
+                                  <item translatable="yes">Benutzerdefiniert</item>
                                 </items>
                               </object>
                             </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="add_shape_row">
+                            <property name="title" translatable="yes">Form hinzufügen</property>
+                            <property name="visible">false</property>
+                            <child type="suffix">
+                              <object class="GtkButton" id="add_circle_button">
+                                <property name="valign">center</property>
+                                <property name="label" translatable="yes">+ Kreis</property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="add_line_button">
+                                <property name="valign">center</property>
+                                <property name="label" translatable="yes">+ Linie</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>

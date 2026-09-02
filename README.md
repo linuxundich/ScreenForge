@@ -29,7 +29,8 @@ PNG, JPEG or WebP image.
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
 - **Backgrounds**: solid color, linear gradient, radial gradient, an
   image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), or
-  a vector pattern (dot grid or diagonal stripes) in a chosen color.
+  a vector pattern — a dot grid, diagonal stripes, or freeform: add
+  individual circles/lines with their own position, size and color.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
 - **Text overlay**: an optional caption drawn over the whole composition,
@@ -87,8 +88,7 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: freeform vector shapes (only the two
-background patterns above exist so far).
+history.
 
 ## License
 
