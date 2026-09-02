@@ -23,8 +23,8 @@ PNG, JPEG or WebP image.
   rounded corners.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
 - **Undo/redo** for every edit.
-- **Export** to PNG, JPEG or WebP at a freely chosen resolution, rendered
-  off the UI thread so the app never blocks.
+- **Export** to PNG, JPEG, WebP or AVIF at a freely chosen resolution,
+  rendered off the UI thread so the app never blocks.
 - **Projects**: save/load as `.screenforge` files (versioned JSON,
   image references kept as paths — originals are never modified).
 
@@ -64,9 +64,8 @@ GUI toolkit and is unit-testable on its own:
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
 history. Not yet implemented: snap guides, free (manual) positioning,
-text and vector decorations, reusable templates, image backgrounds, AVIF
-export, per-element manual size/position controls, and a preferences
-page.
+text and vector decorations, reusable templates, image backgrounds,
+per-element manual size/position controls, and a preferences page.
 
 ## License
 

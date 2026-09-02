@@ -64,6 +64,13 @@ pub fn render_and_write(doc: &Document, decoded_images: &HashMap<Uuid, DecodedIm
             let encoder = image::codecs::webp::WebPEncoder::new_lossless(file);
             encoder.write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)?;
         }
+        ExportFormat::Avif => {
+            let rgba = surface_to_rgba_image(&mut target)?;
+            let file = File::create(path)?;
+            let quality = doc.canvas.export_quality.clamp(1, 100);
+            let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(file, 4, quality);
+            encoder.write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)?;
+        }
     }
     Ok(())
 }
@@ -95,4 +102,31 @@ fn surface_to_rgba_image(surface: &mut cairo::ImageSurface) -> Result<RgbaImage,
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use screenforge_core::model::Document;
+
+    /// Each format's encoder path, exercised end-to-end against an empty
+    /// (background-only) document — enough to catch an encoder call that
+    /// panics or a file that never gets written, without needing any real
+    /// screenshots decoded.
+    #[test]
+    fn every_export_format_writes_a_non_empty_file() {
+        for format in [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::WebP, ExportFormat::Avif] {
+            let mut doc = Document::new();
+            doc.canvas.export_width = 32;
+            doc.canvas.export_height = 24;
+            doc.canvas.export_format = format;
+
+            let path = std::env::temp_dir().join(format!("screenforge-export-test-{format:?}.bin"));
+            render_and_write(&doc, &HashMap::new(), &path).unwrap_or_else(|err| panic!("{format:?} export failed: {err}"));
+
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(!bytes.is_empty(), "{format:?} export wrote an empty file");
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }

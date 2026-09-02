@@ -12,7 +12,7 @@ cairo-rs = { version = "0.22.9", features = ["png"] }
 gio = "0.22.9"
 glib = "0.22.9"
 gtk4 = { version = "0.11.4", features = ["v4_22"] }
-image = "0.25.10"
+image = { version = "0.25.10", features = ["avif"] }
 libadwaita = { version = "0.9.2", features = ["v1_9"] }
 screenforge-core = { path = "../core" }
 serde = { version = "1.0.229", features = ["derive"] }

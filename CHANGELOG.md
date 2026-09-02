@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-02
+
+### Added
+
+- AVIF export, alongside PNG, JPEG and WebP, using the quality slider
+  already shared with JPEG/WebP.
+
 ## [0.4.0] - 2026-09-02
 
 ### Added

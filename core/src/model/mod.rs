@@ -248,6 +248,7 @@ pub enum ExportFormat {
     Png,
     Jpeg,
     WebP,
+    Avif,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

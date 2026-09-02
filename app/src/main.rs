@@ -557,7 +557,8 @@ fn export_format_for_index(index: u32) -> ExportFormat {
     match index {
         0 => ExportFormat::Png,
         1 => ExportFormat::Jpeg,
-        _ => ExportFormat::WebP,
+        2 => ExportFormat::WebP,
+        _ => ExportFormat::Avif,
     }
 }
 
@@ -566,6 +567,7 @@ fn index_for_export_format(format: ExportFormat) -> u32 {
         ExportFormat::Png => 0,
         ExportFormat::Jpeg => 1,
         ExportFormat::WebP => 2,
+        ExportFormat::Avif => 3,
     }
 }
 
@@ -613,6 +615,7 @@ fn extension_for_format(format: ExportFormat) -> &'static str {
         ExportFormat::Png => "png",
         ExportFormat::Jpeg => "jpg",
         ExportFormat::WebP => "webp",
+        ExportFormat::Avif => "avif",
     }
 }
 

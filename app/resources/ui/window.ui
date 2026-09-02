@@ -254,6 +254,7 @@
                                   <item>PNG</item>
                                   <item>JPEG</item>
                                   <item>WebP</item>
+                                  <item>AVIF</item>
                                 </items>
                               </object>
                             </property>
@@ -262,7 +263,7 @@
                         <child>
                           <object class="AdwSpinRow" id="export_quality_row">
                             <property name="title" translatable="yes">Qualität</property>
-                            <property name="subtitle" translatable="yes">Nur für JPEG/WebP</property>
+                            <property name="subtitle" translatable="yes">Nur für JPEG/WebP/AVIF</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
