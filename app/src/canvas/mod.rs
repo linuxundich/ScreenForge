@@ -87,6 +87,16 @@ impl Canvas {
     pub fn connect_move<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
         self.imp().set_move_callback(f);
     }
+
+    /// Called at the end of a `LayoutMode::Free` corner-handle drag that
+    /// actually resized an element (its index into `Document.elements`,
+    /// and its complete new transform — width/height and, unless the
+    /// bottom-right corner was grabbed, x/y too, since the opposite corner
+    /// stays anchored). Never fires outside Free mode or for a drag that
+    /// ends back where it started.
+    pub fn connect_resize<F: Fn(usize, screenforge_core::model::Transform) + 'static>(&self, f: F) {
+        self.imp().set_resize_callback(f);
+    }
 }
 
 impl Default for Canvas {
@@ -105,15 +115,27 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::{Document, LayoutMode};
+    use screenforge_core::model::{Corner, Document, LayoutMode, Transform};
     use uuid::Uuid;
 
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
     type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
     type MoveCallback = Box<dyn Fn(usize, f64, f64)>;
+    type ResizeCallback = Box<dyn Fn(usize, Transform)>;
     /// `(drag-start point, dragged element's original x/y)`, both in
     /// document space.
     type FreeDragOrigin = ((f64, f64), (f64, f64));
+    /// `(corner grabbed, dragged element's original transform, drag-start
+    /// point in document space)`.
+    type ResizeDragOrigin = (Corner, Transform, (f64, f64));
+
+    /// How close (in *screen* pixels, regardless of zoom) a press has to
+    /// land to a Free-mode element's corner to grab it for resizing rather
+    /// than moving the whole element.
+    const HANDLE_HIT_RADIUS_PX: f64 = 10.0;
+    /// Half the side length of the little squares `snapshot()` draws at
+    /// each Free-mode element's corners.
+    const HANDLE_DRAW_HALF_PX: f64 = 5.0;
 
     pub struct Canvas {
         document: RefCell<Document>,
@@ -150,9 +172,15 @@ mod imp {
         /// element's own transform.x/y at that moment. Together they turn
         /// the gesture's cumulative offset into an absolute new position.
         free_drag_origin: Cell<Option<FreeDragOrigin>>,
+        /// Set instead of `free_drag_origin` when the drag that picked up
+        /// `drag_from` grabbed one of that element's corner handles —
+        /// checked first, so grabbing near a corner always resizes rather
+        /// than moves.
+        resize_drag_origin: Cell<Option<ResizeDragOrigin>>,
         reorder_callback: RefCell<Option<ReorderCallback>>,
         context_menu_callback: RefCell<Option<ContextMenuCallback>>,
         move_callback: RefCell<Option<MoveCallback>>,
+        resize_callback: RefCell<Option<ResizeCallback>>,
     }
 
     impl Default for Canvas {
@@ -170,9 +198,11 @@ mod imp {
                 drag_from: Cell::new(None),
                 drag_hover: Cell::new(None),
                 free_drag_origin: Cell::new(None),
+                resize_drag_origin: Cell::new(None),
                 reorder_callback: RefCell::new(None),
                 context_menu_callback: RefCell::new(None),
                 move_callback: RefCell::new(None),
+                resize_callback: RefCell::new(None),
             }
         }
     }
@@ -291,6 +321,32 @@ mod imp {
                     ctx.line_to(line_x, offset_y + render_h as f64);
                     let _ = ctx.stroke();
                 }
+
+                // Resize handles at every element's corners — only in Free
+                // mode, where dragging one actually does something (spec
+                // §8). There's no per-element selection yet, so every
+                // element gets its handles drawn, not just a chosen one.
+                if self.document.borrow().layout.mode == LayoutMode::Free {
+                    let scale = self.last_scale.get();
+                    for p in self.last_placements.borrow().iter() {
+                        for (cx, cy) in
+                            [(p.x, p.y), (p.x + p.width, p.y), (p.x, p.y + p.height), (p.x + p.width, p.y + p.height)]
+                        {
+                            let (sx, sy) = (offset_x + cx * scale, offset_y + cy * scale);
+                            ctx.rectangle(
+                                sx - HANDLE_DRAW_HALF_PX,
+                                sy - HANDLE_DRAW_HALF_PX,
+                                HANDLE_DRAW_HALF_PX * 2.0,
+                                HANDLE_DRAW_HALF_PX * 2.0,
+                            );
+                            ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                            let _ = ctx.fill_preserve();
+                            ctx.set_source_rgba(0.29, 0.56, 0.89, 1.0);
+                            ctx.set_line_width(1.5);
+                            let _ = ctx.stroke();
+                        }
+                    }
+                }
             }
 
             if self.drag_active.get() {
@@ -335,6 +391,10 @@ mod imp {
 
         pub fn set_move_callback<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
             *self.move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub fn set_resize_callback<F: Fn(usize, Transform) + 'static>(&self, f: F) {
+            *self.resize_callback.borrow_mut() = Some(Box::new(f));
         }
 
         pub(super) fn on_secondary_click(&self, x: f64, y: f64) {
@@ -418,6 +478,36 @@ mod imp {
                 .position(|p| doc_x >= p.x && doc_x <= p.x + p.width && doc_y >= p.y && doc_y <= p.y + p.height)
         }
 
+        /// Which element's corner handle (if any) covers `(doc_x, doc_y)` —
+        /// only meaningful in `LayoutMode::Free`, where `snapshot()` draws
+        /// these handles in the first place. `HANDLE_HIT_RADIUS_PX` is a
+        /// screen-pixel radius, so it's converted through `last_scale`
+        /// first to stay a constant on-screen hit target at any zoom level.
+        fn corner_handle_at(&self, doc_x: f64, doc_y: f64) -> Option<(usize, Corner)> {
+            let scale = self.last_scale.get();
+            if scale <= 0.0 {
+                return None;
+            }
+            let tolerance = HANDLE_HIT_RADIUS_PX / scale;
+            let tolerance_sq = tolerance * tolerance;
+
+            for (index, p) in self.last_placements.borrow().iter().enumerate() {
+                let corners = [
+                    (Corner::TopLeft, p.x, p.y),
+                    (Corner::TopRight, p.x + p.width, p.y),
+                    (Corner::BottomLeft, p.x, p.y + p.height),
+                    (Corner::BottomRight, p.x + p.width, p.y + p.height),
+                ];
+                for (corner, cx, cy) in corners {
+                    let (dx, dy) = (doc_x - cx, doc_y - cy);
+                    if dx * dx + dy * dy <= tolerance_sq {
+                        return Some((index, corner));
+                    }
+                }
+            }
+            None
+        }
+
         /// Where `doc_x` would be inserted among the current placements, as
         /// a position in `0..=last_placements.len()` (not yet adjusted for
         /// the removal of the dragged element — see `on_drag_end`).
@@ -428,24 +518,42 @@ mod imp {
 
         pub(super) fn on_drag_begin(&self, x: f64, y: f64) {
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
-            let hit = self.element_index_at(doc_x, doc_y);
-            self.drag_from.set(hit);
 
-            if let Some(index) = hit {
-                if self.document.borrow().layout.mode == LayoutMode::Free {
-                    let origin = {
-                        let doc = self.document.borrow();
-                        let t = doc.elements[index].transform;
-                        (t.x, t.y)
-                    };
-                    self.free_drag_origin.set(Some(((doc_x, doc_y), origin)));
+            if self.document.borrow().layout.mode == LayoutMode::Free {
+                if let Some((index, corner)) = self.corner_handle_at(doc_x, doc_y) {
+                    let original = self.document.borrow().elements[index].transform;
+                    self.drag_from.set(Some(index));
+                    self.resize_drag_origin.set(Some((corner, original, (doc_x, doc_y))));
                     return;
                 }
+
+                let hit = self.element_index_at(doc_x, doc_y);
+                self.drag_from.set(hit);
+                if let Some(index) = hit {
+                    let origin = self.document.borrow().elements[index].transform;
+                    self.free_drag_origin.set(Some(((doc_x, doc_y), (origin.x, origin.y))));
+                }
+                return;
             }
+
+            let hit = self.element_index_at(doc_x, doc_y);
+            self.drag_from.set(hit);
             self.drag_hover.set(hit);
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if let Some((corner, original, (start_x, start_y))) = self.resize_drag_origin.get() {
+                let Some(index) = self.drag_from.get() else { return };
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                        el.transform = original.resized_from_corner(corner, doc_x - start_x, doc_y - start_y);
+                    }
+                    self.content_dirty.set(true);
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
             if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.get() {
                 let Some(index) = self.drag_from.get() else { return };
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
@@ -469,6 +577,19 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some((corner, original, (start_x, start_y))) = self.resize_drag_origin.take() {
+                let Some(index) = self.drag_from.take() else { return };
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let new = original.resized_from_corner(corner, doc_x - start_x, doc_y - start_y);
+                    if new != original {
+                        if let Some(cb) = self.resize_callback.borrow().as_ref() {
+                            cb(index, new);
+                        }
+                    }
+                }
+                return;
+            }
+
             if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.take() {
                 let Some(index) = self.drag_from.take() else { return };
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
@@ -505,11 +626,21 @@ mod imp {
         }
 
         pub(super) fn cancel_drag(&self) {
-            // A cancelled Free-mode drag needs its in-place preview move
-            // undone explicitly — unlike reorder's hover indicator, the
-            // element's position was mutated live during the drag, and
-            // nothing else will put it back until the next `set_document`.
-            if let (Some(index), Some((_, (orig_x, orig_y)))) = (self.drag_from.take(), self.free_drag_origin.take()) {
+            // A cancelled Free-mode drag (move or resize) needs its in-place
+            // preview mutation undone explicitly — unlike reorder's hover
+            // indicator, the element's transform was mutated live during the
+            // drag, and nothing else will put it back until the next
+            // `set_document`.
+            let index = self.drag_from.take();
+            let resize_origin = self.resize_drag_origin.take();
+            let free_origin = self.free_drag_origin.take();
+
+            if let (Some(index), Some((_, original, _))) = (index, resize_origin) {
+                if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                    el.transform = original;
+                }
+                self.content_dirty.set(true);
+            } else if let (Some(index), Some((_, (orig_x, orig_y)))) = (index, free_origin) {
                 if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
                     el.transform.x = orig_x;
                     el.transform.y = orig_y;

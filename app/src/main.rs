@@ -113,6 +113,7 @@ fn build_ui(app: &adw::Application) {
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
     register_move(&window, &canvas, &state);
+    register_resize(&window, &canvas, &state);
     register_context_menu(&window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
 
@@ -1232,6 +1233,30 @@ fn register_move(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorStat
             let mut new = old;
             new.x = new_x;
             new.y = new_y;
+            let element_id = element.id;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// Wires the canvas's `LayoutMode::Free` corner-handle resize-drag to an
+/// undoable [`SetTransform`] (spec §8: manual positioning).
+fn register_resize(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_resize(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |index, new| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.get(index) else { return };
+            let old = element.transform;
             let element_id = element.id;
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);

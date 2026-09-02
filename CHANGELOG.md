@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-02
+
+### Added
+
+- Resize handles for Free-mode screenshots: drag any corner to resize,
+  keeping the opposite corner anchored. Respects each screenshot's
+  aspect-lock (on by default) by deriving height from width. Undoable,
+  like every other edit.
+
+### Note
+
+Snap guides and multi-select are still not part of this slice.
+
 ## [0.7.0] - 2026-09-02
 
 ### Added

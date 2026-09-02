@@ -67,6 +67,50 @@ impl Default for Transform {
     }
 }
 
+/// One of a `Transform`'s four resize handles, in document space (not
+/// affected by `rotation_deg` — resize handles operate on the unrotated
+/// bounding box, matching `render::compose`'s draw order of scale-then-
+/// rotate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Transform {
+    /// Smallest width/height a resize can produce, in document pixels —
+    /// keeps a drag from collapsing a screenshot to zero or negative size.
+    pub const MIN_SIZE: f64 = 20.0;
+
+    /// The transform that results from dragging `corner` by `(dx, dy)` in
+    /// document space, keeping the *opposite* corner fixed in place. When
+    /// `aspect_locked` is set, height always follows width to preserve the
+    /// original aspect ratio — width is the driving axis regardless of
+    /// which direction the drag moved more.
+    pub fn resized_from_corner(&self, corner: Corner, dx: f64, dy: f64) -> Transform {
+        let (horiz_sign, vert_sign) = match corner {
+            Corner::TopLeft => (-1.0, -1.0),
+            Corner::TopRight => (1.0, -1.0),
+            Corner::BottomLeft => (-1.0, 1.0),
+            Corner::BottomRight => (1.0, 1.0),
+        };
+
+        let width = (self.width + horiz_sign * dx).max(Self::MIN_SIZE);
+        let height = if self.aspect_locked {
+            (width * (self.height / self.width.max(Self::MIN_SIZE))).max(Self::MIN_SIZE)
+        } else {
+            (self.height + vert_sign * dy).max(Self::MIN_SIZE)
+        };
+
+        let x = if horiz_sign > 0.0 { self.x } else { self.x + self.width - width };
+        let y = if vert_sign > 0.0 { self.y } else { self.y + self.height - height };
+
+        Transform { x, y, width, height, ..*self }
+    }
+}
+
 /// Per-corner radius, in document pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CornerRadius {
@@ -294,5 +338,71 @@ impl Document {
 impl Default for Document {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> Transform {
+        Transform { x: 100.0, y: 100.0, width: 200.0, height: 100.0, aspect_locked: false, ..Transform::default() }
+    }
+
+    #[test]
+    fn bottom_right_grows_size_and_keeps_top_left_anchored() {
+        let resized = fixture().resized_from_corner(Corner::BottomRight, 20.0, 30.0);
+        assert_eq!(resized.x, 100.0);
+        assert_eq!(resized.y, 100.0);
+        assert_eq!(resized.width, 220.0);
+        assert_eq!(resized.height, 130.0);
+    }
+
+    #[test]
+    fn top_left_shrinks_size_and_keeps_bottom_right_anchored() {
+        let original = fixture();
+        let resized = original.resized_from_corner(Corner::TopLeft, 20.0, 10.0);
+        assert_eq!(resized.width, 180.0);
+        assert_eq!(resized.height, 90.0);
+        assert_eq!(resized.x, 120.0);
+        assert_eq!(resized.y, 110.0);
+        // The opposite corner (bottom-right) stays at the same document point.
+        assert_eq!(resized.x + resized.width, original.x + original.width);
+        assert_eq!(resized.y + resized.height, original.y + original.height);
+    }
+
+    #[test]
+    fn top_right_and_bottom_left_anchor_their_own_opposite_corner() {
+        let original = fixture();
+
+        let top_right = original.resized_from_corner(Corner::TopRight, 20.0, 10.0);
+        assert_eq!(top_right.x, 100.0);
+        assert_eq!(top_right.width, 220.0);
+        assert_eq!(top_right.height, 90.0);
+        assert_eq!(top_right.y, 110.0);
+        assert_eq!(top_right.y + top_right.height, original.y + original.height);
+
+        let bottom_left = original.resized_from_corner(Corner::BottomLeft, 20.0, 10.0);
+        assert_eq!(bottom_left.y, 100.0);
+        assert_eq!(bottom_left.height, 110.0);
+        assert_eq!(bottom_left.width, 180.0);
+        assert_eq!(bottom_left.x, 120.0);
+        assert_eq!(bottom_left.x + bottom_left.width, original.x + original.width);
+    }
+
+    #[test]
+    fn resize_never_shrinks_below_the_minimum_size() {
+        let resized = fixture().resized_from_corner(Corner::BottomRight, -9999.0, -9999.0);
+        assert_eq!(resized.width, Transform::MIN_SIZE);
+        assert_eq!(resized.height, Transform::MIN_SIZE);
+    }
+
+    #[test]
+    fn aspect_locked_derives_height_from_width_regardless_of_dy() {
+        let mut original = fixture();
+        original.aspect_locked = true; // 200x100, aspect 2:1
+        let resized = original.resized_from_corner(Corner::BottomRight, 40.0, 9999.0);
+        assert_eq!(resized.width, 240.0);
+        assert_eq!(resized.height, 120.0);
     }
 }

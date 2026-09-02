@@ -16,7 +16,8 @@ PNG, JPEG or WebP image.
 - **Layout modes**: horizontal, vertical, or grid (each scaling screenshots
   to a common size automatically, with adjustable spacing and outer
   margin), or free — drag any screenshot anywhere on the canvas to
-  position it manually.
+  position it, and its corner handles to resize it (aspect-locked by
+  default).
 - **Reordering** by dragging screenshots directly on the canvas.
 - **Per-screenshot context menu**: duplicate, replace, delete, bring
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
@@ -66,9 +67,8 @@ GUI toolkit and is unit-testable on its own:
 
 ScreenForge is under active development. The features listed above are
 implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history. Not yet implemented: snap guides, resize handles for
-free-positioned screenshots, multi-select, text and vector decorations,
-reusable templates, and a preferences page.
+history. Not yet implemented: snap guides, multi-select, text and vector
+decorations, reusable templates, and a preferences page.
 
 ## License
 
