@@ -73,6 +73,7 @@
                                   <item translatable="yes">Horizontal</item>
                                   <item translatable="yes">Vertikal</item>
                                   <item translatable="yes">Raster</item>
+                                  <item translatable="yes">Frei</item>
                                 </items>
                               </object>
                             </property>

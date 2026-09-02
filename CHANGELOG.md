@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-02
+
+### Added
+
+- Free layout mode ("Frei"): drag any screenshot anywhere on the canvas to
+  position it manually, instead of an automatic arrangement. Switching
+  into it snapshots each screenshot's current (auto-computed) placement as
+  its starting position, so nothing jumps to the origin. Moves are
+  undoable, like every other edit.
+
+### Note
+
+Resizing, snap guides and multi-select are deliberately not part of this
+slice — manual positioning ships first, those build on top of it next.
+
 ## [0.6.0] - 2026-09-02
 
 ### Added

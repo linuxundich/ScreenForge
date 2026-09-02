@@ -33,8 +33,27 @@ pub fn compute_layout(
         LayoutMode::Horizontal => compute_horizontal_layout(elements, spacing_px, margin_px),
         LayoutMode::Vertical => compute_vertical_layout(elements, spacing_px, margin_px),
         LayoutMode::Grid => compute_grid_layout(elements, spacing_px, margin_px),
-        LayoutMode::Free => todo!("free positioning (manual per-element placement) is not implemented yet"),
+        LayoutMode::Free => compute_free_layout(elements),
     }
+}
+
+/// Places every element at its own stored position/size (`spacing_px` and
+/// `margin_px` don't apply — there's nothing automatic to space out).
+/// Elements newly switched into Free mode get their transform populated
+/// from their last computed placement first (see
+/// `command::EnterFreeLayout`), so this only ever sees meaningful
+/// coordinates, never the `Transform::default()` zeroes.
+pub fn compute_free_layout(elements: &[ScreenshotElement]) -> Vec<Placement> {
+    elements
+        .iter()
+        .map(|el| Placement {
+            element_id: el.id,
+            x: el.transform.x,
+            y: el.transform.y,
+            width: el.transform.width,
+            height: el.transform.height,
+        })
+        .collect()
 }
 
 /// Scales every element to a common width (the smallest natural width in
@@ -197,10 +216,34 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn free_mode_is_not_yet_implemented() {
-        let elements = [fixture(400.0, 800.0)];
-        compute_layout(LayoutMode::Free, &elements, 0.0, 0.0);
+    fn free_layout_uses_each_elements_own_stored_position_and_size() {
+        let mut a = fixture(400.0, 800.0);
+        a.transform.x = 10.0;
+        a.transform.y = 20.0;
+        a.transform.width = 111.0;
+        a.transform.height = 222.0;
+        let mut b = fixture(400.0, 800.0);
+        b.transform.x = 300.0;
+        b.transform.y = 5.0;
+        b.transform.width = 50.0;
+        b.transform.height = 60.0;
+
+        // Spacing/margin have no effect — Free mode ignores them entirely.
+        let placements = compute_layout(LayoutMode::Free, &[a, b], 999.0, 999.0);
+
+        assert_eq!(placements[0].x, 10.0);
+        assert_eq!(placements[0].y, 20.0);
+        assert_eq!(placements[0].width, 111.0);
+        assert_eq!(placements[0].height, 222.0);
+        assert_eq!(placements[1].x, 300.0);
+        assert_eq!(placements[1].y, 5.0);
+        assert_eq!(placements[1].width, 50.0);
+        assert_eq!(placements[1].height, 60.0);
+    }
+
+    #[test]
+    fn free_layout_of_empty_input_is_empty() {
+        assert_eq!(compute_free_layout(&[]), Vec::new());
     }
 
     #[test]

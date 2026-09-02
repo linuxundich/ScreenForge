@@ -15,8 +15,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
-    AddScreenshots, Command, DuplicateScreenshot, RemoveScreenshot, ReorderScreenshot, ReplaceScreenshotSource, SetBackground,
-    SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
+    AddScreenshots, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, ReorderScreenshot, ReplaceScreenshotSource,
+    SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetShadowForAllElements, SetSpacing, SetTransform, UndoStack,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, CornerRadius, Document, ExportFormat, GradientKind, GradientSpec, ImageBackgroundSpec, ImageSource,
@@ -112,6 +112,7 @@ fn build_ui(app: &adw::Application) {
     register_undo_redo_actions(app, &window, &canvas, &state);
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
+    register_move(&window, &canvas, &state);
     register_context_menu(&window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
 
@@ -269,7 +270,8 @@ fn layout_mode_for_index(index: u32) -> LayoutMode {
     match index {
         0 => LayoutMode::Horizontal,
         1 => LayoutMode::Vertical,
-        _ => LayoutMode::Grid,
+        2 => LayoutMode::Grid,
+        _ => LayoutMode::Free,
     }
 }
 
@@ -278,8 +280,7 @@ fn index_for_layout_mode(mode: LayoutMode) -> u32 {
         LayoutMode::Horizontal => 0,
         LayoutMode::Vertical => 1,
         LayoutMode::Grid => 2,
-        // "Free" positioning has no UI entry yet; fall back to Horizontal's slot.
-        LayoutMode::Free => 0,
+        LayoutMode::Free => 3,
     }
 }
 
@@ -312,8 +313,33 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             if state_ref.syncing_controls || old == new {
                 return;
             }
+            let command: Box<dyn Command> = if new == LayoutMode::Free {
+                // Snapshot each visible element's placement under the old
+                // mode as its new transform, so free positioning starts
+                // from "wherever auto-layout had it" instead of everyone
+                // collapsed onto Transform::default()'s (0, 0) origin.
+                let doc = &state_ref.document;
+                let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
+                let placements =
+                    screenforge_core::layout::compute_layout(old, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+                let transforms = visible
+                    .iter()
+                    .zip(placements.iter())
+                    .map(|(el, placement)| {
+                        let mut new_transform = el.transform;
+                        new_transform.x = placement.x;
+                        new_transform.y = placement.y;
+                        new_transform.width = placement.width;
+                        new_transform.height = placement.height;
+                        (el.id, el.transform, new_transform)
+                    })
+                    .collect();
+                Box::new(EnterFreeLayout { old_mode: old, transforms })
+            } else {
+                Box::new(SetLayoutMode { old, new })
+            };
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetLayoutMode { old, new }), document);
+            undo_stack.apply(command, document);
             drop(state_ref);
             refresh_canvas(&canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
@@ -1182,6 +1208,33 @@ fn register_reorder(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorS
             let mut state_ref = state.borrow_mut();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
             undo_stack.apply(Box::new(ReorderScreenshot { from, to }), document);
+            drop(state_ref);
+            refresh_canvas(&canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// Wires the canvas's `LayoutMode::Free` move-drag to an undoable
+/// [`SetTransform`] (spec §8: manual positioning).
+fn register_move(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_move(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |index, new_x, new_y| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.get(index) else { return };
+            let old = element.transform;
+            let mut new = old;
+            new.x = new_x;
+            new.y = new_y;
+            let element_id = element.id;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetTransform { element_id, old, new }), document);
             drop(state_ref);
             refresh_canvas(&canvas, &state);
             update_undo_redo_sensitivity(&window, &state);

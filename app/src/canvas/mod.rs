@@ -78,6 +78,15 @@ impl Canvas {
     pub fn connect_context_menu<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
         self.imp().set_context_menu_callback(f);
     }
+
+    /// Called at the end of a `LayoutMode::Free` drag that actually moved an
+    /// element (its index into `Document.elements`, and its new x/y in
+    /// document space) — spec §8 manual positioning. Never fires outside
+    /// Free mode, or for a drag that starts on empty canvas space, or one
+    /// that ends back where it started.
+    pub fn connect_move<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+        self.imp().set_move_callback(f);
+    }
 }
 
 impl Default for Canvas {
@@ -96,11 +105,15 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::Document;
+    use screenforge_core::model::{Document, LayoutMode};
     use uuid::Uuid;
 
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
     type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
+    type MoveCallback = Box<dyn Fn(usize, f64, f64)>;
+    /// `(drag-start point, dragged element's original x/y)`, both in
+    /// document space.
+    type FreeDragOrigin = ((f64, f64), (f64, f64));
 
     pub struct Canvas {
         document: RefCell<Document>,
@@ -131,8 +144,15 @@ mod imp {
         /// not yet converted to the `Vec::insert`-style index the reorder
         /// callback expects.
         drag_hover: Cell<Option<usize>>,
+        /// Set instead of `drag_hover` when the drag that picked up
+        /// `drag_from` is a `LayoutMode::Free` move rather than a reorder:
+        /// the document-space point where the drag began, and the dragged
+        /// element's own transform.x/y at that moment. Together they turn
+        /// the gesture's cumulative offset into an absolute new position.
+        free_drag_origin: Cell<Option<FreeDragOrigin>>,
         reorder_callback: RefCell<Option<ReorderCallback>>,
         context_menu_callback: RefCell<Option<ContextMenuCallback>>,
+        move_callback: RefCell<Option<MoveCallback>>,
     }
 
     impl Default for Canvas {
@@ -149,8 +169,10 @@ mod imp {
                 last_scale: Cell::new(1.0),
                 drag_from: Cell::new(None),
                 drag_hover: Cell::new(None),
+                free_drag_origin: Cell::new(None),
                 reorder_callback: RefCell::new(None),
                 context_menu_callback: RefCell::new(None),
+                move_callback: RefCell::new(None),
             }
         }
     }
@@ -311,6 +333,10 @@ mod imp {
             *self.context_menu_callback.borrow_mut() = Some(Box::new(f));
         }
 
+        pub fn set_move_callback<F: Fn(usize, f64, f64) + 'static>(&self, f: F) {
+            *self.move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
         pub(super) fn on_secondary_click(&self, x: f64, y: f64) {
             let Some(index) = self.widget_to_document(x, y).and_then(|(dx, dy)| self.element_index_at(dx, dy)) else {
                 return;
@@ -401,12 +427,38 @@ mod imp {
         }
 
         pub(super) fn on_drag_begin(&self, x: f64, y: f64) {
-            let hit = self.widget_to_document(x, y).and_then(|(dx, dy)| self.element_index_at(dx, dy));
+            let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
+            let hit = self.element_index_at(doc_x, doc_y);
             self.drag_from.set(hit);
+
+            if let Some(index) = hit {
+                if self.document.borrow().layout.mode == LayoutMode::Free {
+                    let origin = {
+                        let doc = self.document.borrow();
+                        let t = doc.elements[index].transform;
+                        (t.x, t.y)
+                    };
+                    self.free_drag_origin.set(Some(((doc_x, doc_y), origin)));
+                    return;
+                }
+            }
             self.drag_hover.set(hit);
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.get() {
+                let Some(index) = self.drag_from.get() else { return };
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                        el.transform.x = orig_x + (doc_x - start_x);
+                        el.transform.y = orig_y + (doc_y - start_y);
+                    }
+                    self.content_dirty.set(true);
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
             if self.drag_from.get().is_none() {
                 return;
             }
@@ -417,6 +469,19 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some(((start_x, start_y), (orig_x, orig_y))) = self.free_drag_origin.take() {
+                let Some(index) = self.drag_from.take() else { return };
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let (new_x, new_y) = (orig_x + (doc_x - start_x), orig_y + (doc_y - start_y));
+                    if new_x != orig_x || new_y != orig_y {
+                        if let Some(cb) = self.move_callback.borrow().as_ref() {
+                            cb(index, new_x, new_y);
+                        }
+                    }
+                }
+                return;
+            }
+
             let Some(from) = self.drag_from.take() else {
                 return;
             };
@@ -440,7 +505,17 @@ mod imp {
         }
 
         pub(super) fn cancel_drag(&self) {
-            self.drag_from.set(None);
+            // A cancelled Free-mode drag needs its in-place preview move
+            // undone explicitly — unlike reorder's hover indicator, the
+            // element's position was mutated live during the drag, and
+            // nothing else will put it back until the next `set_document`.
+            if let (Some(index), Some((_, (orig_x, orig_y)))) = (self.drag_from.take(), self.free_drag_origin.take()) {
+                if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                    el.transform.x = orig_x;
+                    el.transform.y = orig_y;
+                }
+                self.content_dirty.set(true);
+            }
             self.drag_hover.set(None);
             self.obj().queue_draw();
         }

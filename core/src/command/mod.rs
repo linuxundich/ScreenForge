@@ -271,6 +271,41 @@ impl Command for SetLayoutMode {
     }
 }
 
+/// Switches into `LayoutMode::Free` while giving every element a sensible
+/// starting position: `transforms` carries each visible element's *last
+/// computed* placement (from whichever mode was active before) as its new
+/// transform, so free positioning starts from "wherever auto-layout had it"
+/// rather than everyone collapsed onto `Transform::default()`'s zeroes.
+/// Building `transforms` is the caller's job (it needs `compute_layout` and
+/// the current spacing/margin, which aren't this command's concern) —
+/// mirrors [`SetShadowForAllElements`] in taking pre-computed per-element
+/// state rather than recomputing anything itself.
+#[derive(Debug)]
+pub struct EnterFreeLayout {
+    pub old_mode: LayoutMode,
+    pub transforms: Vec<(Uuid, Transform, Transform)>,
+}
+
+impl Command for EnterFreeLayout {
+    fn apply(&self, doc: &mut Document) {
+        doc.layout.mode = LayoutMode::Free;
+        for (id, _old, new) in &self.transforms {
+            if let Some(element) = doc.elements.iter_mut().find(|e| e.id == *id) {
+                element.transform = *new;
+            }
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.layout.mode = self.old_mode;
+        for (id, old, _new) in &self.transforms {
+            if let Some(element) = doc.elements.iter_mut().find(|e| e.id == *id) {
+                element.transform = *old;
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SetBackground {
     pub old: Background,
@@ -544,6 +579,32 @@ mod tests {
 
         stack.undo(&mut doc);
         assert_eq!(doc.layout.mode, LayoutMode::Horizontal);
+    }
+
+    #[test]
+    fn enter_free_layout_snapshots_placements_and_undo_restores_mode_and_transforms() {
+        let mut doc = Document::new();
+        doc.elements.push(ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0));
+        let id = doc.elements[0].id;
+        let old_transform = doc.elements[0].transform;
+        assert_eq!(old_transform.x, 0.0);
+
+        let mut new_transform = old_transform;
+        new_transform.x = 42.0;
+        new_transform.width = 100.0;
+        new_transform.height = 200.0;
+
+        let mut stack = UndoStack::new();
+        stack.apply(
+            Box::new(EnterFreeLayout { old_mode: LayoutMode::Horizontal, transforms: vec![(id, old_transform, new_transform)] }),
+            &mut doc,
+        );
+        assert_eq!(doc.layout.mode, LayoutMode::Free);
+        assert_eq!(doc.elements[0].transform.x, 42.0);
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.layout.mode, LayoutMode::Horizontal);
+        assert_eq!(doc.elements[0].transform.x, 0.0);
     }
 
     #[test]
