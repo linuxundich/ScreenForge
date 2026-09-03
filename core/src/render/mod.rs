@@ -5,15 +5,17 @@
 
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI};
+use std::rc::Rc;
 
 use cairo::{Context, LinearGradient, RadialGradient};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::layout::compute_layout;
+use crate::background_cache::BackgroundCache;
+use crate::layout::{compute_layout, Placement};
 use crate::model::{
-    Background, BackgroundImageFit, Callout, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, TextAlign,
-    TextBackground, TextElement,
+    Background, BackgroundImageFit, Callout, CornerRadius, Document, GeneratedBackground, GradientKind, ScreenshotElement,
+    ShadowParams, TextAlign, TextBackground, TextElement,
 };
 use crate::shadow_cache::{ShadowCache, MAX_SHADOW_SURFACE_DIM};
 
@@ -49,6 +51,7 @@ pub fn compose(
     resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
     background_image: Option<&cairo::ImageSurface>,
     shadow_cache: &ShadowCache,
+    background_cache: &BackgroundCache,
 ) -> Result<(), RenderError> {
     shadow_cache.begin_frame();
     let ctx = Context::new(target)?;
@@ -68,7 +71,64 @@ pub fn compose(
         doc.canvas.export_height as f64,
         background_image,
         &screenshot_regions,
+        scale,
+        background_cache,
     )?;
+
+    draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)
+}
+
+/// Renders every visible element (screenshots, their shadows, labels, and
+/// callouts) onto `target` — everything [`compose`] draws *except* the
+/// background — so a caller that can prove the background hasn't changed
+/// can composite the two independently instead of paying for both every
+/// frame. `target` should start fully transparent (a fresh `ImageSurface`
+/// already is), since this never paints anything outside each element's
+/// own footprint. Used by the interactive canvas while a wallpaper drag is
+/// in progress: it renders this once at drag-start (see
+/// `app/src/canvas/mod.rs`'s `try_begin_wallpaper_drag`) and reuses the
+/// same bitmap, unmoved, for the whole drag, since dragging the background
+/// never moves any element. Shares its actual drawing code with `compose`
+/// (via `draw_elements`), so the two-layer composite this enables is
+/// pixel-identical to `compose`'s own single-pass output.
+pub fn compose_elements(
+    doc: &Document,
+    target: &cairo::ImageSurface,
+    scale: f64,
+    resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
+    shadow_cache: &ShadowCache,
+) -> Result<(), RenderError> {
+    shadow_cache.begin_frame();
+    let ctx = Context::new(target)?;
+    ctx.scale(scale, scale);
+
+    let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+
+    draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)
+}
+
+/// The shared drawing loop behind both [`compose`] and [`compose_elements`]
+/// — every visible element's screenshot, shadow, label, and callouts, onto
+/// `ctx` (already scaled by the caller's `scale`).
+fn draw_elements(
+    ctx: &Context,
+    doc: &Document,
+    visible: &[ScreenshotElement],
+    placements: &[Placement],
+    resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
+    scale: f64,
+    shadow_cache: &ShadowCache,
+) -> Result<(), RenderError> {
+    // Every element is placed in "nominal" layout space by `compute_layout`
+    // (which knows nothing about negative-padding labels/callouts pushing
+    // content past the canvas's own edge) — `content_offset_x/y` (set by
+    // `crate::layout::fit_canvas_to_content`) shifts that whole space into
+    // its correct final position in one step, applied only here and never
+    // to the background itself, which must always fill the canvas's own
+    // full, unshifted bounds.
+    ctx.save()?;
+    ctx.translate(doc.canvas.content_offset_x, doc.canvas.content_offset_y);
 
     for (el, placement) in visible.iter().zip(placements.iter()) {
         let image = resolved_images.get(&el.id).ok_or(RenderError::MissingImage(el.id))?;
@@ -81,10 +141,10 @@ pub fn compose(
         ctx.translate(-placement.width / 2.0, -placement.height / 2.0);
 
         if el.shadow.enabled {
-            draw_shadow(&ctx, placement.width, placement.height, &el.corner_radius, &el.shadow, scale, shadow_cache)?;
+            draw_shadow(ctx, placement.width, placement.height, &el.corner_radius, &el.shadow, scale, shadow_cache)?;
         }
 
-        rounded_rect_path(&ctx, 0.0, 0.0, placement.width, placement.height, &el.corner_radius);
+        rounded_rect_path(ctx, 0.0, 0.0, placement.width, placement.height, &el.corner_radius);
         ctx.clip();
 
         ctx.save()?;
@@ -111,7 +171,7 @@ pub fn compose(
         // commonly sits outside the screenshot's own rounded-rect bounds
         // (e.g. a caption below it) and must not be clipped away.
         if el.label.enabled && !el.label.content.is_empty() {
-            draw_text_element(&ctx, &el.label, placement.width, placement.height, scale, shadow_cache)?;
+            draw_text_element(ctx, &el.label, placement.width, placement.height, scale, shadow_cache)?;
         }
 
         // Drawn after the label, in the same screenshot-relative space, so
@@ -120,13 +180,14 @@ pub fn compose(
         // of where the label itself sits.
         for callout in &el.callouts {
             if callout.enabled && !callout.text.content.is_empty() {
-                draw_callout(&ctx, callout, placement.width, placement.height, scale, shadow_cache)?;
+                draw_callout(ctx, callout, placement.width, placement.height, scale, shadow_cache)?;
             }
         }
 
         ctx.restore()?;
     }
 
+    ctx.restore()?;
     Ok(())
 }
 
@@ -217,12 +278,29 @@ fn build_text_layout(ctx: &Context, text: &TextElement, ref_w: f64) -> (pango::L
         layout.set_attributes(Some(&attrs));
     }
 
-    if text.typography.wrap {
-        layout.set_width((text.wrap_width(ref_w) * pango::SCALE as f64) as i32);
+    // Pango already treats a literal `\n` in `content` as a hard line
+    // break, so multi-line text needs no special handling beyond this
+    // `set_text` call — the manual/automatic distinction below is purely
+    // about whether *long* lines also get word-wrapped.
+    layout.set_text(&text.content);
+
+    // A label/callout must never grow wider than its own screenshot
+    // (`ref_w`, see `TextElement::wrap_width`'s own doc comment) —
+    // `typography.wrap` on proactively word-wraps to fill that width;
+    // off, manual line breaks are respected as typed and width-wrapping
+    // only kicks in as a fallback for a single line that's too long on
+    // its own, so short manually-broken text isn't needlessly reflowed.
+    let max_width = text.wrap_width(ref_w);
+    let needs_width_constraint = if text.typography.wrap {
+        true
+    } else {
+        let (_, natural) = layout.pixel_extents();
+        natural.width() as f64 > max_width
+    };
+    if needs_width_constraint {
+        layout.set_width((max_width * pango::SCALE as f64) as i32);
         layout.set_wrap(pango::WrapMode::Word);
     }
-
-    layout.set_text(&text.content);
 
     let (_, logical) = layout.pixel_extents();
     (layout, logical.width() as f64, logical.height() as f64)
@@ -444,6 +522,8 @@ fn draw_background(
     height: f64,
     background_image: Option<&cairo::ImageSurface>,
     screenshot_regions: &[crate::generator::ScreenshotRegion],
+    scale: f64,
+    background_cache: &BackgroundCache,
 ) -> Result<(), RenderError> {
     match background {
         Background::Solid(color) => {
@@ -487,10 +567,91 @@ fn draw_background(
             }
         }
         Background::Generated(generated) => {
-            crate::generator::render(ctx, generated, width, height, screenshot_regions)?;
+            let surface = generated_background_bitmap(generated, width, height, scale, screenshot_regions, background_cache)?;
+            ctx.save()?;
+            ctx.scale(1.0 / scale, 1.0 / scale);
+            paint_generated_background_bitmap(ctx, &surface, 0.0, 0.0)?;
+            ctx.restore()?;
         }
     }
     Ok(())
+}
+
+/// Returns the cached (or freshly rendered + cached) bitmap for a
+/// `Background::Generated` background on its own, without painting it —
+/// shared by `draw_background`'s own `Generated` arm above and directly by
+/// the interactive canvas (`app/src/canvas/mod.rs`'s
+/// `try_begin_wallpaper_drag`), which grabs this exact bitmap once when a
+/// wallpaper drag begins so the whole drag can reuse it (via
+/// [`paint_generated_background_bitmap`]) instead of re-rasterizing the
+/// wave layers on every mouse-move. That reuse only works because the
+/// document's `GeneratedBackground` itself is never mutated until the drag
+/// commits — see `crate::background_cache`.
+pub fn generated_background_bitmap(
+    bg: &GeneratedBackground,
+    width: f64,
+    height: f64,
+    scale: f64,
+    regions: &[crate::generator::ScreenshotRegion],
+    cache: &BackgroundCache,
+) -> Result<Rc<cairo::ImageSurface>, RenderError> {
+    cache.get_or_render(bg, width, height, regions, || render_generated_background_2x(bg, width, height, scale, regions))
+}
+
+/// Paints a bitmap previously obtained from [`generated_background_bitmap`]
+/// onto `ctx` at `(x, y)`, top-left aligned, undoing exactly the
+/// supersampling `render_generated_background_2x` baked into its pixel
+/// dimensions — nothing else. Callers are responsible for any additional
+/// transform of their own: `draw_background` above first undoes its
+/// context's document-to-device `scale` (since the bitmap is already at
+/// device resolution), while the interactive canvas's drag-preview path
+/// (`app/src/canvas/mod.rs`) calls this directly on an unscaled,
+/// device-pixel context and passes `(x, y)` as a device-pixel offset.
+pub fn paint_generated_background_bitmap(ctx: &Context, surface: &cairo::ImageSurface, x: f64, y: f64) -> Result<(), RenderError> {
+    ctx.save()?;
+    ctx.translate(x, y);
+    ctx.scale(1.0 / BACKGROUND_SUPERSAMPLE, 1.0 / BACKGROUND_SUPERSAMPLE);
+    let pattern = cairo::SurfacePattern::create(surface);
+    pattern.set_filter(cairo::Filter::Good);
+    ctx.set_source(&pattern)?;
+    ctx.paint()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+/// How much finer than the canvas's own render resolution the generated
+/// background is rasterized at — a hand-drawn reference wallpaper looks
+/// crisp because it's vector art; rendering the procedural wave layers at
+/// the canvas's exact pixel resolution can leave thin bands looking slightly
+/// soft after Cairo's antialiasing, which supersampling then downscaling
+/// (via `Filter::Good`) fixes without changing the canvas/export size
+/// itself (spec: "Die Größe des Canvas darf sich dadurch nicht verändern").
+const BACKGROUND_SUPERSAMPLE: f64 = 2.0;
+
+/// Renders `generated` onto a fresh, standalone `ImageSurface` at
+/// `BACKGROUND_SUPERSAMPLE` times the effective render resolution
+/// (`scale * BACKGROUND_SUPERSAMPLE` device pixels per document pixel) —
+/// the whole "2x resolution" implementation, since `generator::render`
+/// already draws pure vector geometry in document-pixel coordinates and
+/// needs nothing else to benefit from a finer target. Cached by
+/// `BackgroundCache` (see `draw_background`'s `Generated` arm) so this only
+/// runs again when the background's own parameters, the canvas size, or the
+/// screenshot layout actually change — never on a label/callout drag.
+fn render_generated_background_2x(
+    generated: &GeneratedBackground,
+    width: f64,
+    height: f64,
+    scale: f64,
+    screenshot_regions: &[crate::generator::ScreenshotRegion],
+) -> Result<cairo::ImageSurface, RenderError> {
+    let device_scale = scale * BACKGROUND_SUPERSAMPLE;
+    let surf_w = (width * device_scale).round().max(1.0) as i32;
+    let surf_h = (height * device_scale).round().max(1.0) as i32;
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, surf_w, surf_h)?;
+    let scratch_ctx = Context::new(&surface)?;
+    scratch_ctx.scale(device_scale, device_scale);
+    crate::generator::render(&scratch_ctx, generated, width, height, screenshot_regions)?;
+    Ok(surface)
 }
 
 /// Builds a rounded-rectangle path at `(x, y)` sized `w`×`h` with the given
@@ -562,10 +723,78 @@ mod tests {
         doc.background = Background::Solid(Rgba::new(0.2, 0.4, 0.6, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert_close(read_pixel(&mut target, 5, 5), (0.2, 0.4, 0.6, 1.0));
         assert_close(read_pixel(&mut target, 195, 95), (0.2, 0.4, 0.6, 1.0));
+    }
+
+    #[test]
+    fn generated_background_paints_something_and_leaves_the_canvas_size_unchanged() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Generated(crate::model::GeneratedBackground::new(7));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        let cache = BackgroundCache::new();
+        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new(), &cache).unwrap();
+
+        assert_eq!(target.width(), 200);
+        assert_eq!(target.height(), 100);
+        assert!(cache.is_cached());
+        let painted = (0..100)
+            .flat_map(|y| (0..200).map(move |x| (x, y)))
+            .any(|(x, y)| read_pixel(&mut target, x, y).3 > 0.0);
+        assert!(painted, "the 2x-supersampled background should still paint visible pixels onto the 1x canvas");
+    }
+
+    /// Regression test for the interactive canvas's wallpaper-drag preview
+    /// (`app/src/canvas/mod.rs`'s `WallpaperPreview`): painting
+    /// `generated_background_bitmap`'s bitmap via
+    /// `paint_generated_background_bitmap`, then `compose_elements` on top,
+    /// must land on the exact same pixels as a single `compose()` call —
+    /// otherwise the live preview (background + elements painted as two
+    /// separate blits) would visibly snap to a different image the moment
+    /// the real `compose()` takes over on drag release.
+    #[test]
+    fn two_layer_composite_matches_a_single_compose_call() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
+        doc.background = Background::Generated(crate::model::GeneratedBackground::new(11));
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 10.0, margin_px: 20.0 };
+        let el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 60.0, 60.0);
+        let el_id = el.id;
+        doc.elements = vec![el];
+        let mut resolved = HashMap::new();
+        resolved.insert(el_id, solid_surface(60, 60, Rgba::new(1.0, 0.0, 0.0, 1.0)));
+
+        let mut single_pass = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        compose(&doc, &single_pass, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
+
+        let cache = BackgroundCache::new();
+        let bg_surface = generated_background_bitmap(
+            match &doc.background {
+                Background::Generated(g) => g,
+                _ => unreachable!(),
+            },
+            200.0,
+            100.0,
+            1.0,
+            &[crate::generator::ScreenshotRegion { x: 20.0, y: 20.0, width: 60.0, height: 60.0 }],
+            &cache,
+        )
+        .unwrap();
+
+        let mut two_layer = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        {
+            let ctx = Context::new(&two_layer).unwrap();
+            paint_generated_background_bitmap(&ctx, &bg_surface, 0.0, 0.0).unwrap();
+        }
+        compose_elements(&doc, &two_layer, 1.0, &resolved, &ShadowCache::new()).unwrap();
+
+        for (x, y) in [(5, 5), (100, 50), (195, 95), (50, 50), (140, 50)] {
+            assert_close(read_pixel(&mut single_pass, x, y), read_pixel(&mut two_layer, x, y));
+        }
     }
 
     #[test]
@@ -578,7 +807,7 @@ mod tests {
         });
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         let left = read_pixel(&mut target, 2, 50);
         let right = read_pixel(&mut target, 197, 50);
@@ -603,7 +832,7 @@ mod tests {
         resolved.insert(blue_id, solid_surface(100, 160, Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 300, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // First element: x in [20, 120), y in [20, 180).
         assert_close(read_pixel(&mut target, 60, 100), (1.0, 0.0, 0.0, 1.0));
@@ -619,7 +848,7 @@ mod tests {
         doc.elements = vec![ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0)];
         let target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
 
-        let err = compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap_err();
+        let err = compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new(), &BackgroundCache::new()).unwrap_err();
         assert!(matches!(err, RenderError::MissingImage(_)));
     }
 
@@ -639,7 +868,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 0.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // The very corner pixel is outside the rounded-rect clip, so the
         // white canvas background should show through.
@@ -678,7 +907,7 @@ mod tests {
         resolved.insert(id, split_surface(100, 100, Rgba::new(1.0, 0.0, 0.0, 1.0), Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Unflipped this would be red-left/blue-right; flipped it's reversed.
         assert_close(read_pixel(&mut target, 10, 50), (0.0, 0.0, 1.0, 1.0));
@@ -699,7 +928,7 @@ mod tests {
         resolved.insert(id, split_surface(100, 100, Rgba::new(1.0, 0.0, 0.0, 1.0), Rgba::new(0.0, 0.0, 1.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert_close(read_pixel(&mut target, 10, 50), (1.0, 0.0, 0.0, 1.0));
         assert_close(read_pixel(&mut target, 90, 50), (0.0, 0.0, 1.0, 1.0));
@@ -719,7 +948,7 @@ mod tests {
         doc.background = image_background(crate::model::BackgroundImageFit::Cover, 1.0);
         let target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
 
-        let err = compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap_err();
+        let err = compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new(), &BackgroundCache::new()).unwrap_err();
         assert!(matches!(err, RenderError::MissingBackgroundImage));
     }
 
@@ -731,7 +960,7 @@ mod tests {
         let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // A wider-than-tall image under "cover" scales until height matches,
         // overflowing left/right — every corner should be fully painted.
@@ -747,7 +976,7 @@ mod tests {
         let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Scaled to 100x50, centered: covers y in [25, 75), leaves top/bottom empty.
         assert_close(read_pixel(&mut target, 50, 50), (0.0, 1.0, 0.0, 1.0));
@@ -762,7 +991,7 @@ mod tests {
         let bg = solid_surface(200, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert_close(read_pixel(&mut target, 1, 1), (0.0, 1.0, 0.0, 1.0));
         assert_close(read_pixel(&mut target, 98, 98), (0.0, 1.0, 0.0, 1.0));
@@ -776,7 +1005,7 @@ mod tests {
         let bg = solid_surface(10, 10, Rgba::new(0.0, 1.0, 0.0, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert_close(read_pixel(&mut target, 5, 5), (0.0, 1.0, 0.0, 1.0));
         assert_close(read_pixel(&mut target, 95, 95), (0.0, 1.0, 0.0, 1.0));
@@ -790,7 +1019,7 @@ mod tests {
         let bg = solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0));
 
         let mut target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &HashMap::new(), Some(&bg), &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert_close(read_pixel(&mut target, 50, 50), (0.0, 1.0, 0.0, 0.5));
     }
@@ -823,7 +1052,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Element at [50,150)x[50,150), shadow shifted by (20, 20) to
         // [70,170)x[70,170). (160, 160) is inside the shadow but past the
@@ -848,14 +1077,14 @@ mod tests {
         let cache = ShadowCache::new();
 
         let target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &cache).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &cache, &BackgroundCache::new()).unwrap();
         assert_eq!(cache.len(), 1);
 
         // "Move" the element without changing its size/shape/shadow — a
         // different margin shifts every placement exactly like a drag
         // would, with nothing the shadow's own bitmap depends on changed.
         doc.layout.margin_px = 65.0;
-        compose(&doc, &target, 1.0, &resolved, None, &cache).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &cache, &BackgroundCache::new()).unwrap();
         assert_eq!(cache.len(), 1, "moving the element should not have minted a second cached shadow bitmap");
     }
 
@@ -882,7 +1111,7 @@ mod tests {
 
         let cache = ShadowCache::new();
         let target = ImageSurface::create(Format::ARgb32, 400, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &cache).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &cache, &BackgroundCache::new()).unwrap();
 
         assert_eq!(cache.len(), 1, "two elements with identical size/shape/shadow should share one cached bitmap");
     }
@@ -915,7 +1144,7 @@ mod tests {
         let target = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
         let cache = ShadowCache::new();
 
-        compose(&doc, &target, scale, &resolved, None, &cache).expect("a huge element's shadow must render, not error or abort");
+        compose(&doc, &target, scale, &resolved, None, &cache, &BackgroundCache::new()).expect("a huge element's shadow must render, not error or abort");
     }
 
     /// Same shape, but at `scale = 1.0` (a full-resolution export of a huge
@@ -947,7 +1176,7 @@ mod tests {
         let target = ImageSurface::create(Format::ARgb32, 500, 500).unwrap();
         let cache = ShadowCache::new();
 
-        compose(&doc, &target, 1.0, &resolved, None, &cache)
+        compose(&doc, &target, 1.0, &resolved, None, &cache, &BackgroundCache::new())
             .expect("a full-resolution shadow on a huge element must still render, not error or abort");
     }
 
@@ -960,7 +1189,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Element/shadow both at [50,150)x[50,150) (zero offset) -- just
         // past the shared edge, the unblurred shadow leaves pure background.
@@ -982,7 +1211,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Same point that stayed pure white with no blur now has some
         // shadow darkness bled into it.
@@ -1048,7 +1277,7 @@ mod tests {
         let doc = text_test_doc(absolute_title(false, "Hallo"));
         let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "a disabled title should draw no ink at all");
     }
@@ -1058,7 +1287,7 @@ mod tests {
         let doc = text_test_doc(absolute_title(true, ""));
         let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "empty content should draw no ink");
     }
@@ -1068,7 +1297,7 @@ mod tests {
         let doc = text_test_doc(absolute_title(true, "Hallo"));
         let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert!(any_ink_in_region(&mut target, 5, 5, 120, 45), "expected the caption's glyphs somewhere near (10, 10)");
         assert!(!any_ink_in_region(&mut target, 0, 60, 200, 100), "far from the caption, the background should stay untouched");
@@ -1103,7 +1332,7 @@ mod tests {
             doc.elements[0].natural_height = 100.0;
             let resolved = resolved_for(&doc);
             let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
             any_ink_in_region(&mut target, 70, 0, 130, 40)
         };
 
@@ -1114,7 +1343,7 @@ mod tests {
             doc.elements[0].natural_height = 100.0;
             let resolved = resolved_for(&doc);
             let mut target = ImageSurface::create(Format::ARgb32, 800, 100).unwrap();
-            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
             any_ink_in_region(&mut target, 70, 0, 130, 40)
         };
 
@@ -1140,7 +1369,7 @@ mod tests {
         let doc = text_test_doc(title);
         let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Just inside the box's padding (before any glyph ink starts),
         // the background's blue fill should show through untouched.
@@ -1173,7 +1402,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 300, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // The screenshot sits at [50,150)x[50,150) (margin 50); its label
         // is placed at a local (5, 5) offset, i.e. near document (55, 55).
@@ -1196,6 +1425,52 @@ mod tests {
         assert!(box_w > 20.0 && box_h > 10.0, "expected the measured box to be at least as big as its own padding, got {box_w}x{box_h}");
     }
 
+    fn plain_label(content: &str) -> crate::model::TextElement {
+        crate::model::TextElement {
+            enabled: true,
+            content: content.to_string(),
+            position: crate::model::TextPosition::Absolute { x: 0.0, y: 0.0 },
+            padding_x: 5.0,
+            padding_y: 5.0,
+            typography: crate::model::Typography { font_size: 16.0, ..crate::model::Typography::label_default() },
+            ..crate::model::TextElement::label_default()
+        }
+    }
+
+    #[test]
+    fn a_manual_newline_produces_a_taller_multi_line_box() {
+        let one_line = measure_text_box(&plain_label("Linux"), 400.0, 200.0).unwrap();
+        let two_lines = measure_text_box(&plain_label("Linux\nfür alle"), 400.0, 200.0).unwrap();
+        assert!(two_lines.3 > one_line.3 * 1.5, "expected a manual line break to noticeably grow the box height, got {one_line:?} vs {two_lines:?}");
+    }
+
+    #[test]
+    fn automatic_wrap_keeps_the_box_within_the_screenshot_width() {
+        let mut label = plain_label("a rather long single line of text with no manual breaks at all");
+        label.typography.wrap = true;
+        let (_, _, box_w, _) = measure_text_box(&label, 120.0, 200.0).unwrap();
+        assert!(box_w <= 120.0, "expected wrapping to keep the box at or under the screenshot's width, got {box_w}");
+    }
+
+    #[test]
+    fn manual_mode_still_force_wraps_a_single_line_that_would_exceed_the_screenshot_width() {
+        // typography.wrap is left at its default (false/manual) here --
+        // the hard "never wider than the screenshot" ceiling must still
+        // apply as a fallback, per spec.
+        let label = plain_label("a rather long single line of text with no manual breaks at all");
+        let (_, _, box_w, _) = measure_text_box(&label, 120.0, 200.0).unwrap();
+        assert!(box_w <= 120.0, "expected the manual-mode safety net to still cap width at the screenshot's own size, got {box_w}");
+    }
+
+    #[test]
+    fn manual_mode_leaves_short_text_unwrapped_and_uncentered_in_extra_width() {
+        // A short manual line well within the screenshot's width should
+        // NOT be forced to reflow/fill the whole available width.
+        let label = plain_label("Hi");
+        let (_, _, box_w, _) = measure_text_box(&label, 1000.0, 200.0).unwrap();
+        assert!(box_w < 200.0, "expected a short line's box to stay tight around its own content, got {box_w}");
+    }
+
     #[test]
     fn disabled_screenshot_label_draws_nothing() {
         let mut doc = Document::new();
@@ -1211,7 +1486,7 @@ mod tests {
         resolved.insert(id, solid_surface(100, 100, Rgba::new(0.0, 1.0, 0.0, 1.0)));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // Below the screenshot (where a bottom-anchored label would land
         // if it were somehow enabled) should stay pure background.
@@ -1239,7 +1514,7 @@ mod tests {
         resolved.insert(id, solid_surface(200, 200, Rgba::WHITE));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         // The bubble sits near the top-left corner (its default position).
         assert!(any_ink_in_region(&mut target, 0, 0, 60, 60), "expected the callout's text bubble near the top-left corner");
@@ -1265,7 +1540,7 @@ mod tests {
         resolved.insert(id, solid_surface(200, 200, Rgba::WHITE));
 
         let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
-        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
 
         assert!(!any_ink_in_region(&mut target, 0, 0, 200, 200), "a disabled callout should draw no ink at all");
     }

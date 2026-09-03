@@ -469,40 +469,6 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="generator_offset_x_row">
-                            <property name="title" translatable="yes">Position X</property>
-                            <property name="subtitle" translatable="yes">In Prozent — verschiebt das Muster horizontal</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-100</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_offset_y_row">
-                            <property name="title" translatable="yes">Position Y</property>
-                            <property name="subtitle" translatable="yes">In Prozent — verschiebt das Muster vertikal</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-100</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
                           <object class="AdwSpinRow" id="generator_scale_row">
                             <property name="title" translatable="yes">Skalierung</property>
                             <property name="subtitle" translatable="yes">In Prozent — vergrößert oder verkleinert das Muster</property>
@@ -666,8 +632,48 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwEntryRow" id="label_content_row">
-                            <property name="title" translatable="yes">Text</property>
+                          <object class="GtkBox" id="label_content_box">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">6</property>
+                            <property name="margin-top">12</property>
+                            <property name="margin-bottom">12</property>
+                            <property name="margin-start">12</property>
+                            <property name="margin-end">12</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Text</property>
+                                <property name="halign">start</property>
+                                <style>
+                                  <class name="caption-heading"/>
+                                </style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkScrolledWindow">
+                                <property name="hscrollbar-policy">never</property>
+                                <property name="min-content-height">64</property>
+                                <property name="max-content-height">120</property>
+                                <style>
+                                  <class name="card"/>
+                                </style>
+                                <child>
+                                  <object class="GtkTextView" id="label_content_view">
+                                    <property name="sensitive">false</property>
+                                    <property name="wrap-mode">word-char</property>
+                                    <property name="top-margin">8</property>
+                                    <property name="bottom-margin">8</property>
+                                    <property name="left-margin">8</property>
+                                    <property name="right-margin">8</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSwitchRow" id="label_wrap_row">
+                            <property name="title" translatable="yes">Automatisch umbrechen</property>
+                            <property name="subtitle" translatable="yes">Sonst nur an manuell eingefügten Zeilenumbrüchen</property>
                             <property name="sensitive">false</property>
                           </object>
                         </child>
@@ -723,7 +729,7 @@
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
-                                <property name="lower">0</property>
+                                <property name="lower">-500</property>
                                 <property name="upper">500</property>
                                 <property name="step-increment">4</property>
                                 <property name="page-increment">20</property>
@@ -1175,6 +1181,10 @@
       <attribute name="label" translatable="yes">Einstellungen…</attribute>
       <attribute name="action">app.preferences</attribute>
       <attribute name="accel">&lt;Ctrl&gt;comma</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">Info zu ScreenForge…</attribute>
+      <attribute name="action">app.about</attribute>
     </item>
   </menu>
 </interface>

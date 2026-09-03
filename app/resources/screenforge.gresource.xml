@@ -3,4 +3,13 @@
   <gresource prefix="/de/christophlangner/ScreenForge">
     <file preprocess="xml-stripblanks">ui/window.ui</file>
   </gresource>
+  <!-- Bundled straight from `../data/icons` (the GNOME hicolor-theme-shaped
+       source, kept there for a future packaging step's `install_data`)
+       rather than duplicated under `resources/` — see `register_app_icon_theme`
+       in `main.rs` for why this alone is enough to make the icon resolve
+       in-process, with no install step needed for `cargo run`. -->
+  <gresource prefix="/de/christophlangner/ScreenForge/icons">
+    <file alias="hicolor/scalable/apps/de.christophlangner.ScreenForge.svg">../data/icons/hicolor/scalable/apps/de.christophlangner.ScreenForge.svg</file>
+    <file alias="hicolor/symbolic/apps/de.christophlangner.ScreenForge-symbolic.svg">../data/icons/hicolor/symbolic/apps/de.christophlangner.ScreenForge-symbolic.svg</file>
+  </gresource>
 </gresources>

@@ -138,11 +138,33 @@ fn main() -> glib::ExitCode {
 
     let app = adw::Application::builder().application_id(APP_ID).build();
     register_preferences_action(&app);
+    register_about_action(&app);
     app.connect_activate(build_ui);
     app.run()
 }
 
+/// Makes the app's own icon (bundled into the gresource — see
+/// `resources/screenforge.gresource.xml`'s `icons` gresource, sourced from
+/// the GNOME hicolor-theme-shaped files under `data/icons`) resolve by
+/// name — `APP_ID` for the full-color app icon, `"{APP_ID}-symbolic"` for
+/// the symbolic one — anywhere the running app looks up an icon by name,
+/// notably `AboutDialog::application_icon` in `register_about_action`.
+/// Needs no install step: `GtkIconTheme` treats a resource path as if it
+/// *were itself* the hicolor theme's own root (`$path/scalable/apps/
+/// name.svg`, not `$path/hicolor/scalable/apps/name.svg`) — one directory
+/// level short of where the bundle's own `hicolor/...` layout actually
+/// starts, hence the extra `/hicolor` here even though nothing else
+/// (gresource.xml's alias paths, `data/icons`' own layout) needs it. Must
+/// run after a display exists (unlike GSettings/gresource registration in
+/// `main`, which don't need one), so this is called from `build_ui` rather
+/// than `main`.
+fn register_app_icon_theme() {
+    let Some(display) = gdk::Display::default() else { return };
+    gtk4::IconTheme::for_display(&display).add_resource_path("/de/christophlangner/ScreenForge/icons/hicolor");
+}
+
 fn build_ui(app: &adw::Application) {
+    register_app_icon_theme();
     let window = Window::new(app);
     let canvas = window.canvas();
 
@@ -158,6 +180,7 @@ fn build_ui(app: &adw::Application) {
     register_label_controls(&window, &canvas, &state);
     register_selection_sync(&window, &canvas, &state);
     register_label_drag(&window, &canvas, &state);
+    register_wallpaper_drag(&window, &canvas, &state);
     register_callouts_controls(&window, &canvas, &state);
     register_callout_drag(&window, &canvas, &state);
     register_export_controls(&window, &state);
@@ -175,6 +198,7 @@ fn build_ui(app: &adw::Application) {
     register_paste_action(app, &window, &canvas, &state);
     register_hide_screenshots_toggle(&window, &canvas, &state);
     register_eyedroppers(&window, &canvas);
+    register_text_focus_guards(&window);
 
     window.present();
 }
@@ -569,8 +593,6 @@ fn sync_generator_controls(window: &Window, generated: &GeneratedBackground) {
     window.generator_adapt_row().set_active(generated.adapt_to_screenshots);
     window.generator_inverse_contrast_row().set_value(generated.inverse_contrast * 100.0);
     window.generator_corner_bias_row().set_value(generated.corner_bias * 100.0);
-    window.generator_offset_x_row().set_value(generated.offset_x * 100.0);
-    window.generator_offset_y_row().set_value(generated.offset_y * 100.0);
     window.generator_scale_row().set_value(generated.scale * 100.0);
     window.generator_contrast_row().set_value(generated.contrast * 100.0);
     window.generator_seed_row().set_value(generated.seed as f64);
@@ -716,7 +738,8 @@ fn sync_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
     state.borrow_mut().syncing_controls = true;
 
     window.label_enabled_row().set_active(label.enabled);
-    window.label_content_row().set_text(&label.content);
+    window.label_content_view().buffer().set_text(&label.content);
+    window.label_wrap_row().set_active(label.typography.wrap);
 
     let is_absolute = matches!(label.position, TextPosition::Absolute { .. });
     window.label_position_mode_row().set_selected(if is_absolute { 1 } else { 0 });
@@ -774,7 +797,8 @@ fn sync_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
 
     let controls_enabled = label.enabled;
     for row in [
-        &window.label_content_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_content_view().clone().upcast::<gtk4::Widget>(),
+        &window.label_wrap_row().clone().upcast::<gtk4::Widget>(),
         &window.label_position_mode_row().clone().upcast::<gtk4::Widget>(),
         &window.label_background_row().clone().upcast::<gtk4::Widget>(),
         &window.label_corner_radius_row().clone().upcast::<gtk4::Widget>(),
@@ -831,8 +855,6 @@ fn sync_background_controls(window: &Window, background: &Background) {
     window.generator_color_strategy_row().set_visible(is_generated);
     window.generator_adapt_row().set_visible(is_generated);
     window.generator_corner_bias_row().set_visible(is_generated);
-    window.generator_offset_x_row().set_visible(is_generated);
-    window.generator_offset_y_row().set_visible(is_generated);
     window.generator_scale_row().set_visible(is_generated);
     window.generator_contrast_row().set_visible(is_generated);
     window.generator_seed_row().set_visible(is_generated);
@@ -1068,8 +1090,6 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             window.generator_color_strategy_row().set_visible(is_generated);
             window.generator_adapt_row().set_visible(is_generated);
             window.generator_corner_bias_row().set_visible(is_generated);
-            window.generator_offset_x_row().set_visible(is_generated);
-            window.generator_offset_y_row().set_visible(is_generated);
             window.generator_scale_row().set_visible(is_generated);
             window.generator_contrast_row().set_visible(is_generated);
             window.generator_seed_row().set_visible(is_generated);
@@ -1305,9 +1325,11 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
             // controls this closure doesn't read.
             let shadow = current.shadow;
 
+            let buffer = window.label_content_view().buffer();
+            let content = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             let new = TextElement {
                 enabled: window.label_enabled_row().is_active(),
-                content: window.label_content_row().text().to_string(),
+                content,
                 position,
                 typography: Typography {
                     font_family,
@@ -1319,7 +1341,7 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
                     opacity: window.label_opacity_row().value() / 100.0,
                     letter_spacing: 0.0,
                     line_spacing: 1.2,
-                    wrap: false,
+                    wrap: window.label_wrap_row().is_active(),
                 },
                 background,
                 corner_radius: CornerRadius::uniform(window.label_corner_radius_row().value()),
@@ -1347,7 +1369,8 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         move |row| {
             let enabled = row.is_active();
             for widget in [
-                window.label_content_row().upcast::<gtk4::Widget>(),
+                window.label_content_view().upcast::<gtk4::Widget>(),
+                window.label_wrap_row().upcast(),
                 window.label_position_mode_row().upcast(),
                 window.label_horizontal_row().upcast(),
                 window.label_vertical_row().upcast(),
@@ -1375,7 +1398,12 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
             apply_label();
         }
     ));
-    window.label_content_row().connect_changed(glib::clone!(
+    window.label_content_view().buffer().connect_changed(glib::clone!(
+        #[strong]
+        apply_label,
+        move |_| apply_label()
+    ));
+    window.label_wrap_row().connect_active_notify(glib::clone!(
         #[strong]
         apply_label,
         move |_| apply_label()
@@ -1597,7 +1625,7 @@ fn register_selection_sync(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
             sync_label_controls(&window, &canvas, &state);
             sync_callouts_controls(&window, &canvas, &state);
             if single_selected_label_target(&canvas, &state).is_some() {
-                window.label_content_row().grab_focus();
+                window.label_content_view().grab_focus();
             }
         }
     ));
@@ -1632,6 +1660,35 @@ fn register_label_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
             // change (contrast `apply_label`, where the sidebar itself was
             // already the source of truth for what it displays).
             sync_label_controls(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// Wires the canvas's own Alt-held wallpaper-drag gesture to an undoable
+/// `SetBackground` — mirrors `register_label_drag`, but for a generated
+/// background's own focus point (`offset_x`/`offset_y`) rather than a
+/// screenshot's label. Never fires unless `doc.background` is already
+/// `Background::Generated` at drag time (see `Canvas::connect_wallpaper_move`).
+fn register_wallpaper_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_wallpaper_move(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |new_offset_x, new_offset_y| {
+            let mut state_ref = state.borrow_mut();
+            let Background::Generated(current) = &state_ref.document.background else { return };
+            let mut new = current.clone();
+            new.offset_x = new_offset_x;
+            new.offset_y = new_offset_y;
+            let old = state_ref.document.background.clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetBackground { old, new: Background::Generated(new) }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1744,10 +1801,35 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
     delete_button.set_tooltip_text(Some("Callout löschen"));
     row.add_suffix(&delete_button);
 
-    let content_row = adw::EntryRow::new();
-    content_row.set_title("Text");
-    content_row.set_text(&callout.text.content);
-    row.add_row(&content_row);
+    let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    content_box.set_margin_top(12);
+    content_box.set_margin_bottom(12);
+    content_box.set_margin_start(12);
+    content_box.set_margin_end(12);
+    let content_label = gtk4::Label::new(Some("Text"));
+    content_label.set_halign(gtk4::Align::Start);
+    content_label.add_css_class("caption-heading");
+    content_box.append(&content_label);
+    let content_scroller = gtk4::ScrolledWindow::new();
+    content_scroller.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    content_scroller.set_min_content_height(64);
+    content_scroller.set_max_content_height(120);
+    content_scroller.add_css_class("card");
+    let content_view = gtk4::TextView::new();
+    content_view.set_wrap_mode(gtk4::WrapMode::WordChar);
+    content_view.set_top_margin(8);
+    content_view.set_bottom_margin(8);
+    content_view.set_left_margin(8);
+    content_view.set_right_margin(8);
+    content_view.buffer().set_text(&callout.text.content);
+    content_scroller.set_child(Some(&content_view));
+    content_box.append(&content_scroller);
+    row.add_row(&content_box);
+
+    let wrap_row = adw::SwitchRow::new();
+    wrap_row.set_title("Automatisch umbrechen");
+    wrap_row.set_active(callout.text.typography.wrap);
+    row.add_row(&wrap_row);
 
     let background_color_row = adw::ActionRow::new();
     background_color_row.set_title("Hintergrundfarbe");
@@ -1793,7 +1875,9 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         #[weak]
         enabled_switch,
         #[weak]
-        content_row,
+        content_view,
+        #[weak]
+        wrap_row,
         #[weak]
         background_color_button,
         #[weak]
@@ -1812,9 +1896,11 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
             let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
             let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
 
+            let buffer = content_view.buffer();
             let mut new = current.clone();
             new.enabled = enabled_switch.is_active();
-            new.text.content = content_row.text().to_string();
+            new.text.content = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            new.text.typography.wrap = wrap_row.is_active();
             new.text.background = TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba()));
             new.text.typography.color = rgba_from_gdk(&color_button.rgba());
             new.text.corner_radius = CornerRadius::uniform(corner_radius_row.value());
@@ -1836,15 +1922,20 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         apply,
         move |_| apply()
     ));
-    content_row.connect_changed(glib::clone!(
+    content_view.buffer().connect_changed(glib::clone!(
         #[strong]
         apply,
         #[weak]
         row,
-        move |entry| {
-            row.set_title(&title_for(&entry.text()));
+        move |buffer| {
+            row.set_title(&title_for(&buffer.text(&buffer.start_iter(), &buffer.end_iter(), false)));
             apply();
         }
+    ));
+    wrap_row.connect_active_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
     ));
     background_color_button.connect_rgba_notify(glib::clone!(
         #[strong]
@@ -2221,13 +2312,15 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
                 adapt_to_screenshots: window.generator_adapt_row().is_active(),
                 inverse_contrast: window.generator_inverse_contrast_row().value() / 100.0,
                 corner_bias: window.generator_corner_bias_row().value() / 100.0,
-                offset_x: window.generator_offset_x_row().value() / 100.0,
-                offset_y: window.generator_offset_y_row().value() / 100.0,
                 scale: window.generator_scale_row().value() / 100.0,
-                // No sliders for these — they're only ever redrawn from
-                // scratch by `generate_background`'s own randomization, so
-                // editing any *other* generator control must leave them
-                // exactly as they were.
+                // No sliders for these — `offset_x`/`offset_y` are only
+                // ever changed by dragging the wallpaper directly on the
+                // canvas (see `register_wallpaper_drag`), and the rest are
+                // only ever redrawn from scratch by `generate_background`'s
+                // own randomization — so editing any *other* generator
+                // control must leave all of them exactly as they were.
+                offset_x: current.offset_x,
+                offset_y: current.offset_y,
                 density: current.density,
                 flow: current.flow,
                 variation: current.variation,
@@ -2263,8 +2356,6 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
     window.generator_adapt_row().connect_active_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_inverse_contrast_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_corner_bias_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    window.generator_offset_x_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    window.generator_offset_y_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_scale_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_contrast_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_seed_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
@@ -2317,6 +2408,14 @@ fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
         Background::Generated(g) => g.seed,
         _ => 0,
     };
+    // A "Generieren"/"Regenerate" click rerolls the pattern itself, not
+    // where the user has already dragged its focus point to — carried
+    // over unchanged, the same way `sync_generator_controls` never touches
+    // it either.
+    let (previous_offset_x, previous_offset_y) = match &state_ref.document.background {
+        Background::Generated(g) => (g.offset_x, g.offset_y),
+        _ => (0.0, 0.0),
+    };
     // A fresh seed each click, derived deterministically from the last one
     // (plus a fixed salt) through the same `Rng` generation itself uses —
     // this needs no external randomness source, and still gives a
@@ -2361,8 +2460,8 @@ fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
         adapt_to_screenshots: window.generator_adapt_row().is_active(),
         inverse_contrast,
         corner_bias: window.generator_corner_bias_row().value() / 100.0,
-        offset_x: window.generator_offset_x_row().value() / 100.0,
-        offset_y: window.generator_offset_y_row().value() / 100.0,
+        offset_x: previous_offset_x,
+        offset_y: previous_offset_y,
         scale: window.generator_scale_row().value() / 100.0,
         density,
         flow,
@@ -2910,6 +3009,127 @@ fn register_preferences_action(app: &adw::Application) {
     app.set_accels_for_action("app.preferences", &["<Ctrl>comma"]);
 }
 
+/// The most recent versions' changelog, most recent first — each entry
+/// drawn straight from this repo's own version-bump commit messages (`git
+/// log --oneline | grep '(v'`), never invented. Handed to
+/// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
+/// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
+const RELEASE_NOTES: &str = "\
+<p>Version 0.23.0</p>
+<ul>
+<li>Neuer Info-Dialog („Info zu ScreenForge…“) mit Danksagung, Lizenzen und Changelog</li>
+<li>Neues App-Icon im Schmiede-Motiv, inklusive symbolischer Variante</li>
+<li>Hintergrund lässt sich jetzt direkt mit der Maus verschieben (Alt+Ziehen) — spürbar flüssiger, da nicht mehr bei jeder Mausbewegung neu berechnet</li>
+<li>Labels unterstützen jetzt mehrzeiligen Text mit eigenem Umbruch-Schalter</li>
+<li>Labels und Callouts dürfen jetzt über den Rand ihres Screenshots hinausragen — die Leinwand passt sich automatisch an, statt sie abzuschneiden</li>
+</ul>
+<p>Version 0.22.0</p>
+<ul>
+<li>Anwendungsweiten Titel durch Labels pro Screenshot ersetzt</li>
+<li>Callouts hinzugefügt: Sprechblasen mit Pfeil auf einen Punkt im Screenshot</li>
+</ul>
+<p>Version 0.21.0</p>
+<ul>
+<li>Rendering des Hintergrund-Generators überarbeitet: harte Kanten und geschichtete Kontaktschatten</li>
+</ul>
+<p>Version 0.20.0</p>
+<ul>
+<li>Screenshots lassen sich jetzt direkt von einem verbundenen Android-Gerät importieren</li>
+</ul>
+<p>Version 0.19.0</p>
+<ul>
+<li>Neues Ausrichtungswerkzeug für Screenshots</li>
+<li>Pipette zum Aufnehmen von Farben direkt von der Leinwand</li>
+</ul>
+<p>Version 0.18.0</p>
+<ul>
+<li>Vektor-Musterhintergründe durch einen einheitlichen Generator ersetzt</li>
+<li>Schatten-Caching für spürbar bessere Performance beim Bearbeiten</li>
+</ul>
+<p>Version 0.17.0</p>
+<ul>
+<li>Freiform-Vektorformen für das benutzerdefinierte Dekorationsmuster hinzugefügt</li>
+</ul>";
+
+/// The "Info zu ScreenForge…" dialog (spec: application info, dedication/
+/// acknowledgements for the toolchain and libraries this is built on,
+/// their licenses, and a changelog — all in one `AdwAboutDialog`, GNOME's
+/// standard shape for exactly this). Every credited project and every
+/// license below is one this app (or one of its *direct* Cargo
+/// dependencies) actually uses — checked against `Cargo.toml` and each
+/// dependency's own published license via `cargo metadata`, not assumed —
+/// and grouped by what they're *for* rather than dumped as a flat list, so
+/// it reads as a real "built with" page instead of a dependency dump.
+/// `application_icon` resolves via `register_app_icon_theme`, called once
+/// before any window (including this dialog) can exist.
+fn register_about_action(app: &adw::Application) {
+    let action = gio::SimpleAction::new("about", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            let dialog = adw::AboutDialog::builder()
+                .application_name("ScreenForge")
+                .application_icon(APP_ID)
+                .developer_name("Christoph Langner")
+                .version(env!("CARGO_PKG_VERSION"))
+                .comments("Ordnet Smartphone-Screenshots zu einer einzigen Präsentationsgrafik an — eine native GNOME-App.")
+                .website("https://github.com/linuxundich/ScreenForge")
+                .issue_url("https://github.com/linuxundich/ScreenForge/issues")
+                .copyright("© 2025–2026 Christoph Langner")
+                .license_type(gtk4::License::Gpl30)
+                .release_notes(RELEASE_NOTES)
+                .release_notes_version(env!("CARGO_PKG_VERSION"))
+                .build();
+
+            // "Built with" — who/what, not the legal details (those are
+            // their own section below); `add_credit_section`'s row format
+            // is "Name https://url", the same one GNOME's own about
+            // dialogs use to make a name double as a link.
+            dialog.add_credit_section(Some("Sprache"), &["Rust https://www.rust-lang.org"]);
+            dialog.add_credit_section(
+                Some("GUI-Framework"),
+                &[
+                    "GTK https://www.gtk.org",
+                    "libadwaita https://gnome.pages.gitlab.gnome.org/libadwaita/",
+                    "gtk4-rs / libadwaita-rs (Rust-Bindings) https://gtk-rs.org",
+                ],
+            );
+            dialog.add_credit_section(Some("Grafik & Rendering"), &["Cairo https://www.cairographics.org", "Pango https://pango.gnome.org"]);
+            dialog.add_credit_section(
+                Some("Weitere Bibliotheken"),
+                &[
+                    "image-rs https://github.com/image-rs/image",
+                    "serde / serde_json https://serde.rs",
+                    "uuid https://github.com/uuid-rs/uuid",
+                    "thiserror / anyhow https://github.com/dtolnay",
+                ],
+            );
+
+            // Licenses — one section per distinct license actually in use
+            // (verified via `cargo metadata`), not one per crate: the
+            // GNOME platform libraries GTK/libadwaita/GLib/Pango/Cairo
+            // ship under LGPL-2.1-or-later; the Rust *bindings* to them
+            // (gtk4-rs/libadwaita-rs) are a separate MIT-licensed project;
+            // the remaining direct Rust dependencies are dual-licensed,
+            // which `gtk4::License` has no single variant for, so that one
+            // uses `Custom` with the real, unabridged statement instead of
+            // picking just one half of it.
+            dialog.add_legal_section("GTK, libadwaita, GLib, Pango, Cairo", None, gtk4::License::Lgpl21, None);
+            dialog.add_legal_section("gtk4-rs, libadwaita-rs (Rust-Bindings)", None, gtk4::License::MitX11, None);
+            dialog.add_legal_section(
+                "serde, serde_json, thiserror, anyhow, uuid, image-rs, Rust",
+                None,
+                gtk4::License::Custom,
+                Some("Dual-lizenziert unter MIT oder Apache-2.0, nach Wahl der Rechteinhaberin oder des Rechteinhabers."),
+            );
+
+            dialog.present(app.active_window().as_ref());
+        }
+    ));
+    app.add_action(&action);
+}
+
 /// Reflects `undo_stack.can_undo()/can_redo()` onto the `win.undo`/`win.redo`
 /// `GSimpleAction`s. The header-bar buttons are bound to these actions via
 /// `action-name` in the `.ui` file, so disabling the action alone is enough
@@ -3087,6 +3307,52 @@ fn register_delete_selected(app: &adw::Application, window: &Window, canvas: &Ca
     ));
     window.add_action(&action);
     app.set_accels_for_action("win.delete-selected", &["Delete", "BackSpace"]);
+}
+
+/// Disables `delete-selected`/`undo`/`redo`/`paste` whenever a text-input
+/// widget has keyboard focus, re-enabling them the instant it doesn't.
+///
+/// These four are registered as global accelerators (`Delete`/`BackSpace`,
+/// `<Ctrl>z`, `<Ctrl><Shift>z`, `<Ctrl>v`) via `app.set_accels_for_action`,
+/// which GTK4 dispatches through a capture-phase shortcut controller on the
+/// window — that wins the race against the focused widget's own key
+/// handling. A no-op check *inside* an action's own activate callback
+/// isn't enough to fix this: GTK already marks the key event as handled
+/// once a matching, *enabled* action fires, regardless of what the
+/// callback body does, so the keystroke would never reach the focused
+/// entry either way. Disabling the `GSimpleAction` itself is what makes
+/// GTK skip it and let the event fall through normally — e.g. Backspace
+/// then deletes a character in the focused field instead of deleting the
+/// selected screenshot (the bug this fixes), and Ctrl+Z reaches the
+/// field's own built-in undo instead of the document's.
+///
+/// `gtk4::Text` is the internal widget every `AdwEntryRow`/`GtkEntry`/
+/// `GtkSpinButton` entry focuses; `gtk4::TextView` covers the multi-line
+/// label/callout text fields.
+fn register_text_focus_guards(window: &Window) {
+    let update = glib::clone!(
+        #[weak]
+        window,
+        move || {
+            let text_focused = gtk4::prelude::RootExt::focus(&window).is_some_and(|w| w.is::<gtk4::Text>() || w.is::<gtk4::TextView>());
+            for name in ["delete-selected", "undo", "redo", "paste"] {
+                if let Some(action) = window.lookup_action(name) {
+                    if let Some(action) = action.downcast_ref::<gio::SimpleAction>() {
+                        action.set_enabled(!text_focused);
+                    }
+                }
+            }
+        }
+    );
+    window.connect_notify_local(
+        Some("focus-widget"),
+        glib::clone!(
+            #[strong]
+            update,
+            move |_, _| update()
+        ),
+    );
+    update();
 }
 
 /// One of the six ways `align_selected` can line up the current

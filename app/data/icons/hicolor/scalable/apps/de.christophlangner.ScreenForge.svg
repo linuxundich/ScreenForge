@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="phoneBody" x1="42" y1="16" x2="86" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#57545f"/>
+      <stop offset="1" stop-color="#211e28"/>
+    </linearGradient>
+    <linearGradient id="screenSky" x1="49" y1="23" x2="79" y2="57" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8fd0f8"/>
+      <stop offset="1" stop-color="#1a5fb4"/>
+    </linearGradient>
+    <linearGradient id="hammerHandle" x1="95" y1="68" x2="127" y2="82" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a06e40"/>
+      <stop offset="1" stop-color="#5c3b20"/>
+    </linearGradient>
+    <clipPath id="screenClip">
+      <rect x="49" y="23" width="30" height="34" rx="4"/>
+    </clipPath>
+    <clipPath id="anvilBodyClip">
+      <rect x="22" y="78" width="78" height="16" rx="5"/>
+    </clipPath>
+    <clipPath id="anvilFootClip">
+      <rect x="40" y="104" width="48" height="13" rx="4"/>
+    </clipPath>
+  </defs>
+
+  <!-- anvil: flat top face (lit from above) + flat darker front face on every mass -->
+  <g>
+    <path d="m 22 82 -10 4 10 4 z" fill="#413e47"/>
+    <g clip-path="url(#anvilBodyClip)">
+      <rect x="22" y="78" width="78" height="16" fill="#47444d"/>
+      <rect x="22" y="78" width="78" height="6" fill="#98959f"/>
+    </g>
+    <path d="M 50 94 L 92 94 L 83 104 L 59 104 Z" fill="#3c3942"/>
+    <g clip-path="url(#anvilFootClip)">
+      <rect x="40" y="104" width="48" height="13" fill="#3a3740"/>
+      <rect x="40" y="104" width="48" height="4" fill="#7c7982"/>
+    </g>
+    <ellipse cx="64" cy="80" rx="17" ry="2.4" fill="#000000" opacity="0.16"/>
+  </g>
+
+  <!-- phone -->
+  <g>
+    <rect x="42" y="16" width="44" height="64" rx="10" fill="url(#phoneBody)"/>
+    <rect x="59" y="19.5" width="10" height="2.2" rx="1.1" fill="#141219"/>
+    <g clip-path="url(#screenClip)">
+      <rect x="49" y="23" width="30" height="34" fill="url(#screenSky)"/>
+      <path d="M 51 55 L 59 41 L 65 49 L 71 39 L 79 55 L 79 57 L 49 57 Z" fill="#14528f"/>
+      <circle cx="72.5" cy="30.5" r="3.6" fill="#f6f5f4"/>
+    </g>
+    <g fill="none" stroke="#f6f5f4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 49 29 L 49 23 L 55 23"/>
+      <path d="M 73 23 L 79 23 L 79 29"/>
+      <path d="M 49 51 L 49 57 L 55 57"/>
+      <path d="M 73 57 L 79 57 L 79 51"/>
+    </g>
+  </g>
+
+  <!-- sparks -->
+  <g fill-rule="evenodd">
+    <path d="M 71 79 L 74.5 84 L 71 89 L 67.5 84 Z" fill="#ff9430"/>
+    <path d="M 79 89 L 81 92.5 L 79 96 L 77 92.5 Z" fill="#ffd166"/>
+    <path d="M 66 65 L 67.6 67.6 L 66 70.2 L 64.4 67.6 Z" fill="#ffd166"/>
+  </g>
+
+  <!-- hammer -->
+  <g transform="rotate(-45 85 75)">
+    <rect x="95" y="71.5" width="32" height="7" rx="3.5" fill="url(#hammerHandle)"/>
+    <rect x="75" y="68.5" width="20" height="13" rx="3" fill="#2c2933"/>
+    <rect x="75" y="68.5" width="20" height="4.5" rx="2.25" fill="#8f8c96"/>
+  </g>
+</svg>

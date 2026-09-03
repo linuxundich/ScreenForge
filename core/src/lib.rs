@@ -2,6 +2,7 @@
 //! rendering. No GTK/GDK/Adwaita dependency is allowed in this crate — that
 //! boundary is what keeps the model and layout engine unit-testable.
 
+pub mod background_cache;
 pub mod blur;
 pub mod command;
 pub mod generator;

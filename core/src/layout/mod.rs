@@ -145,23 +145,80 @@ pub fn extent_for(placements: &[Placement], margin_px: f64) -> CanvasExtent {
 }
 
 /// Resizes `doc.canvas` to exactly fit the current layout's content —
-/// every visible element plus spacing/margin — so the canvas always
-/// follows the content instead of the other way around (a fixed canvas
-/// size used to let tall/portrait screenshots get cropped off). A no-op
-/// while there are no visible elements, so a brand-new or emptied project
-/// keeps a sensible starting size instead of collapsing to just the
-/// margin. Called after every undo-tracked mutation (see
+/// every visible element plus spacing/margin, plus any label/callout box
+/// that spills past an element's own bounds (e.g. via a negative
+/// `Semantic.padding`) — so the canvas always follows the content instead
+/// of the other way around (a fixed canvas size used to let tall/portrait
+/// screenshots get cropped off, and later, negative-margin labels get
+/// clipped). A no-op while there are no visible elements, so a brand-new
+/// or emptied project keeps a sensible starting size instead of collapsing
+/// to just the margin. Called after every undo-tracked mutation (see
 /// `command::UndoStack`) and on project load — never something the UI
 /// calls directly, since there's no user-facing control for it anymore.
+///
+/// When content spills to the left of or above the nominal `(0, 0)`
+/// origin, the canvas grows in that direction too, and `doc.canvas.
+/// content_offset_x/y` records how far everything must be shifted right/
+/// down at render time (see `render::compose`) so the existing content
+/// keeps its position instead of sliding along with the new, larger
+/// canvas.
 pub fn fit_canvas_to_content(doc: &mut Document) {
     let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
     if visible.is_empty() {
         return;
     }
     let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
-    let extent = extent_for(&placements, doc.layout.margin_px);
-    doc.canvas.export_width = extent.width.round().max(1.0) as u32;
-    doc.canvas.export_height = extent.height.round().max(1.0) as u32;
+
+    let mut min_x = 0.0_f64;
+    let mut min_y = 0.0_f64;
+    let mut max_x = 0.0_f64;
+    let mut max_y = 0.0_f64;
+
+    for (el, placement) in visible.iter().zip(placements.iter()) {
+        min_x = min_x.min(placement.x);
+        min_y = min_y.min(placement.y);
+        max_x = max_x.max(placement.x + placement.width);
+        max_y = max_y.max(placement.y + placement.height);
+
+        if el.label.enabled && !el.label.content.is_empty() {
+            if let Ok((bx, by, bw, bh)) = crate::render::measure_text_box(&el.label, placement.width, placement.height) {
+                min_x = min_x.min(placement.x + bx);
+                min_y = min_y.min(placement.y + by);
+                max_x = max_x.max(placement.x + bx + bw);
+                max_y = max_y.max(placement.y + by + bh);
+            }
+        }
+
+        for callout in &el.callouts {
+            if callout.enabled && !callout.text.content.is_empty() {
+                if let Ok((bx, by, bw, bh)) =
+                    crate::render::measure_text_box(&callout.text, placement.width, placement.height)
+                {
+                    min_x = min_x.min(placement.x + bx);
+                    min_y = min_y.min(placement.y + by);
+                    max_x = max_x.max(placement.x + bx + bw);
+                    max_y = max_y.max(placement.y + by + bh);
+                }
+            }
+        }
+    }
+
+    let margin = doc.layout.margin_px;
+    // Content that never goes negative reproduces the old behaviour
+    // exactly: canvas left/top edge stays at the nominal origin, and the
+    // layout's own leading margin (already baked into `placement.x/y`)
+    // is the only gap on that side. Content that does spill past the
+    // origin gets an extra margin-sized gap beyond its own extent too, so
+    // it doesn't touch the canvas edge.
+    let final_min_x = if min_x < 0.0 { min_x - margin } else { 0.0 };
+    let final_min_y = if min_y < 0.0 { min_y - margin } else { 0.0 };
+    let final_max_x = max_x + margin;
+    let final_max_y = max_y + margin;
+
+    doc.canvas.content_offset_x = -final_min_x;
+    doc.canvas.content_offset_y = -final_min_y;
+    doc.canvas.export_width = (final_max_x - final_min_x).round().max(1.0) as u32;
+    doc.canvas.export_height = (final_max_y - final_min_y).round().max(1.0) as u32;
 }
 
 #[cfg(test)]
@@ -262,6 +319,46 @@ mod tests {
         crate::layout::fit_canvas_to_content(&mut doc);
         assert_eq!(doc.canvas, before);
         assert_eq!(doc.canvas, CanvasSettings::default());
+    }
+
+    #[test]
+    fn a_negative_label_padding_pushes_the_canvas_origin_and_grows_it() {
+        use crate::model::{Document, TextPosition, VerticalAnchor};
+
+        let mut doc = Document::new();
+        doc.layout.margin_px = 10.0;
+        let mut el = fixture(200.0, 100.0);
+        el.label.enabled = true;
+        el.label.content = "Hi".to_string();
+        // Push the label 50px above the screenshot's own top edge.
+        if let TextPosition::Semantic { vertical, padding, .. } = &mut el.label.position {
+            *vertical = VerticalAnchor::Top;
+            *padding = -50.0;
+        }
+        doc.elements = vec![el];
+
+        crate::layout::fit_canvas_to_content(&mut doc);
+
+        // The label box's top edge sits at placement.y (margin_px) plus its
+        // own resolved box_y, which is negative here — so content reaches
+        // above the nominal origin and the canvas must grow upward too.
+        assert!(doc.canvas.content_offset_y > 0.0);
+        assert_eq!(doc.canvas.content_offset_x, 0.0);
+        assert!(doc.canvas.export_height > (100.0 + 20.0) as u32);
+    }
+
+    #[test]
+    fn content_that_never_goes_negative_keeps_a_zero_offset() {
+        use crate::model::Document;
+
+        let mut doc = Document::new();
+        doc.layout.margin_px = 48.0;
+        doc.elements = vec![fixture(400.0, 800.0)];
+
+        crate::layout::fit_canvas_to_content(&mut doc);
+
+        assert_eq!(doc.canvas.content_offset_x, 0.0);
+        assert_eq!(doc.canvas.content_offset_y, 0.0);
     }
 
     #[test]

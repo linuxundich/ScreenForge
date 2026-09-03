@@ -10,6 +10,13 @@ fn main() {
     // resource) silently doesn't take effect until something else happens
     // to touch build.rs or Cargo.toml.
     println!("cargo:rerun-if-changed=resources");
+    // The gresource bundle also pulls the app icon SVGs in from here (see
+    // `resources/screenforge.gresource.xml`'s `icons` gresource) — they
+    // live under `data/` rather than `resources/` so a future packaging
+    // step can `install_data` them straight into a real hicolor icon theme
+    // directory unchanged, but that means the rule above alone won't catch
+    // edits to them.
+    println!("cargo:rerun-if-changed=data/icons");
 
     glib_build_tools::compile_resources(
         &["resources"],

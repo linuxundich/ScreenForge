@@ -184,14 +184,6 @@ impl Window {
         self.imp().generator_corner_bias_row.get().clone()
     }
 
-    pub fn generator_offset_x_row(&self) -> adw::SpinRow {
-        self.imp().generator_offset_x_row.get().clone()
-    }
-
-    pub fn generator_offset_y_row(&self) -> adw::SpinRow {
-        self.imp().generator_offset_y_row.get().clone()
-    }
-
     pub fn generator_scale_row(&self) -> adw::SpinRow {
         self.imp().generator_scale_row.get().clone()
     }
@@ -252,8 +244,12 @@ impl Window {
         self.imp().label_enabled_row.get().clone()
     }
 
-    pub fn label_content_row(&self) -> adw::EntryRow {
-        self.imp().label_content_row.get().clone()
+    pub fn label_content_view(&self) -> gtk4::TextView {
+        self.imp().label_content_view.get().clone()
+    }
+
+    pub fn label_wrap_row(&self) -> adw::SwitchRow {
+        self.imp().label_wrap_row.get().clone()
     }
 
     pub fn label_position_mode_row(&self) -> adw::ComboRow {
@@ -483,10 +479,6 @@ mod imp {
         #[template_child]
         pub generator_corner_bias_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub generator_offset_x_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub generator_offset_y_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
         pub generator_scale_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub generator_contrast_row: TemplateChild<adw::SpinRow>,
@@ -517,7 +509,9 @@ mod imp {
         #[template_child]
         pub label_enabled_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub label_content_row: TemplateChild<adw::EntryRow>,
+        pub label_content_view: TemplateChild<gtk4::TextView>,
+        #[template_child]
+        pub label_wrap_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub label_position_mode_row: TemplateChild<adw::ComboRow>,
         #[template_child]

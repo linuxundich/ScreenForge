@@ -444,17 +444,18 @@ impl TextElement {
         }
     }
 
-    /// The width (in the same coordinate space as `position`) long content
-    /// should wrap within, when `typography.wrap` is set — the reference
-    /// rect's own width for `Absolute` placement (no better bound exists),
-    /// or the rect's width minus the semantic edge padding on both sides,
-    /// so wrapped text never overflows past where the box itself is
-    /// anchored.
+    /// The maximum width long content should ever occupy, in the same
+    /// coordinate space as `ref_w` (a screenshot's own width, for both a
+    /// label and a callout — see `core::render`'s call sites) — derived
+    /// from the box's own internal padding (`padding_x`), never from
+    /// `position`'s edge margin, so a label/callout can never grow wider
+    /// than its own screenshot regardless of how it's positioned relative
+    /// to that screenshot's edge. Used both to wrap long text (when
+    /// `typography.wrap` is set) and, as a hard ceiling, to force-wrap an
+    /// unbroken line that would otherwise exceed it even with wrapping
+    /// off — see `core::render::build_text_layout`.
     pub fn wrap_width(&self, ref_w: f64) -> f64 {
-        match self.position {
-            TextPosition::Absolute { .. } => ref_w.max(1.0),
-            TextPosition::Semantic { padding, .. } => (ref_w - 2.0 * padding).max(1.0),
-        }
+        (ref_w - 2.0 * self.padding_x).max(20.0)
     }
 }
 
@@ -761,6 +762,23 @@ pub struct CanvasSettings {
     /// content is exactly what used to let content get cropped off.
     pub export_width: u32,
     pub export_height: u32,
+    /// How far the nominal, layout-computed coordinate system (where
+    /// `(0, 0)` is wherever `compute_layout`/`extent_for` would normally
+    /// put the top-left-most content) has been shifted right/down to keep
+    /// everything within the actual canvas — set only by
+    /// [`crate::layout::fit_canvas_to_content`], never user-edited
+    /// directly. Needed because a label/callout's own negative edge
+    /// padding (`TextPosition::Semantic`'s `padding`) can push its box
+    /// above/left of `(0, 0)`; rather than shifting individual elements
+    /// (meaningless in `LayoutMode::Horizontal/Vertical/Grid`, where
+    /// nothing has an individual stored position), the whole canvas grows
+    /// and everything already-placed shifts by this single offset,
+    /// applied once in `core::render::compose`. `#[serde(default)]` so a
+    /// project saved before this field existed still loads, unshifted.
+    #[serde(default)]
+    pub content_offset_x: f64,
+    #[serde(default)]
+    pub content_offset_y: f64,
     /// The user-facing export knob: renders the composition scaled so its
     /// width equals this, height following proportionally so nothing is
     /// ever stretched or cropped (`#[serde(default)]` so a project saved
@@ -782,6 +800,8 @@ impl Default for CanvasSettings {
         Self {
             export_width: 1920,
             export_height: 1080,
+            content_offset_x: 0.0,
+            content_offset_y: 0.0,
             export_target_width: default_export_target_width(),
             export_format: ExportFormat::Png,
             export_quality: 90,
@@ -998,15 +1018,29 @@ mod tests {
     }
 
     #[test]
-    fn wrap_width_is_bounded_by_semantic_padding_on_both_sides() {
-        let el = TextElement { position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 50.0 }, ..TextElement::label_default() };
-        assert_eq!(el.wrap_width(1000.0), 900.0);
+    fn wrap_width_is_bounded_by_padding_x_regardless_of_position() {
+        // A large *edge margin* (`TextPosition::Semantic`'s own `padding`)
+        // must NOT affect wrap_width at all -- only `padding_x` (the
+        // box's own internal text padding) does. This is the fix for a
+        // label/callout being allowed to grow wider than its screenshot.
+        let el = TextElement {
+            position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 50.0 },
+            padding_x: 20.0,
+            ..TextElement::label_default()
+        };
+        assert_eq!(el.wrap_width(1000.0), 960.0);
     }
 
     #[test]
-    fn wrap_width_for_absolute_position_falls_back_to_the_full_reference_width() {
-        let el = TextElement { position: TextPosition::Absolute { x: 10.0, y: 10.0 }, ..TextElement::label_default() };
-        assert_eq!(el.wrap_width(1000.0), 1000.0);
+    fn wrap_width_is_the_same_for_absolute_position() {
+        let el = TextElement { position: TextPosition::Absolute { x: 10.0, y: 10.0 }, padding_x: 20.0, ..TextElement::label_default() };
+        assert_eq!(el.wrap_width(1000.0), 960.0);
+    }
+
+    #[test]
+    fn wrap_width_never_goes_below_a_sane_minimum() {
+        let el = TextElement { padding_x: 5000.0, ..TextElement::label_default() };
+        assert_eq!(el.wrap_width(1000.0), 20.0);
     }
 
     #[test]

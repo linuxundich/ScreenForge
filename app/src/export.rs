@@ -67,7 +67,8 @@ pub fn render_and_write(
     // the way the interactive preview does (see `Canvas`'s long-lived
     // one) — every shadow just misses once and renders at full quality.
     let shadow_cache = screenforge_core::shadow_cache::ShadowCache::new();
-    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache)?;
+    let background_cache = screenforge_core::background_cache::BackgroundCache::new();
+    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache, &background_cache)?;
 
     match doc.canvas.export_format {
         ExportFormat::Png => {

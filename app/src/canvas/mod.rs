@@ -150,6 +150,16 @@ impl Canvas {
     pub fn connect_callout_target_move<F: Fn(Uuid, Uuid, f64, f64) + 'static>(&self, f: F) {
         self.imp().set_callout_target_move_callback(f);
     }
+
+    /// Called at the end of an Alt-held drag on empty canvas space that
+    /// moved a generated background's own focus point (new `offset_x`,
+    /// `offset_y` — see `GeneratedBackground::offset_x`/`offset_y`). Never
+    /// fires without Alt held, without a `Background::Generated` document,
+    /// or for a drag that ends back where it started. Plain (no Alt) drags
+    /// on empty canvas space keep starting a marquee-select as before.
+    pub fn connect_wallpaper_move<F: Fn(f64, f64) + 'static>(&self, f: F) {
+        self.imp().set_wallpaper_move_callback(f);
+    }
 }
 
 impl Default for Canvas {
@@ -162,6 +172,7 @@ mod imp {
     use std::cell::{Cell, RefCell};
     use std::collections::{HashMap, HashSet};
     use std::f64::consts::PI;
+    use std::rc::Rc;
 
     use gtk4::cairo;
     use gtk4::gdk;
@@ -170,7 +181,7 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::{Corner, Document, LayoutMode, Rgba, TextPosition, Transform};
+    use screenforge_core::model::{Background, Corner, Document, LayoutMode, Rgba, TextPosition, Transform};
     use screenforge_core::snap::{self, Guide};
     use uuid::Uuid;
 
@@ -182,6 +193,7 @@ mod imp {
     type LabelMoveCallback = Box<dyn Fn(Uuid, TextPosition)>;
     type CalloutBoxMoveCallback = Box<dyn Fn(Uuid, Uuid, TextPosition)>;
     type CalloutTargetMoveCallback = Box<dyn Fn(Uuid, Uuid, f64, f64)>;
+    type WallpaperMoveCallback = Box<dyn Fn(f64, f64)>;
     /// `(drag-start point, moved elements' own (id, original x, original y))`
     /// — one entry per element for a multi-selection group move, or a
     /// single entry for an ordinary single-element move.
@@ -195,6 +207,54 @@ mod imp {
     /// the screenshot itself, and always a single element (a label can't
     /// be part of a multi-selection group move).
     type LabelDragOrigin = (usize, (f64, f64), (f64, f64));
+
+    /// `(drag-start point in document space, the generated background's
+    /// original (offset_x, offset_y))` — the same shape as the other
+    /// drag-origin types, but for the wallpaper itself rather than an
+    /// element; only ever set while `doc.background` is
+    /// `Background::Generated` and the Alt modifier is held (see
+    /// `on_drag_begin`). The document's own `offset_x`/`offset_y` are
+    /// deliberately *not* touched while this is set — see
+    /// `WallpaperPreview` for how the drag is actually shown.
+    type WallpaperDragOrigin = ((f64, f64), (f64, f64));
+
+    /// A cheap, drag-duration-only stand-in for a full re-`compose()`,
+    /// captured once by `try_begin_wallpaper_drag` and reused for the
+    /// entire drag: the background bitmap and the "everything else"
+    /// bitmap (screenshots/shadows/labels/callouts, from
+    /// `render::compose_elements`) that were correct *before* the drag
+    /// started, painted back together each frame as two plain blits — the
+    /// background shifted by `delta_doc`, the rest not — by `snapshot()`.
+    /// Neither bitmap is regenerated while this exists: the elements
+    /// bitmap because nothing about any element changes during a
+    /// wallpaper drag, and the background bitmap because
+    /// `background_cache` keeps returning the same cached entry as long as
+    /// the document's own `GeneratedBackground` isn't mutated (which only
+    /// happens once, at `on_drag_end`, via `wallpaper_move_callback`). This
+    /// is what keeps a wallpaper drag to two Cairo blits per frame
+    /// regardless of canvas complexity, instead of a full recomposite —
+    /// see the module doc comment on `screenforge_core::background_cache`
+    /// for the perf problem this exists to avoid.
+    struct WallpaperPreview {
+        background_surface: Rc<cairo::ImageSurface>,
+        elements_surface: Rc<cairo::ImageSurface>,
+        /// Device-pixel size both surfaces above were rendered at — must
+        /// match `cached`'s own size for the blits to align; a resize
+        /// mid-drag is the one case this doesn't hold, left as a rare,
+        /// harmless cosmetic glitch for the remainder of that drag rather
+        /// than handled specially.
+        render_w: i32,
+        render_h: i32,
+        /// The render scale (document px → device px) the two surfaces
+        /// above were rendered at.
+        scale: f64,
+        canvas_w: f64,
+        canvas_h: f64,
+        /// How far the background has moved from its pre-drag position so
+        /// far, in *document* pixels — updated every `on_drag_update`,
+        /// read (and converted to device pixels) by `snapshot()`.
+        delta_doc: Cell<(f64, f64)>,
+    }
 
     /// Which part of a callout a drag grabbed: its text bubble (behaves
     /// exactly like a label drag) or its arrow's target point (stored as a
@@ -258,6 +318,14 @@ mod imp {
         /// element's shadow bitmap instead of re-blurring it on every
         /// single mouse-move event. See `screenforge_core::shadow_cache`.
         shadow_cache: screenforge_core::shadow_cache::ShadowCache,
+        /// The generated background's rendered bitmap, kept across
+        /// `ensure_rendered()` calls for the same reason as `shadow_cache`
+        /// above — a label/callout drag re-composites every frame via
+        /// `content_dirty`, and none of that ever changes the background
+        /// itself, so re-rasterizing its (2x-supersampled) wave layers on
+        /// every mouse-move would be pure waste. See
+        /// `screenforge_core::background_cache`.
+        background_cache: screenforge_core::background_cache::BackgroundCache,
         content_dirty: Cell<bool>,
         pub(super) drag_active: Cell<bool>,
         /// `None` = fit to window (default); `Some(z)` = fixed render scale,
@@ -316,6 +384,19 @@ mod imp {
         /// arrow target — checked before the label and before the
         /// screenshot itself, in every layout mode.
         callout_drag_origin: Cell<Option<CalloutDragOrigin>>,
+        /// Set instead of every other drag-origin slot when the drag that
+        /// picked up `drag_from` started on empty canvas space with Alt
+        /// held while a generated background is active — see
+        /// `on_drag_begin`. Unlike every other drag-origin slot, this one
+        /// isn't tied to `drag_from`/an element index at all.
+        wallpaper_drag_origin: Cell<Option<WallpaperDragOrigin>>,
+        /// The cheap live-preview state for the wallpaper drag described by
+        /// `wallpaper_drag_origin` above — `Some` for exactly the same
+        /// span, set by `try_begin_wallpaper_drag`, updated by
+        /// `on_drag_update`, and cleared by `on_drag_end`/`cancel_drag`.
+        /// `snapshot()` checks this first and, if set, paints from it
+        /// instead of calling `ensure_rendered()` at all.
+        wallpaper_preview: RefCell<Option<WallpaperPreview>>,
         /// Alignment guides from the current Free-mode move drag, drawn by
         /// `snapshot()`; empty outside of a move drag that's actually
         /// snapped to something. Only a single-element move snaps — a
@@ -343,6 +424,7 @@ mod imp {
         label_move_callback: RefCell<Option<LabelMoveCallback>>,
         callout_box_move_callback: RefCell<Option<CalloutBoxMoveCallback>>,
         callout_target_move_callback: RefCell<Option<CalloutTargetMoveCallback>>,
+        wallpaper_move_callback: RefCell<Option<WallpaperMoveCallback>>,
     }
 
     impl Default for Canvas {
@@ -353,6 +435,7 @@ mod imp {
                 background_image: RefCell::new(None),
                 cached: RefCell::new(None),
                 shadow_cache: screenforge_core::shadow_cache::ShadowCache::new(),
+                background_cache: screenforge_core::background_cache::BackgroundCache::new(),
                 content_dirty: Cell::new(true),
                 drag_active: Cell::new(false),
                 manual_zoom: Cell::new(None),
@@ -366,6 +449,8 @@ mod imp {
                 resize_drag_origin: Cell::new(None),
                 label_drag_origin: Cell::new(None),
                 callout_drag_origin: Cell::new(None),
+                wallpaper_drag_origin: Cell::new(None),
+                wallpaper_preview: RefCell::new(None),
                 active_guides: RefCell::new(Vec::new()),
                 selected: RefCell::new(HashSet::new()),
                 marquee_start: Cell::new(None),
@@ -379,6 +464,7 @@ mod imp {
                 label_move_callback: RefCell::new(None),
                 callout_box_move_callback: RefCell::new(None),
                 callout_target_move_callback: RefCell::new(None),
+                wallpaper_move_callback: RefCell::new(None),
             }
         }
     }
@@ -400,8 +486,10 @@ mod imp {
                 #[weak]
                 obj,
                 move |gesture, x, y| {
-                    let shift = gesture.current_event_state().contains(gdk::ModifierType::SHIFT_MASK);
-                    obj.imp().on_drag_begin(x, y, shift);
+                    let state = gesture.current_event_state();
+                    let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+                    let alt = state.contains(gdk::ModifierType::ALT_MASK);
+                    obj.imp().on_drag_begin(x, y, shift, alt);
                 }
             ));
             drag.connect_drag_update(glib::clone!(
@@ -473,14 +561,50 @@ mod imp {
             ctx.rectangle(0.0, 0.0, width as f64, height as f64);
             let _ = ctx.fill();
 
-            self.ensure_rendered(width, height);
+            // While a wallpaper drag is live, `wallpaper_preview` holds
+            // everything needed to paint the current frame as two cheap
+            // blits (see its doc comment) — `ensure_rendered()` (a full
+            // `render::compose()`) is skipped entirely for the drag's
+            // whole duration, which is the actual fix for "dragging the
+            // background regenerates it on every mouse-move".
+            let preview_size = self.wallpaper_preview.borrow().as_ref().map(|p| (p.render_w, p.render_h));
+            let render_size = if let Some(size) = preview_size {
+                Some(size)
+            } else {
+                self.ensure_rendered(width, height);
+                self.cached.borrow().as_ref().map(|(_, w, h)| (*w, *h))
+            };
 
-            let render_size = self.cached.borrow().as_ref().map(|(_, w, h)| (*w, *h));
             if let Some((render_w, render_h)) = render_size {
                 let offset_x = (width as f64 - render_w as f64) / 2.0;
                 let offset_y = (height as f64 - render_h as f64) / 2.0;
+                // Every placement/guide/marquee coordinate below lives in
+                // nominal document space (unshifted), exactly like
+                // `last_placements` — the same space `compose()` shifts by
+                // this offset right before scaling to device pixels (see
+                // its `ctx.translate(content_offset_x, content_offset_y)`).
+                // Every overlay drawn on top of the rendered surface must
+                // add it back before scaling, or it drifts out of sync with
+                // the actual rendered content once the offset is non-zero.
+                // Unaffected by a live wallpaper-drag preview: only the
+                // background moves during one, never any element.
+                let (content_offset_x, content_offset_y) = {
+                    let doc = self.document.borrow();
+                    (doc.canvas.content_offset_x, doc.canvas.content_offset_y)
+                };
 
-                if let Some((surface, _, _)) = self.cached.borrow().as_ref() {
+                if let Some(preview) = self.wallpaper_preview.borrow().as_ref() {
+                    let (dx_doc, dy_doc) = preview.delta_doc.get();
+                    let _ = screenforge_core::render::paint_generated_background_bitmap(
+                        &ctx,
+                        &preview.background_surface,
+                        offset_x + dx_doc * preview.scale,
+                        offset_y + dy_doc * preview.scale,
+                    );
+                    if ctx.set_source_surface(&*preview.elements_surface, offset_x, offset_y).is_ok() {
+                        let _ = ctx.paint();
+                    }
+                } else if let Some((surface, _, _)) = self.cached.borrow().as_ref() {
                     if ctx.set_source_surface(surface, offset_x, offset_y).is_ok() {
                         let _ = ctx.paint();
                     }
@@ -493,7 +617,7 @@ mod imp {
                         None => placements.last().map(|p| p.x + p.width).unwrap_or(0.0),
                     };
                     let scale = self.last_scale.get();
-                    let line_x = offset_x + doc_x * scale;
+                    let line_x = offset_x + (doc_x + content_offset_x) * scale;
                     ctx.set_source_rgba(0.29, 0.56, 0.89, 0.95);
                     ctx.set_line_width(3.0);
                     ctx.move_to(line_x, offset_y);
@@ -516,8 +640,8 @@ mod imp {
                                 continue;
                             }
                             let inset = 3.0;
-                            let sx = offset_x + p.x * scale - inset;
-                            let sy = offset_y + p.y * scale - inset;
+                            let sx = offset_x + (p.x + content_offset_x) * scale - inset;
+                            let sy = offset_y + (p.y + content_offset_y) * scale - inset;
                             let sw = p.width * scale + inset * 2.0;
                             let sh = p.height * scale + inset * 2.0;
                             ctx.rectangle(sx, sy, sw, sh);
@@ -538,7 +662,10 @@ mod imp {
                         for (cx, cy) in
                             [(p.x, p.y), (p.x + p.width, p.y), (p.x, p.y + p.height), (p.x + p.width, p.y + p.height)]
                         {
-                            let (sx, sy) = (offset_x + cx * scale, offset_y + cy * scale);
+                            let (sx, sy) = (
+                                offset_x + (cx + content_offset_x) * scale,
+                                offset_y + (cy + content_offset_y) * scale,
+                            );
                             ctx.rectangle(
                                 sx - HANDLE_DRAW_HALF_PX,
                                 sy - HANDLE_DRAW_HALF_PX,
@@ -564,7 +691,10 @@ mod imp {
                     let placements = self.last_placements.borrow();
                     for callout in self.last_callout_placements.borrow().iter() {
                         let Some(p) = placements.get(callout.element_index) else { continue };
-                        let (cx, cy) = (offset_x + (p.x + callout.target.0) * scale, offset_y + (p.y + callout.target.1) * scale);
+                        let (cx, cy) = (
+                            offset_x + (p.x + callout.target.0 + content_offset_x) * scale,
+                            offset_y + (p.y + callout.target.1 + content_offset_y) * scale,
+                        );
                         ctx.arc(cx, cy, CALLOUT_TARGET_DRAW_RADIUS_PX, 0.0, 2.0 * PI);
                         ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
                         let _ = ctx.fill_preserve();
@@ -581,12 +711,12 @@ mod imp {
                 for guide in self.active_guides.borrow().iter() {
                     match *guide {
                         Guide::Vertical(doc_x) => {
-                            let sx = offset_x + doc_x * scale;
+                            let sx = offset_x + (doc_x + content_offset_x) * scale;
                             ctx.move_to(sx, offset_y);
                             ctx.line_to(sx, offset_y + render_h as f64);
                         }
                         Guide::Horizontal(doc_y) => {
-                            let sy = offset_y + doc_y * scale;
+                            let sy = offset_y + (doc_y + content_offset_y) * scale;
                             ctx.move_to(offset_x, sy);
                             ctx.line_to(offset_x + render_w as f64, sy);
                         }
@@ -600,8 +730,8 @@ mod imp {
                 if let (Some((sx0, sy0)), Some((sx1, sy1))) = (self.marquee_start.get(), self.marquee_current.get()) {
                     let (x0, x1) = (sx0.min(sx1), sx0.max(sx1));
                     let (y0, y1) = (sy0.min(sy1), sy0.max(sy1));
-                    let rx = offset_x + x0 * scale;
-                    let ry = offset_y + y0 * scale;
+                    let rx = offset_x + (x0 + content_offset_x) * scale;
+                    let ry = offset_y + (y0 + content_offset_y) * scale;
                     let rw = (x1 - x0) * scale;
                     let rh = (y1 - y0) * scale;
                     ctx.rectangle(rx, ry, rw, rh);
@@ -683,6 +813,10 @@ mod imp {
             *self.callout_target_move_callback.borrow_mut() = Some(Box::new(f));
         }
 
+        pub fn set_wallpaper_move_callback<F: Fn(f64, f64) + 'static>(&self, f: F) {
+            *self.wallpaper_move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
         fn notify_selection_changed(&self) {
             if let Some(cb) = self.selection_callback.borrow().as_ref() {
                 cb();
@@ -732,9 +866,15 @@ mod imp {
             };
             let resolved = self.resolved_images.borrow();
             let background_image = self.background_image.borrow();
-            if let Err(err) =
-                screenforge_core::render::compose(&doc, &surface, scale, &resolved, background_image.as_ref(), &self.shadow_cache)
-            {
+            if let Err(err) = screenforge_core::render::compose(
+                &doc,
+                &surface,
+                scale,
+                &resolved,
+                background_image.as_ref(),
+                &self.shadow_cache,
+                &self.background_cache,
+            ) {
                 eprintln!("ScreenForge: render error: {err}");
                 return;
             }
@@ -797,7 +937,10 @@ mod imp {
             let widget = self.obj();
             let offset_x = (widget.width() as f64 - render_w as f64) / 2.0;
             let offset_y = (widget.height() as f64 - render_h as f64) / 2.0;
-            Some(((wx - offset_x) / scale, (wy - offset_y) / scale))
+            let doc = self.document.borrow();
+            let doc_x = (wx - offset_x) / scale - doc.canvas.content_offset_x;
+            let doc_y = (wy - offset_y) / scale - doc.canvas.content_offset_y;
+            Some((doc_x, doc_y))
         }
 
         /// Samples the RGBA color currently rendered at a widget-space point
@@ -972,7 +1115,66 @@ mod imp {
             (result.x, result.y)
         }
 
-        pub(super) fn on_drag_begin(&self, x: f64, y: f64, shift: bool) {
+        /// Starts a wallpaper drag if `doc.background` is currently
+        /// `Background::Generated`, capturing the `WallpaperPreview` two
+        /// bitmaps need for the whole drag to stay cheap (see that type's
+        /// doc comment). Returns `false` (having set nothing) when there's
+        /// no generated background to drag, or when nothing has been
+        /// rendered yet to capture a background/elements size from —
+        /// callers fall back to the normal empty-space behavior (marquee
+        /// select) in that case, same as before this existed.
+        fn try_begin_wallpaper_drag(&self, doc_x: f64, doc_y: f64) -> bool {
+            let doc = self.document.borrow();
+            let Background::Generated(generated) = &doc.background else { return false };
+            let Some((render_w, render_h)) = self.cached.borrow().as_ref().map(|(_, w, h)| (*w, *h)) else { return false };
+            let scale = self.last_scale.get();
+            let canvas_w = doc.canvas.export_width as f64;
+            let canvas_h = doc.canvas.export_height as f64;
+
+            let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
+            let placements =
+                screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+            let regions: Vec<_> = placements
+                .iter()
+                .map(|p| screenforge_core::generator::ScreenshotRegion { x: p.x, y: p.y, width: p.width, height: p.height })
+                .collect();
+
+            let background_surface = match screenforge_core::render::generated_background_bitmap(
+                generated, canvas_w, canvas_h, scale, &regions, &self.background_cache,
+            ) {
+                Ok(surface) => surface,
+                Err(err) => {
+                    eprintln!("ScreenForge: could not prepare wallpaper drag preview: {err}");
+                    return false;
+                }
+            };
+
+            let elements_surface = {
+                let Ok(surface) = cairo::ImageSurface::create(cairo::Format::ARgb32, render_w, render_h) else { return false };
+                let resolved = self.resolved_images.borrow();
+                if let Err(err) = screenforge_core::render::compose_elements(&doc, &surface, scale, &resolved, &self.shadow_cache) {
+                    eprintln!("ScreenForge: could not prepare wallpaper drag preview: {err}");
+                    return false;
+                }
+                Rc::new(surface)
+            };
+
+            let orig_offset = (generated.offset_x, generated.offset_y);
+            *self.wallpaper_preview.borrow_mut() = Some(WallpaperPreview {
+                background_surface,
+                elements_surface,
+                render_w,
+                render_h,
+                scale,
+                canvas_w,
+                canvas_h,
+                delta_doc: Cell::new((0.0, 0.0)),
+            });
+            self.wallpaper_drag_origin.set(Some(((doc_x, doc_y), orig_offset)));
+            true
+        }
+
+        pub(super) fn on_drag_begin(&self, x: f64, y: f64, shift: bool, alt: bool) {
             self.active_guides.borrow_mut().clear();
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
 
@@ -1013,6 +1215,10 @@ mod imp {
             }
 
             let hit = self.element_index_at(doc_x, doc_y);
+
+            if hit.is_none() && alt && self.try_begin_wallpaper_drag(doc_x, doc_y) {
+                return;
+            }
 
             let Some(index) = hit else {
                 // Empty canvas space: start a marquee-select drag rather
@@ -1071,6 +1277,23 @@ mod imp {
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if let Some(((start_x, start_y), (orig_ox, orig_oy))) = self.wallpaper_drag_origin.get() {
+                // Deliberately never touches `self.document` or
+                // `content_dirty` here — see `WallpaperPreview`'s doc
+                // comment. Only the cheap preview delta changes per frame.
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    if let Some(preview) = self.wallpaper_preview.borrow().as_ref() {
+                        let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                        let new_ox = (orig_ox + dx / (preview.canvas_w * 0.5).max(1.0)).clamp(-1.0, 1.0);
+                        let new_oy = (orig_oy + dy / (preview.canvas_h * 0.5).max(1.0)).clamp(-1.0, 1.0);
+                        let delta_px = ((new_ox - orig_ox) * preview.canvas_w * 0.5, (new_oy - orig_oy) * preview.canvas_h * 0.5);
+                        preview.delta_doc.set(delta_px);
+                    }
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
             if let Some((index, (start_x, start_y), kind)) = self.callout_drag_origin.get() {
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
                     let (dx, dy) = (doc_x - start_x, doc_y - start_y);
@@ -1162,6 +1385,29 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some(((start_x, start_y), (orig_ox, orig_oy))) = self.wallpaper_drag_origin.take() {
+                // The one point in the whole drag that actually commits to
+                // `self.document` (via the callback, which round-trips
+                // through the app's undo stack and back into
+                // `set_document` — see `register_wallpaper_drag` in
+                // `main.rs`) and so the one point that pays for a real
+                // `render::compose()`, exactly once, at the true final
+                // offset — restoring full quality after the cheap preview.
+                let preview = self.wallpaper_preview.take();
+                if let (Some((doc_x, doc_y)), Some(preview)) = (self.widget_to_document(abs_x, abs_y), preview) {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    let new_ox = (orig_ox + dx / (preview.canvas_w * 0.5).max(1.0)).clamp(-1.0, 1.0);
+                    let new_oy = (orig_oy + dy / (preview.canvas_h * 0.5).max(1.0)).clamp(-1.0, 1.0);
+                    if new_ox != orig_ox || new_oy != orig_oy {
+                        if let Some(cb) = self.wallpaper_move_callback.borrow().as_ref() {
+                            cb(new_ox, new_oy);
+                        }
+                    }
+                }
+                self.obj().queue_draw();
+                return;
+            }
+
             if let Some((index, (start_x, start_y), kind)) = self.callout_drag_origin.take() {
                 self.drag_from.set(None);
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
@@ -1317,6 +1563,7 @@ mod imp {
             let move_origin = self.move_drag_origin.take();
             let label_origin = self.label_drag_origin.take();
             let callout_origin = self.callout_drag_origin.take();
+            let wallpaper_origin = self.wallpaper_drag_origin.take();
             self.marquee_start.set(None);
             self.marquee_current.set(None);
 
@@ -1353,6 +1600,13 @@ mod imp {
                     }
                 }
                 self.content_dirty.set(true);
+            } else if wallpaper_origin.is_some() {
+                // Nothing to revert: unlike every other drag kind above,
+                // a wallpaper drag never mutates `self.document` while in
+                // progress (see `WallpaperPreview`), so cancelling it is
+                // just dropping the preview — `self.cached` is already
+                // exactly what it was before the drag started.
+                self.wallpaper_preview.borrow_mut().take();
             }
             self.drag_hover.set(None);
             self.obj().queue_draw();

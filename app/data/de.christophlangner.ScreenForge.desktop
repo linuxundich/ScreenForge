@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ScreenForge
+Comment=Ordnet Smartphone-Screenshots zu einer einzigen Präsentationsgrafik an
+Exec=screenforge
+Icon=de.christophlangner.ScreenForge
+Terminal=false
+Categories=Graphics;Photography;GTK;GNOME;
+StartupNotify=true
