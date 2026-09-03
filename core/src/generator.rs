@@ -20,9 +20,10 @@
 //! corner is controlled entirely by `GeneratedBackground::corner_bias` —
 //! see that function's doc comment for the geometry.
 
-use cairo::{Context, LinearGradient, RadialGradient};
+use cairo::{Context, Format, ImageSurface, LinearGradient};
 
 use crate::model::{GeneratedBackground, Rgba};
+use crate::palette::{oklab_to_rgb, rgb_to_oklab};
 use crate::render::RenderError;
 use crate::rng::Rng;
 
@@ -64,31 +65,55 @@ fn occupancy(x: f64, y: f64, regions: &[ScreenshotRegion]) -> f64 {
     regions.iter().map(|r| r.proximity(x, y)).fold(0.0, f64::max)
 }
 
-/// Picks a color at fractional position `t` (`0.0..=1.0`) along `palette`
-/// by linearly interpolating between its two nearest entries — a smooth
-/// ramp across the whole palette, rather than `generator`'s old
-/// cycle-with-occasional-random-jump behavior. Falls back to a neutral
-/// gray if `palette` is empty.
-fn palette_lerp(palette: &[Rgba], t: f64) -> Rgba {
-    if palette.is_empty() {
-        return Rgba::new(0.5, 0.5, 0.5, 1.0);
-    }
-    if palette.len() == 1 {
-        return palette[0];
+/// Converts `palette` to Oklab once per render (so `layer_color` never
+/// reconverts on every call), plus its mean lightness — the pivot
+/// `layer_color`'s contrast boost pushes every layer's lightness/chroma
+/// away from. Falls back to a single neutral-gray stop when `palette` is
+/// empty, converted the same way so `layer_color` needs no separate
+/// empty-palette case.
+fn oklab_palette(palette: &[Rgba]) -> (Vec<(f64, f64, f64)>, f64) {
+    let stops: Vec<(f64, f64, f64)> =
+        if palette.is_empty() { vec![rgb_to_oklab(Rgba::new(0.5, 0.5, 0.5, 1.0))] } else { palette.iter().map(|&c| rgb_to_oklab(c)).collect() };
+    let mean_l = stops.iter().map(|s| s.0).sum::<f64>() / stops.len() as f64;
+    (stops, mean_l)
+}
+
+/// Interpolates Oklab `stops` at fractional position `t` (`0.0..=1.0`)
+/// between its two nearest entries — the same ramp-across-the-whole-
+/// palette shape the old RGB-space `palette_lerp` had, but in a
+/// perceptually uniform space. Plain RGB interpolation between two very
+/// different hues passes through a muddy, desaturated midpoint; Oklab
+/// doesn't, which is a big part of why adjacent layers used to read as
+/// too similar to tell apart (spec: "stärkere Farbunterschiede").
+fn oklab_lerp(stops: &[(f64, f64, f64)], t: f64) -> (f64, f64, f64) {
+    if stops.len() == 1 {
+        return stops[0];
     }
     let t = t.clamp(0.0, 1.0);
-    let scaled = t * (palette.len() - 1) as f64;
+    let scaled = t * (stops.len() - 1) as f64;
     let i0 = scaled.floor() as usize;
-    let i1 = (i0 + 1).min(palette.len() - 1);
+    let i1 = (i0 + 1).min(stops.len() - 1);
     let frac = scaled - i0 as f64;
-    let a = palette[i0];
-    let b = palette[i1];
-    Rgba::new(
-        a.r + (b.r - a.r) * frac,
-        a.g + (b.g - a.g) * frac,
-        a.b + (b.b - a.b) * frac,
-        a.a + (b.a - a.a) * frac,
-    )
+    let (l0, a0, b0) = stops[i0];
+    let (l1, a1, b1) = stops[i1];
+    (l0 + (l1 - l0) * frac, a0 + (a1 - a0) * frac, b0 + (b1 - b0) * frac)
+}
+
+/// One wave layer's flat fill color: `oklab_lerp(stops, t)`, then pushed
+/// away from the palette's own mean lightness `mean_l` — and its chroma
+/// scaled the same way — by `contrast`. At `contrast = 0` this is just
+/// the plain interpolated color; at `contrast = 1` adjacent layers pull
+/// apart much more in both lightness and saturation. That's the
+/// difference between "clearly distinct regions" and a single smooth
+/// wash: boosting contrast globally (e.g. an S-curve on `t` itself) would
+/// only widen the *overall* range, but every layer sits at its own fixed
+/// `t` regardless — pushing each color away from the *palette's* pivot
+/// widens the gap between every pair of neighbors at once.
+fn layer_color(stops: &[(f64, f64, f64)], mean_l: f64, t: f64, contrast: f64) -> Rgba {
+    let (l, a, b) = oklab_lerp(stops, t);
+    let gain = 1.0 + contrast.clamp(0.0, 1.0) * 1.4;
+    let boosted_l = (mean_l + (l - mean_l) * gain).clamp(0.0, 1.0);
+    oklab_to_rgb(boosted_l, a * gain, b * gain)
 }
 
 /// Bundles the canvas/screenshot context [`draw_wave_layers`] needs beyond
@@ -195,6 +220,114 @@ fn choose_corner(rng: &mut Rng, width: f64, height: f64, regions: &[ScreenshotRe
     best
 }
 
+/// Casts `points`' silhouette (the exact wobbly wedge a layer is about to
+/// fill) as a soft, semi-transparent shadow offset by `offset`, painted
+/// onto `ctx` *before* that layer's own opaque fill. Drawing it this way
+/// — as part of generation, not a raster post-process over the finished
+/// image — is what gives each layer a visible "contact shadow" rim
+/// exactly where the *next*, smaller layer's boundary doesn't quite
+/// reach: that later layer's own fill covers the un-shifted footprint,
+/// leaving only the sliver the offset pushed outside it. See
+/// `draw_wave_layers` for how `offset`/`blur`/`alpha` are chosen.
+///
+/// Renders into a scratch surface capped at `SHADOW_RENDER_MAX_DIM` in its
+/// longest dimension, *not* the shape's true document-space size —
+/// shadows are blurred by construction, so the resolution this trades
+/// away is imperceptible, and it's what keeps this cheap however large
+/// the canvas or an outer layer's own footprint gets: without it, a wide
+/// outer layer's shadow on a multi-thousand-pixel export canvas blurs a
+/// multi-megapixel surface, once per layer, on every single render —
+/// exactly what made a generated background slow enough to look hung.
+/// The shape is drawn scaled down to fit, blurred at that resolution,
+/// then stretched back out over its true footprint when composited
+/// (mirroring `render::shadow_render_scale`'s own reasoning, just with a
+/// fixed cap rather than one derived from the caller's device scale,
+/// since nothing here has that scale threaded through it).
+///
+/// Deliberately does *not* clamp the padded bounding box to the canvas
+/// edges: cropping away the margin a blurred edge needs right at the
+/// canvas boundary — which every outer layer's shadow used to hit, since
+/// the fan reaches into a canvas corner by design — left a hard, visible
+/// seam exactly where the crop happened, a stray straight line rather
+/// than the intended soft fade-out.
+const SHADOW_RENDER_MAX_DIM: f64 = 256.0;
+
+fn draw_layer_shadow(ctx: &Context, points: &[(f64, f64)], offset: (f64, f64), blur: f64, alpha: f64) -> Result<(), RenderError> {
+    if alpha <= 0.0 || points.is_empty() {
+        return Ok(());
+    }
+    // Deliberately traces just `points` — the arc boundary itself — closed
+    // directly rather than the true fan-shaped fill (which also has a
+    // vertex at the shared focus point, however far outside the canvas
+    // that sits for a low `corner_bias`). Every layer shares that same
+    // focus and roughly the same angular sweep, so the sliver between the
+    // arc and the focus is common ground every layer overpaints anyway —
+    // a shadow there would never be visible. Leaving it out of the
+    // silhouette keeps the shadow's own bounding box close to the arc's
+    // actual on-canvas size instead of ballooning out to the focus point
+    // (which, for a wide/flat wave-band read, may sit many canvas-
+    // diagonals away) — that ballooning was the actual reason a generated
+    // background could take seconds per layer and look hung.
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (points[0].0, points[0].0, points[0].1, points[0].1);
+    for &(x, y) in points {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    // Widen by the offset so the shifted copy's own extent is covered too.
+    min_x = min_x.min(min_x + offset.0);
+    min_y = min_y.min(min_y + offset.1);
+    max_x = max_x.max(max_x + offset.0);
+    max_y = max_y.max(max_y + offset.1);
+
+    let bbox_w = (max_x - min_x).max(1.0);
+    let bbox_h = (max_y - min_y).max(1.0);
+    // The blur's own padding (~3x its radius per side, see `pad` below)
+    // has to count toward the size being capped too — a small shape with
+    // a large blur radius needs just as much downscaling as a large shape
+    // would, otherwise the padding alone (not the traced shape) is what
+    // balloons the surface past the cap.
+    let unscaled_extent = bbox_w.max(bbox_h) + blur * 6.0 + 8.0;
+    let render_scale = (SHADOW_RENDER_MAX_DIM / unscaled_extent).min(1.0);
+    let render_blur = blur * render_scale;
+    let pad = (render_blur * 3.0 + 4.0).max(4.0);
+
+    let surface_w = (bbox_w * render_scale + pad * 2.0).ceil() as i32;
+    let surface_h = (bbox_h * render_scale + pad * 2.0).ceil() as i32;
+    if surface_w <= 0 || surface_h <= 0 {
+        return Ok(());
+    }
+
+    let mut shadow_surface = ImageSurface::create(Format::ARgb32, surface_w, surface_h)?;
+    {
+        let shadow_ctx = Context::new(&shadow_surface)?;
+        shadow_ctx.translate(pad, pad);
+        shadow_ctx.scale(render_scale, render_scale);
+        shadow_ctx.translate(-min_x, -min_y);
+        shadow_ctx.set_source_rgba(0.0, 0.0, 0.0, alpha);
+        shadow_ctx.new_path();
+        shadow_ctx.move_to(points[0].0, points[0].1);
+        for &(x, y) in &points[1..] {
+            shadow_ctx.line_to(x, y);
+        }
+        shadow_ctx.close_path();
+        shadow_ctx.fill()?;
+    }
+    if render_blur > 0.0 {
+        let stride = shadow_surface.stride();
+        let mut data = shadow_surface.data()?;
+        crate::blur::box_blur(&mut data, surface_w, surface_h, stride, render_blur);
+    }
+
+    ctx.save()?;
+    ctx.scale(1.0 / render_scale, 1.0 / render_scale);
+    ctx.set_source_surface(&shadow_surface, (min_x + offset.0) * render_scale - pad, (min_y + offset.1) * render_scale - pad)?;
+    ctx.paint()?;
+    ctx.restore()?;
+    Ok(())
+}
+
 /// Draws a fan of nested, wave-perturbed arc layers around a single focus
 /// point — the one procedural style this generator produces. Everything
 /// about *where the layers sit* and *how the fan spreads* is derived from
@@ -220,10 +353,24 @@ fn choose_corner(rng: &mut Rng, width: f64, height: f64, regions: &[ScreenshotRe
 ///
 /// Layers are drawn outermost (largest radius) first and innermost last,
 /// so the innermost layer — closest to the focus point — paints on top.
-/// Each layer's fill color comes from `palette_lerp` at its position in
-/// the stack, so the palette reads as one smooth ramp from the outermost
-/// to the innermost layer, darkest/lightest end depending on how the
-/// caller resolved the palette.
+/// Every layer is an opaque, hard-edged flat fill (`layer_color`, Oklab
+/// space) rather than a per-layer gradient — the earlier per-layer
+/// `RadialGradient` fade was the main reason generated backgrounds read
+/// as one soft, homogeneous wash instead of distinct regions. `bg.contrast`
+/// now does two jobs at once, matching how the reference wallpapers this
+/// algorithm chases actually read: it widens the color gap between
+/// neighboring layers (`layer_color`'s contrast boost) *and* strengthens
+/// the contact shadow each layer casts on the one behind it
+/// (`draw_layer_shadow`), so "more contrast" reads as "more separated,
+/// more dimensional" rather than just "more saturated". `bg.softness`
+/// controls that same shadow's blur radius — a layer's own fill is always
+/// crisp, only its cast shadow is ever soft.
+///
+/// The shadow direction/length is fixed per render (derived from
+/// `outward`, scaled to a fraction of one layer band's own thickness) so
+/// every layer casts its shadow the same way — a consistent "light
+/// direction" across the whole composition, rather than a jumble of
+/// differently-angled shadows.
 fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, palette: &[Rgba], scene: &Scene) -> Result<(), RenderError> {
     let (width, height, regions, avoid) = (scene.width, scene.height, scene.regions, scene.avoid);
     let corner = choose_corner(rng, width, height, regions, avoid);
@@ -260,34 +407,48 @@ fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, pale
     let freq = 1.0 + (bg.variation.clamp(0.0, 1.0) * 3.0).round();
     let segments = 24;
 
+    let contrast = bg.contrast.clamp(0.0, 1.0);
+    let (oklab_stops, mean_l) = oklab_palette(palette);
+
+    let band_thickness = (max_radius - min_radius) / layer_count.max(1) as f64;
+    let shadow_offset = {
+        let len = band_thickness * (0.25 + 0.35 * contrast);
+        (outward.0 * len, outward.1 * len)
+    };
+    let shadow_blur = (band_thickness * (0.15 + 0.5 * bg.softness.clamp(0.0, 1.0))).max(0.5);
+    let shadow_alpha = 0.16 + 0.34 * contrast;
+
     for i in 0..layer_count {
         let t = i as f64 / (layer_count - 1).max(1) as f64;
         let r_base = max_radius + (min_radius - max_radius) * t;
         let phase = rng.range(0.0, std::f64::consts::PI * 2.0);
         let layer_amplitude = amplitude * rng.range(0.7, 1.3);
 
+        let points: Vec<(f64, f64)> = (0..=segments)
+            .map(|s| {
+                let frac = s as f64 / segments as f64;
+                let angle = base_angle - sweep_rad / 2.0 + frac * sweep_rad;
+                let wobble = (frac * freq * std::f64::consts::PI * 2.0 + phase).sin() * layer_amplitude;
+                let r = (r_base + wobble).max(1.0);
+                (focus.0 + angle.cos() * r, focus.1 + angle.sin() * r)
+            })
+            .collect();
+
+        // Cast onto whatever's already painted (the base fill, or the
+        // previous, larger layer) before this layer's own opaque fill —
+        // see this function's doc comment for why that's what produces a
+        // visible rim rather than a fully hidden or fully detached blob.
+        draw_layer_shadow(ctx, &points, shadow_offset, shadow_blur, shadow_alpha)?;
+
         ctx.new_path();
         ctx.move_to(focus.0, focus.1);
-        for s in 0..=segments {
-            let frac = s as f64 / segments as f64;
-            let angle = base_angle - sweep_rad / 2.0 + frac * sweep_rad;
-            let wobble = (frac * freq * std::f64::consts::PI * 2.0 + phase).sin() * layer_amplitude;
-            let r = (r_base + wobble).max(1.0);
-            ctx.line_to(focus.0 + angle.cos() * r, focus.1 + angle.sin() * r);
+        for &(x, y) in &points {
+            ctx.line_to(x, y);
         }
         ctx.close_path();
 
-        let color = palette_lerp(palette, t);
-        let alpha = color.a * (1.0 - 0.3 * bg.contrast.clamp(0.0, 1.0) * (1.0 - t));
-
-        if bg.softness < 0.5 {
-            ctx.set_source_rgba(color.r, color.g, color.b, alpha);
-        } else {
-            let gradient = RadialGradient::new(focus.0, focus.1, 0.0, focus.0, focus.1, r_base + layer_amplitude);
-            gradient.add_color_stop_rgba(0.0, color.r, color.g, color.b, alpha);
-            gradient.add_color_stop_rgba(1.0, color.r, color.g, color.b, alpha * 0.6);
-            ctx.set_source(&gradient)?;
-        }
+        let color = layer_color(&oklab_stops, mean_l, t, contrast);
+        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
         ctx.fill()?;
     }
     Ok(())
@@ -337,6 +498,39 @@ mod tests {
             drop(ctx);
             let data = surface.data().unwrap();
             assert!(data.iter().any(|&b| b != 0), "corner_bias={corner_bias} painted nothing at all");
+        }
+    }
+
+    /// Regression test for a real perf incident: a low `corner_bias` puts
+    /// the focus point many canvas-diagonals away, and a large `contrast`/
+    /// `softness` combination drives a correspondingly large document-
+    /// space shadow blur radius — together, every per-layer shadow's
+    /// scratch surface ballooned to a multi-megapixel blur, once per
+    /// layer, making a single render slow enough that GNOME's own "not
+    /// responding" watchdog fired for what should be a routine slider
+    /// tweak. `SHADOW_RENDER_MAX_DIM` (and folding the blur radius itself
+    /// into the size that gets capped, not just the traced shape) is what
+    /// keeps this bounded regardless of canvas size or how far outside it
+    /// the focus point sits — this asserts that bound holds at every
+    /// `corner_bias` extreme, with the highest layer count and the
+    /// highest contrast/softness this generator allows.
+    #[test]
+    fn rendering_stays_fast_even_at_the_most_expensive_shadow_settings() {
+        for corner_bias in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let bg = GeneratedBackground {
+                density: 1.0,
+                contrast: 1.0,
+                softness: 1.0,
+                corner_bias,
+                ..sample_background(1, corner_bias)
+            };
+            let start = std::time::Instant::now();
+            let _ = render_to_checksum(&bg, &[]);
+            let elapsed = start.elapsed();
+            assert!(
+                elapsed.as_millis() < 2000,
+                "corner_bias={corner_bias} took {elapsed:?} — expected well under a second even in a debug build"
+            );
         }
     }
 
@@ -432,23 +626,45 @@ mod tests {
         assert_ne!(not_avoiding, avoiding, "avoiding screenshot regions should change the chosen focus corner");
     }
 
-    #[test]
-    fn palette_lerp_of_empty_palette_is_neutral_gray() {
-        let c = palette_lerp(&[], 0.5);
-        assert_eq!(c, Rgba::new(0.5, 0.5, 0.5, 1.0));
+    fn assert_close(a: Rgba, b: Rgba, tol: f64) {
+        assert!((a.r - b.r).abs() < tol, "r: {a:?} vs {b:?}");
+        assert!((a.g - b.g).abs() < tol, "g: {a:?} vs {b:?}");
+        assert!((a.b - b.b).abs() < tol, "b: {a:?} vs {b:?}");
     }
 
     #[test]
-    fn palette_lerp_at_the_ends_returns_the_end_colors_exactly() {
-        let palette = vec![Rgba::new(0.0, 0.0, 0.0, 1.0), Rgba::new(1.0, 1.0, 1.0, 1.0)];
-        assert_eq!(palette_lerp(&palette, 0.0), palette[0]);
-        assert_eq!(palette_lerp(&palette, 1.0), palette[1]);
+    fn layer_color_of_empty_palette_is_neutral_gray_regardless_of_contrast() {
+        let (stops, mean_l) = oklab_palette(&[]);
+        for contrast in [0.0, 0.5, 1.0] {
+            let c = layer_color(&stops, mean_l, 0.5, contrast);
+            assert_close(c, Rgba::new(0.5, 0.5, 0.5, 1.0), 0.02);
+        }
     }
 
     #[test]
-    fn palette_lerp_at_the_midpoint_blends_the_two_nearest_colors() {
+    fn layer_color_at_the_ends_approximates_the_end_colors_at_zero_contrast() {
         let palette = vec![Rgba::new(0.0, 0.0, 0.0, 1.0), Rgba::new(1.0, 1.0, 1.0, 1.0)];
-        let mid = palette_lerp(&palette, 0.5);
-        assert!((mid.r - 0.5).abs() < 1e-9);
+        let (stops, mean_l) = oklab_palette(&palette);
+        assert_close(layer_color(&stops, mean_l, 0.0, 0.0), palette[0], 0.02);
+        assert_close(layer_color(&stops, mean_l, 1.0, 0.0), palette[1], 0.02);
+    }
+
+    #[test]
+    fn higher_contrast_widens_the_gap_between_two_layers_colors() {
+        let palette = vec![Rgba::new(0.2, 0.3, 0.6, 1.0), Rgba::new(0.8, 0.5, 0.2, 1.0)];
+        let (stops, mean_l) = oklab_palette(&palette);
+        let gap_at = |contrast: f64| {
+            let a = layer_color(&stops, mean_l, 0.25, contrast);
+            let b = layer_color(&stops, mean_l, 0.75, contrast);
+            ((a.r - b.r).powi(2) + (a.g - b.g).powi(2) + (a.b - b.b).powi(2)).sqrt()
+        };
+        assert!(gap_at(1.0) > gap_at(0.0), "higher contrast should pull neighboring layers' colors further apart");
+    }
+
+    #[test]
+    fn oklab_lerp_of_a_single_stop_is_that_stop_at_every_t() {
+        let stops = [(0.4, 0.1, -0.05)];
+        assert_eq!(oklab_lerp(&stops, 0.0), stops[0]);
+        assert_eq!(oklab_lerp(&stops, 1.0), stops[0]);
     }
 }

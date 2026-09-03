@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-03
+
+### Changed
+
+- Reworked the generated background's rendering to match the look of a
+  hand-drawn "wave-layer" reference wallpaper: adjacent regions now meet
+  at clear, hard edges instead of a soft gradient blur, get their color
+  contrast from separating Oklab lightness/hue (never from raising
+  saturation), and cast a directionally-consistent contact shadow onto
+  the layer behind them for a sense of depth. `Kontrast`/`Weichheit` now
+  double as color-separation strength and shadow strength/blur, rather
+  than only feeding a soft fade.
+
+### Fixed
+
+- Generated backgrounds with strong contrast/shadow settings no longer
+  take long enough to look like the app had hung, and no longer show
+  stray straight horizontal/vertical line artifacts — both were caused
+  by the same shadow-bitmap sizing bug (the pattern's far-away focus
+  point was included in the shadow's own bounding box, and the render-
+  resolution cap didn't account for the blur's own padding cost).
+
 ## [0.20.0] - 2026-09-03
 
 ### Added
