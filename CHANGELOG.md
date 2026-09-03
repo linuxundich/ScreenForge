@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-03
+
+### Added
+
+- Import a screenshot directly from a connected Android device: "Von
+  Android-Gerät importieren…" in the Öffnen menu (`Strg+Umschalt+A`)
+  shells out to the user's own `adb` — `adb devices -l` to find the one
+  authorized device, `adb exec-out screencap -p` to stream its current
+  screen straight to a PNG, no push/pull through the device's own storage
+  needed. Works identically over USB or wireless debugging, since that's
+  negotiated by `adb` itself. Runs on a background thread and feeds into
+  the same import path as a file-picked screenshot, so it's undoable like
+  every other import.
+
 ## [0.19.0] - 2026-09-03
 
 ### Added

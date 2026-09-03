@@ -1,3 +1,4 @@
+mod adb;
 mod canvas;
 mod export;
 mod import;
@@ -149,6 +150,7 @@ fn build_ui(app: &adw::Application) {
     refresh_canvas(&window, &canvas, &state);
 
     register_open_action(app, &window, &canvas, &state);
+    register_import_android_action(app, &window, &canvas, &state);
     register_drop_target(&window, &canvas, &state);
     register_layout_controls(&window, &canvas, &state);
     register_effect_controls(&window, &canvas, &state);
@@ -314,6 +316,39 @@ fn register_open_action(app: &adw::Application, window: &Window, canvas: &Canvas
     ));
     window.add_action(&open_action);
     app.set_accels_for_action("win.open", &["<Ctrl>o"]);
+}
+
+/// The "Von Android-Gerät importieren…" action: runs `adb` on a
+/// background thread (`gio::spawn_blocking`, mirroring `win.export`'s own
+/// use of it — a stuck or slow `adb` call must never freeze the UI),
+/// then imports the captured PNG through the same [`import_paths`] every
+/// other import route shares.
+fn register_import_android_action(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("import-android", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, _| {
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let toast_overlay = window.toast_overlay();
+                let result = gio::spawn_blocking(adb::capture_screenshot).await;
+                match result {
+                    Ok(Ok(path)) => import_paths(&window, &canvas, &state, vec![path]),
+                    Ok(Err(err)) => toast_overlay.add_toast(adw::Toast::new(&err.to_string())),
+                    Err(_) => toast_overlay.add_toast(adw::Toast::new("Import fehlgeschlagen: Hintergrundaufgabe abgebrochen")),
+                }
+            });
+        }
+    ));
+    window.add_action(&action);
+    app.set_accels_for_action("win.import-android", &["<Ctrl><Shift>a"]);
 }
 
 /// Lets screenshots be dragged in directly from a file manager (spec §1).
