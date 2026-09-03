@@ -16,14 +16,14 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
-    AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveScreenshot, RemoveScreenshots, ReorderScreenshot,
-    ReplaceScreenshotSource, SetBackground, SetCornerRadiusForAllElements, SetLayoutMode, SetMargin, SetScreenshotLabel,
-    SetShadowForAllElements, SetSpacing, SetTitle, SetTransform, SetTransforms, UndoStack,
+    AddCallout, AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveCallout, RemoveScreenshot,
+    RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLayoutMode,
+    SetMargin, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack,
 };
 use screenforge_core::model::{
-    Background, BackgroundImageFit, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GradientKind, GradientSpec,
-    HorizontalAnchor, ImageBackgroundSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement, ShadowParams, ShadowPreset, TextAlign,
-    TextBackground, TextElement, TextPosition, Typography, VerticalAnchor,
+    Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GradientKind,
+    GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement, ShadowParams, ShadowPreset,
+    TextAlign, TextBackground, TextElement, TextPosition, Typography, VerticalAnchor,
 };
 use uuid::Uuid;
 
@@ -155,7 +155,11 @@ fn build_ui(app: &adw::Application) {
     register_layout_controls(&window, &canvas, &state);
     register_effect_controls(&window, &canvas, &state);
     register_generator_controls(&window, &canvas, &state);
-    register_title_controls(&window, &canvas, &state);
+    register_label_controls(&window, &canvas, &state);
+    register_selection_sync(&window, &canvas, &state);
+    register_label_drag(&window, &canvas, &state);
+    register_callouts_controls(&window, &canvas, &state);
+    register_callout_drag(&window, &canvas, &state);
     register_export_controls(&window, &state);
     register_export_action(app, &window, &state);
     register_project_actions(app, &window, &canvas, &state);
@@ -553,7 +557,7 @@ fn index_for_color_strategy(strategy: ColorStrategy) -> u32 {
 /// Reflects a `GeneratedBackground`'s parameters onto the generator
 /// controls — used both by `sync_background_controls`'s `Generated` arm
 /// and after a fresh "Generieren" click updates the seed, mirroring
-/// `sync_title_controls`'s role for the title.
+/// `sync_label_controls`'s role for the selected screenshot's label.
 fn sync_generator_controls(window: &Window, generated: &GeneratedBackground) {
     window.generator_color_strategy_row().set_selected(index_for_color_strategy(generated.color_strategy));
     let manual_buttons =
@@ -680,91 +684,123 @@ fn font_desc_from_typography(typography: &Typography) -> pango::FontDescription 
 /// Reflects a `TextElement` (the composition title) onto its controls —
 /// used for both the initial sync and after undo/redo/load, mirroring
 /// `sync_background_controls`.
-fn sync_title_controls(window: &Window, title: &TextElement) {
-    window.title_enabled_row().set_active(title.enabled);
-    window.title_content_row().set_text(&title.content);
+/// The screenshot a Label-sidebar edit should target: the document's own
+/// current single-selected screenshot, or `None` when 0 or several are
+/// selected (in which case the whole `label_group` stays hidden — see
+/// `sync_label_controls`).
+fn single_selected_label_target(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) -> Option<(Uuid, TextElement)> {
+    let selected = canvas.selected_ids();
+    if selected.len() != 1 {
+        return None;
+    }
+    let id = *selected.iter().next().unwrap();
+    state.borrow().document.elements.iter().find(|e| e.id == id).map(|e| (id, e.label.clone()))
+}
 
-    let is_absolute = matches!(title.position, TextPosition::Absolute { .. });
-    window.title_position_mode_row().set_selected(if is_absolute { 1 } else { 0 });
-    window.title_horizontal_row().set_visible(!is_absolute);
-    window.title_vertical_row().set_visible(!is_absolute);
-    window.title_padding_row().set_visible(!is_absolute);
-    window.title_x_row().set_visible(is_absolute);
-    window.title_y_row().set_visible(is_absolute);
-    match title.position {
+/// Reflects the current single-selected screenshot's label onto the
+/// sidebar's "Label" section, hiding that whole section when 0 or several
+/// screenshots are selected. Called both when the selection changes and
+/// as part of `sync_controls_from_document` (after undo/redo/load, since
+/// the selected screenshot's label may have changed underneath it too).
+/// Guards its own writes with `EditorState.syncing_controls` so
+/// `register_label_controls`'s row handlers don't reinterpret this as a
+/// user edit and dispatch a spurious undo step.
+fn sync_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let Some((_, label)) = single_selected_label_target(canvas, state) else {
+        window.label_group().set_visible(false);
+        return;
+    };
+    window.label_group().set_visible(true);
+
+    let was_syncing = state.borrow().syncing_controls;
+    state.borrow_mut().syncing_controls = true;
+
+    window.label_enabled_row().set_active(label.enabled);
+    window.label_content_row().set_text(&label.content);
+
+    let is_absolute = matches!(label.position, TextPosition::Absolute { .. });
+    window.label_position_mode_row().set_selected(if is_absolute { 1 } else { 0 });
+    window.label_horizontal_row().set_visible(!is_absolute);
+    window.label_vertical_row().set_visible(!is_absolute);
+    window.label_padding_row().set_visible(!is_absolute);
+    window.label_x_row().set_visible(is_absolute);
+    window.label_y_row().set_visible(is_absolute);
+    match label.position {
         TextPosition::Semantic { horizontal, vertical, padding } => {
-            window.title_horizontal_row().set_selected(index_for_horizontal_anchor(horizontal));
-            window.title_vertical_row().set_selected(index_for_vertical_anchor(vertical));
-            window.title_padding_row().set_value(padding);
+            window.label_horizontal_row().set_selected(index_for_horizontal_anchor(horizontal));
+            window.label_vertical_row().set_selected(index_for_vertical_anchor(vertical));
+            window.label_padding_row().set_value(padding);
         }
         TextPosition::Absolute { x, y } => {
-            window.title_x_row().set_value(x);
-            window.title_y_row().set_value(y);
+            window.label_x_row().set_value(x);
+            window.label_y_row().set_value(y);
         }
     }
 
-    let background_index = match &title.background {
+    let background_index = match &label.background {
         TextBackground::None => 0,
         TextBackground::Solid(_) => 1,
         TextBackground::Gradient(_) => 2,
     };
-    window.title_background_row().set_selected(background_index);
-    window.title_background_color_row().set_visible(background_index != 0);
-    window.title_background_color2_row().set_visible(background_index == 2);
-    match &title.background {
-        TextBackground::Solid(color) => window.title_background_color_button().set_rgba(&gdk_rgba_from(color)),
+    window.label_background_row().set_selected(background_index);
+    window.label_background_color_row().set_visible(background_index != 0);
+    window.label_background_color2_row().set_visible(background_index == 2);
+    match &label.background {
+        TextBackground::Solid(color) => window.label_background_color_button().set_rgba(&gdk_rgba_from(color)),
         TextBackground::Gradient(spec) => {
             if let Some((_, color)) = spec.stops.first() {
-                window.title_background_color_button().set_rgba(&gdk_rgba_from(color));
+                window.label_background_color_button().set_rgba(&gdk_rgba_from(color));
             }
             if let Some((_, color)) = spec.stops.get(1) {
-                window.title_background_color2_button().set_rgba(&gdk_rgba_from(color));
+                window.label_background_color2_button().set_rgba(&gdk_rgba_from(color));
             }
         }
         TextBackground::None => {}
     }
 
-    window.title_corner_radius_row().set_value(title.corner_radius.top_left);
-    window.title_font_button().set_font_desc(&font_desc_from_typography(&title.typography));
-    window.title_alignment_row().set_selected(index_for_text_align(title.typography.alignment));
-    window.title_letter_spacing_row().set_value(title.typography.letter_spacing);
-    window.title_line_spacing_row().set_value(title.typography.line_spacing);
-    window.title_color_button().set_rgba(&gdk_rgba_from(&title.typography.color));
-    window.title_opacity_row().set_value(title.typography.opacity * 100.0);
+    window.label_corner_radius_row().set_value(label.corner_radius.top_left);
+    window.label_padding_x_row().set_value(label.padding_x);
+    window.label_padding_y_row().set_value(label.padding_y);
+    window.label_font_button().set_font_desc(&font_desc_from_typography(&label.typography));
+    window.label_alignment_row().set_selected(index_for_text_align(label.typography.alignment));
+    window.label_color_button().set_rgba(&gdk_rgba_from(&label.typography.color));
+    window.label_opacity_row().set_value(label.typography.opacity * 100.0);
 
-    window.title_shadow_row().set_selected(shadow_preset_index_for(&title.shadow));
-    let (angle, distance) = title.shadow.angle_and_distance();
-    window.title_shadow_angle_row().set_value(angle);
-    window.title_shadow_distance_row().set_value(distance);
-    window.title_shadow_blur_row().set_value(title.shadow.blur);
+    window.label_shadow_row().set_selected(shadow_preset_index_for(&label.shadow));
+    let (angle, distance) = label.shadow.angle_and_distance();
+    window.label_shadow_angle_row().set_value(angle);
+    window.label_shadow_distance_row().set_value(distance);
+    window.label_shadow_blur_row().set_value(label.shadow.blur);
 
-    let controls_enabled = title.enabled;
+    let controls_enabled = label.enabled;
     for row in [
-        &window.title_content_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_position_mode_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_background_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_corner_radius_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_font_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_alignment_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_letter_spacing_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_line_spacing_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_color_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_opacity_row().clone().upcast::<gtk4::Widget>(),
-        &window.title_shadow_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_content_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_position_mode_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_background_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_corner_radius_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_padding_x_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_padding_y_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_font_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_alignment_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_color_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_opacity_row().clone().upcast::<gtk4::Widget>(),
+        &window.label_shadow_row().clone().upcast::<gtk4::Widget>(),
     ] {
         row.set_sensitive(controls_enabled);
     }
-    window.title_horizontal_row().set_sensitive(controls_enabled);
-    window.title_vertical_row().set_sensitive(controls_enabled);
-    window.title_padding_row().set_sensitive(controls_enabled);
-    window.title_x_row().set_sensitive(controls_enabled);
-    window.title_y_row().set_sensitive(controls_enabled);
-    window.title_background_color_row().set_sensitive(controls_enabled);
-    window.title_background_color2_row().set_sensitive(controls_enabled);
-    let shadow_geometry_enabled = controls_enabled && title.shadow.enabled;
-    window.title_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
-    window.title_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
-    window.title_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+    window.label_horizontal_row().set_sensitive(controls_enabled);
+    window.label_vertical_row().set_sensitive(controls_enabled);
+    window.label_padding_row().set_sensitive(controls_enabled);
+    window.label_x_row().set_sensitive(controls_enabled);
+    window.label_y_row().set_sensitive(controls_enabled);
+    window.label_background_color_row().set_sensitive(controls_enabled);
+    window.label_background_color2_row().set_sensitive(controls_enabled);
+    let shadow_geometry_enabled = controls_enabled && label.shadow.enabled;
+    window.label_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
+    window.label_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
+    window.label_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+
+    state.borrow_mut().syncing_controls = was_syncing;
 }
 
 /// Reflects a `Background` value onto the type/color1/color2/angle controls
@@ -1212,21 +1248,22 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
 
 }
 
-/// Wires the composition-wide title's sidebar controls (spec §5-§10):
-/// enable/content, semantic or manual position, background, corner radius,
-/// typography (via a native `GtkFontDialogButton`), and an independently
-/// cached shadow — all funneled through one `apply_title` that rebuilds
-/// the whole `TextElement` and pushes a single `SetTitle` undo step,
+/// Wires the selected screenshot's own Label sidebar controls: enable/
+/// content, semantic or manual position, background (including the
+/// contrast-aware "Automatisch" action), corner radius, separate
+/// horizontal/vertical padding, typography (via a native
+/// `GtkFontDialogButton`), and an independently cached shadow — all
+/// funneled through one `apply_label` that rebuilds the whole
+/// `TextElement` and pushes a single `SetScreenshotLabel` undo step,
 /// except the shadow *preset* dropdown, which (like the screenshot
 /// shadow's) needs to preserve the current angle rather than reset it —
-/// see `ShadowParams::with_preset`.
-fn register_title_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    {
-        let state_ref = state.borrow();
-        sync_title_controls(window, &state_ref.document.title);
-    }
+/// see `ShadowParams::with_preset`. The whole section only targets a
+/// single-selected screenshot (see `single_selected_label_target`); it's
+/// re-synced whenever the canvas selection changes (`register_selection_sync`).
+fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    sync_label_controls(window, canvas, state);
 
-    let apply_title = glib::clone!(
+    let apply_label = glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -1234,220 +1271,230 @@ fn register_title_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         #[strong]
         state,
         move || {
-            let mut state_ref = state.borrow_mut();
-            if state_ref.syncing_controls {
+            if state.borrow().syncing_controls {
                 return;
             }
+            let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
 
-            let position = if window.title_position_mode_row().selected() == 1 {
-                TextPosition::Absolute { x: window.title_x_row().value(), y: window.title_y_row().value() }
+            let position = if window.label_position_mode_row().selected() == 1 {
+                TextPosition::Absolute { x: window.label_x_row().value(), y: window.label_y_row().value() }
             } else {
                 TextPosition::Semantic {
-                    horizontal: horizontal_anchor_for_index(window.title_horizontal_row().selected()),
-                    vertical: vertical_anchor_for_index(window.title_vertical_row().selected()),
-                    padding: window.title_padding_row().value(),
+                    horizontal: horizontal_anchor_for_index(window.label_horizontal_row().selected()),
+                    vertical: vertical_anchor_for_index(window.label_vertical_row().selected()),
+                    padding: window.label_padding_row().value(),
                 }
             };
-            let background = match window.title_background_row().selected() {
-                1 => TextBackground::Solid(rgba_from_gdk(&window.title_background_color_button().rgba())),
+            let background = match window.label_background_row().selected() {
+                1 => TextBackground::Solid(rgba_from_gdk(&window.label_background_color_button().rgba())),
                 2 => TextBackground::Gradient(GradientSpec {
                     kind: GradientKind::Linear { angle_deg: 135.0 },
                     stops: vec![
-                        (0.0, rgba_from_gdk(&window.title_background_color_button().rgba())),
-                        (1.0, rgba_from_gdk(&window.title_background_color2_button().rgba())),
+                        (0.0, rgba_from_gdk(&window.label_background_color_button().rgba())),
+                        (1.0, rgba_from_gdk(&window.label_background_color2_button().rgba())),
                     ],
                 }),
                 _ => TextBackground::None,
             };
-            let font_desc = window.title_font_button().font_desc().unwrap_or_else(pango::FontDescription::new);
+            let font_desc = window.label_font_button().font_desc().unwrap_or_else(pango::FontDescription::new);
             let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
 
             // The shadow has its own dedicated handlers below (mirroring
             // the screenshot shadow's preset-vs-geometry split), so it's
             // carried over unchanged here rather than rebuilt from
             // controls this closure doesn't read.
-            let shadow = state_ref.document.title.shadow;
-            let background_padding = state_ref.document.title.background_padding;
+            let shadow = current.shadow;
 
             let new = TextElement {
-                enabled: window.title_enabled_row().is_active(),
-                content: window.title_content_row().text().to_string(),
+                enabled: window.label_enabled_row().is_active(),
+                content: window.label_content_row().text().to_string(),
                 position,
                 typography: Typography {
                     font_family,
                     font_size,
                     weight,
                     italic,
-                    color: rgba_from_gdk(&window.title_color_button().rgba()),
-                    alignment: text_align_for_index(window.title_alignment_row().selected()),
-                    opacity: window.title_opacity_row().value() / 100.0,
-                    letter_spacing: window.title_letter_spacing_row().value(),
-                    line_spacing: window.title_line_spacing_row().value(),
+                    color: rgba_from_gdk(&window.label_color_button().rgba()),
+                    alignment: text_align_for_index(window.label_alignment_row().selected()),
+                    opacity: window.label_opacity_row().value() / 100.0,
+                    letter_spacing: 0.0,
+                    line_spacing: 1.2,
                     wrap: false,
                 },
                 background,
-                corner_radius: CornerRadius::uniform(window.title_corner_radius_row().value()),
-                background_padding,
+                corner_radius: CornerRadius::uniform(window.label_corner_radius_row().value()),
+                padding_x: window.label_padding_x_row().value(),
+                padding_y: window.label_padding_y_row().value(),
                 shadow,
             };
-            if state_ref.document.title == new {
+            if current == new {
                 return;
             }
-            let old = state_ref.document.title.clone();
+            let mut state_ref = state.borrow_mut();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetTitle { old, new }), document);
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     );
 
-    window.title_enabled_row().connect_active_notify(glib::clone!(
+    window.label_enabled_row().connect_active_notify(glib::clone!(
         #[weak]
         window,
         #[strong]
-        apply_title,
+        apply_label,
         move |row| {
             let enabled = row.is_active();
             for widget in [
-                window.title_content_row().upcast::<gtk4::Widget>(),
-                window.title_position_mode_row().upcast(),
-                window.title_horizontal_row().upcast(),
-                window.title_vertical_row().upcast(),
-                window.title_padding_row().upcast(),
-                window.title_x_row().upcast(),
-                window.title_y_row().upcast(),
-                window.title_background_row().upcast(),
-                window.title_background_color_row().upcast(),
-                window.title_background_color2_row().upcast(),
-                window.title_corner_radius_row().upcast(),
-                window.title_font_row().upcast(),
-                window.title_alignment_row().upcast(),
-                window.title_letter_spacing_row().upcast(),
-                window.title_line_spacing_row().upcast(),
-                window.title_color_row().upcast(),
-                window.title_opacity_row().upcast(),
-                window.title_shadow_row().upcast(),
+                window.label_content_row().upcast::<gtk4::Widget>(),
+                window.label_position_mode_row().upcast(),
+                window.label_horizontal_row().upcast(),
+                window.label_vertical_row().upcast(),
+                window.label_padding_row().upcast(),
+                window.label_x_row().upcast(),
+                window.label_y_row().upcast(),
+                window.label_background_row().upcast(),
+                window.label_background_color_row().upcast(),
+                window.label_background_color2_row().upcast(),
+                window.label_corner_radius_row().upcast(),
+                window.label_padding_x_row().upcast(),
+                window.label_padding_y_row().upcast(),
+                window.label_font_row().upcast(),
+                window.label_alignment_row().upcast(),
+                window.label_color_row().upcast(),
+                window.label_opacity_row().upcast(),
+                window.label_shadow_row().upcast(),
             ] {
                 widget.set_sensitive(enabled);
             }
-            let shadow_geometry_enabled = enabled && window.title_shadow_row().selected() != 0;
-            window.title_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
-            window.title_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
-            window.title_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
-            apply_title();
+            let shadow_geometry_enabled = enabled && window.label_shadow_row().selected() != 0;
+            window.label_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
+            window.label_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
+            window.label_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+            apply_label();
         }
     ));
-    window.title_content_row().connect_changed(glib::clone!(
+    window.label_content_row().connect_changed(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_position_mode_row().connect_selected_notify(glib::clone!(
+    window.label_position_mode_row().connect_selected_notify(glib::clone!(
         #[weak]
         window,
         #[strong]
-        apply_title,
+        apply_label,
         move |row| {
             let is_absolute = row.selected() == 1;
-            window.title_horizontal_row().set_visible(!is_absolute);
-            window.title_vertical_row().set_visible(!is_absolute);
-            window.title_padding_row().set_visible(!is_absolute);
-            window.title_x_row().set_visible(is_absolute);
-            window.title_y_row().set_visible(is_absolute);
-            apply_title();
+            window.label_horizontal_row().set_visible(!is_absolute);
+            window.label_vertical_row().set_visible(!is_absolute);
+            window.label_padding_row().set_visible(!is_absolute);
+            window.label_x_row().set_visible(is_absolute);
+            window.label_y_row().set_visible(is_absolute);
+            apply_label();
         }
     ));
-    window.title_horizontal_row().connect_selected_notify(glib::clone!(
+    window.label_horizontal_row().connect_selected_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_vertical_row().connect_selected_notify(glib::clone!(
+    window.label_vertical_row().connect_selected_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_padding_row().connect_value_notify(glib::clone!(
+    window.label_padding_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_x_row().connect_value_notify(glib::clone!(
+    window.label_x_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_y_row().connect_value_notify(glib::clone!(
+    window.label_y_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_background_row().connect_selected_notify(glib::clone!(
+    window.label_background_row().connect_selected_notify(glib::clone!(
         #[weak]
         window,
         #[strong]
-        apply_title,
+        apply_label,
         move |row| {
             let selected = row.selected();
-            window.title_background_color_row().set_visible(selected != 0);
-            window.title_background_color2_row().set_visible(selected == 2);
-            apply_title();
+            window.label_background_color_row().set_visible(selected != 0);
+            window.label_background_color2_row().set_visible(selected == 2);
+            apply_label();
         }
     ));
-    window.title_background_color_button().connect_rgba_notify(glib::clone!(
+    window.label_background_color_button().connect_rgba_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_background_color2_button().connect_rgba_notify(glib::clone!(
+    window.label_background_color2_button().connect_rgba_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_corner_radius_row().connect_value_notify(glib::clone!(
+    window.label_background_auto_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        state,
+        move |_| apply_automatic_label_colors(&window, &canvas, &state)
     ));
-    window.title_font_button().connect_font_desc_notify(glib::clone!(
+    window.label_corner_radius_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_alignment_row().connect_selected_notify(glib::clone!(
+    window.label_padding_x_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_letter_spacing_row().connect_value_notify(glib::clone!(
+    window.label_padding_y_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_line_spacing_row().connect_value_notify(glib::clone!(
+    window.label_font_button().connect_font_desc_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_color_button().connect_rgba_notify(glib::clone!(
+    window.label_alignment_row().connect_selected_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
     ));
-    window.title_opacity_row().connect_value_notify(glib::clone!(
+    window.label_color_button().connect_rgba_notify(glib::clone!(
         #[strong]
-        apply_title,
-        move |_| apply_title()
+        apply_label,
+        move |_| apply_label()
+    ));
+    window.label_opacity_row().connect_value_notify(glib::clone!(
+        #[strong]
+        apply_label,
+        move |_| apply_label()
     ));
 
     // Shadow preset dropdown: mirrors the screenshot shadow preset handler
     // exactly (`ShadowParams::with_preset` preserves the angle; the
     // syncing_controls save/restore guards against a reentrant partial-
     // state undo push while distance/blur are updated below) but commits
-    // directly via `SetTitle` rather than routing through `apply_title`,
-    // since `apply_title` deliberately doesn't touch the shadow at all.
-    window.title_shadow_row().connect_selected_notify(glib::clone!(
+    // directly via `SetScreenshotLabel` rather than routing through
+    // `apply_label`, since `apply_label` deliberately doesn't touch the
+    // shadow at all.
+    window.label_shadow_row().connect_selected_notify(glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -1455,40 +1502,37 @@ fn register_title_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         #[strong]
         state,
         move |row| {
+            let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
             let preset = shadow_preset_for_index(row.selected());
-            let mut state_ref = state.borrow_mut();
-            let was_syncing = state_ref.syncing_controls;
-            let current_shadow = state_ref.document.title.shadow;
-            let new_shadow = current_shadow.with_preset(preset);
-            state_ref.syncing_controls = true;
-            drop(state_ref);
+            let new_shadow = current.shadow.with_preset(preset);
 
-            window.title_shadow_distance_row().set_value(new_shadow.angle_and_distance().1);
-            window.title_shadow_blur_row().set_value(new_shadow.blur);
-            window.title_shadow_angle_row().set_sensitive(new_shadow.enabled);
-            window.title_shadow_distance_row().set_sensitive(new_shadow.enabled);
-            window.title_shadow_blur_row().set_sensitive(new_shadow.enabled);
-
-            let mut state_ref = state.borrow_mut();
-            state_ref.syncing_controls = was_syncing;
+            let was_syncing = state.borrow().syncing_controls;
+            state.borrow_mut().syncing_controls = true;
+            window.label_shadow_distance_row().set_value(new_shadow.angle_and_distance().1);
+            window.label_shadow_blur_row().set_value(new_shadow.blur);
+            window.label_shadow_angle_row().set_sensitive(new_shadow.enabled);
+            window.label_shadow_distance_row().set_sensitive(new_shadow.enabled);
+            window.label_shadow_blur_row().set_sensitive(new_shadow.enabled);
+            state.borrow_mut().syncing_controls = was_syncing;
             if was_syncing {
                 return;
             }
-            let mut new_title = state_ref.document.title.clone();
-            new_title.shadow = new_shadow;
-            if state_ref.document.title == new_title {
+
+            let mut new_label = current.clone();
+            new_label.shadow = new_shadow;
+            if current == new_label {
                 return;
             }
-            let old = state_ref.document.title.clone();
+            let mut state_ref = state.borrow_mut();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetTitle { old, new: new_title }), document);
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new_label }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
 
-    let apply_title_shadow_geometry = glib::clone!(
+    let apply_label_shadow_geometry = glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -1496,45 +1540,450 @@ fn register_title_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         #[strong]
         state,
         move || {
-            let mut state_ref = state.borrow_mut();
-            if state_ref.syncing_controls {
+            if state.borrow().syncing_controls {
                 return;
             }
-            let angle = window.title_shadow_angle_row().value();
-            let distance = window.title_shadow_distance_row().value();
-            let blur = window.title_shadow_blur_row().value();
+            let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
+            let angle = window.label_shadow_angle_row().value();
+            let distance = window.label_shadow_distance_row().value();
+            let blur = window.label_shadow_blur_row().value();
             let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(angle, distance);
 
-            let mut new_title = state_ref.document.title.clone();
-            new_title.shadow.offset_x = offset_x;
-            new_title.shadow.offset_y = offset_y;
-            new_title.shadow.blur = blur;
-            if state_ref.document.title == new_title {
+            let mut new_label = current.clone();
+            new_label.shadow.offset_x = offset_x;
+            new_label.shadow.offset_y = offset_y;
+            new_label.shadow.blur = blur;
+            if current == new_label {
                 return;
             }
-            let old = state_ref.document.title.clone();
+            let mut state_ref = state.borrow_mut();
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetTitle { old, new: new_title }), document);
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new_label }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     );
-    window.title_shadow_angle_row().connect_value_notify(glib::clone!(
+    window.label_shadow_angle_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title_shadow_geometry,
-        move |_| apply_title_shadow_geometry()
+        apply_label_shadow_geometry,
+        move |_| apply_label_shadow_geometry()
     ));
-    window.title_shadow_distance_row().connect_value_notify(glib::clone!(
+    window.label_shadow_distance_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title_shadow_geometry,
-        move |_| apply_title_shadow_geometry()
+        apply_label_shadow_geometry,
+        move |_| apply_label_shadow_geometry()
     ));
-    window.title_shadow_blur_row().connect_value_notify(glib::clone!(
+    window.label_shadow_blur_row().connect_value_notify(glib::clone!(
         #[strong]
-        apply_title_shadow_geometry,
-        move |_| apply_title_shadow_geometry()
+        apply_label_shadow_geometry,
+        move |_| apply_label_shadow_geometry()
     ));
+}
+
+/// Re-syncs the Label sidebar section whenever the canvas selection
+/// changes (spec: selecting a screenshot shows/focuses its label
+/// controls directly, no dialog) — and, once synced, focuses the text
+/// entry so typing a label is a single click away.
+fn register_selection_sync(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_selection_changed(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move || {
+            sync_label_controls(&window, &canvas, &state);
+            sync_callouts_controls(&window, &canvas, &state);
+            if single_selected_label_target(&canvas, &state).is_some() {
+                window.label_content_row().grab_focus();
+            }
+        }
+    ));
+}
+
+/// Wires the canvas's own label-drag gesture to an undoable
+/// `SetScreenshotLabel` — works in every layout mode, since a label's
+/// position is always relative to its own screenshot regardless of how
+/// the screenshots themselves are arranged (spec: label positioning is
+/// independent of the composition's auto-layout).
+fn register_label_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_label_move(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |element_id, new_position| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let old = element.label.clone();
+            let mut new = old.clone();
+            new.position = new_position;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            // The drag changed the label's position/mode from outside the
+            // sidebar entirely, so its Position/X/Y rows need an explicit
+            // resync — nothing else triggers one for a canvas-originated
+            // change (contrast `apply_label`, where the sidebar itself was
+            // already the source of truth for what it displays).
+            sync_label_controls(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// The "Automatisch" background-color action (spec: a contrast-aware
+/// suggestion, never by raising saturation): analyzes the selected
+/// screenshot's own decoded pixels via [`suggest_label_colors`] and
+/// applies the suggested background/text colors as one undo step —
+/// mirrors `generate_gradient_from_screenshots`'s decode-then-suggest
+/// shape, scoped to one screenshot instead of every visible one.
+fn apply_automatic_label_colors(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let Some((element_id, current)) = single_selected_label_target(canvas, state) else { return };
+
+    let mut state_ref = state.borrow_mut();
+    let Some(path) = state_ref.document.elements.iter().find(|e| e.id == element_id).and_then(|e| match &e.source {
+        ImageSource::Path(path) => Some(path.clone()),
+        ImageSource::Embedded { .. } => None,
+    }) else {
+        return;
+    };
+    let Some(image) = get_or_decode(&mut state_ref.image_cache, &path).cloned() else { return };
+
+    let sample = screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height };
+    let (background, text) = screenforge_core::palette::suggest_label_colors(&[sample]);
+
+    let mut new = current.clone();
+    new.background = TextBackground::Solid(background);
+    new.typography.color = text;
+    if current == new {
+        return;
+    }
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new.clone() }), document);
+    drop(state_ref);
+
+    state.borrow_mut().syncing_controls = true;
+    window.label_background_row().set_selected(1);
+    window.label_background_color_row().set_visible(true);
+    window.label_background_color2_row().set_visible(false);
+    window.label_background_color_button().set_rgba(&gdk_rgba_from(&background));
+    window.label_color_button().set_rgba(&gdk_rgba_from(&text));
+    state.borrow_mut().syncing_controls = false;
+
+    refresh_canvas(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
+/// The single currently-selected screenshot's own id, or `None` when 0 or
+/// several are selected — the same "exactly one" rule
+/// `single_selected_label_target` uses for the Label section, reused here
+/// for the Callouts section since both are per-screenshot.
+fn single_selected_screenshot_id(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) -> Option<Uuid> {
+    let selected = canvas.selected_ids();
+    if selected.len() != 1 {
+        return None;
+    }
+    let id = *selected.iter().next().unwrap();
+    state.borrow().document.elements.iter().any(|e| e.id == id).then_some(id)
+}
+
+/// Rebuilds the sidebar's "Callouts" section from scratch for the current
+/// single-selected screenshot — hidden entirely when 0 or several are
+/// selected, same as the Label section. Called on selection change and as
+/// part of `sync_controls_from_document` (after undo/redo/load), and after
+/// any action that adds/removes a callout, since unlike the Label section
+/// (always exactly one, always present) the *number* of rows itself can
+/// change.
+fn sync_callouts_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let Some(element_id) = single_selected_screenshot_id(canvas, state) else {
+        window.callouts_group().set_visible(false);
+        return;
+    };
+    window.callouts_group().set_visible(true);
+
+    let callouts = state.borrow().document.elements.iter().find(|e| e.id == element_id).map(|e| e.callouts.clone()).unwrap_or_default();
+
+    let list_box = window.callouts_list_box();
+    while let Some(child) = list_box.first_child() {
+        list_box.remove(&child);
+    }
+    list_box.set_visible(!callouts.is_empty());
+    for callout in &callouts {
+        list_box.append(&build_callout_row(window, canvas, state, element_id, callout));
+    }
+}
+
+/// Builds one fully-wired `AdwExpanderRow` for a single callout: enable
+/// switch and delete button in the row's own header, text/colors/corner
+/// radius/arrow styling nested inside — collapsed by default so several
+/// callouts on one screenshot stay manageable, expanding to edit rather
+/// than needing a separate dialog. Rebuilt from scratch by
+/// `sync_callouts_controls` whenever the callout list itself changes, so
+/// this only needs to wire live-editing, not incremental updates.
+fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, element_id: Uuid, callout: &Callout) -> adw::ExpanderRow {
+    let callout_id = callout.id;
+
+    let row = adw::ExpanderRow::new();
+    let title_for = |content: &str| if content.trim().is_empty() { "Callout".to_string() } else { content.to_string() };
+    row.set_title(&title_for(&callout.text.content));
+
+    let enabled_switch = gtk4::Switch::new();
+    enabled_switch.set_active(callout.enabled);
+    enabled_switch.set_valign(gtk4::Align::Center);
+    row.add_suffix(&enabled_switch);
+
+    let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
+    delete_button.set_valign(gtk4::Align::Center);
+    delete_button.add_css_class("flat");
+    delete_button.set_tooltip_text(Some("Callout löschen"));
+    row.add_suffix(&delete_button);
+
+    let content_row = adw::EntryRow::new();
+    content_row.set_title("Text");
+    content_row.set_text(&callout.text.content);
+    row.add_row(&content_row);
+
+    let background_color_row = adw::ActionRow::new();
+    background_color_row.set_title("Hintergrundfarbe");
+    let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+    background_color_button.set_valign(gtk4::Align::Center);
+    let initial_background = match callout.text.background {
+        TextBackground::Solid(color) => color,
+        _ => Rgba::WHITE,
+    };
+    background_color_button.set_rgba(&gdk_rgba_from(&initial_background));
+    background_color_row.add_suffix(&background_color_button);
+    row.add_row(&background_color_row);
+
+    let color_row = adw::ActionRow::new();
+    color_row.set_title("Textfarbe");
+    let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
+    color_button.set_valign(gtk4::Align::Center);
+    color_button.set_rgba(&gdk_rgba_from(&callout.text.typography.color));
+    color_row.add_suffix(&color_button);
+    row.add_row(&color_row);
+
+    let corner_radius_row = spin_row("Eckenradius", 0.0, 200.0, callout.text.corner_radius.top_left);
+    row.add_row(&corner_radius_row);
+
+    let arrow_color_row = adw::ActionRow::new();
+    arrow_color_row.set_title("Pfeilfarbe");
+    let arrow_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+    arrow_color_button.set_valign(gtk4::Align::Center);
+    arrow_color_button.set_rgba(&gdk_rgba_from(&callout.arrow_color));
+    arrow_color_row.add_suffix(&arrow_color_button);
+    row.add_row(&arrow_color_row);
+
+    let arrow_width_row = spin_row("Pfeilbreite", 0.5, 20.0, callout.arrow_width);
+    row.add_row(&arrow_width_row);
+
+    let apply = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[weak]
+        enabled_switch,
+        #[weak]
+        content_row,
+        #[weak]
+        background_color_button,
+        #[weak]
+        color_button,
+        #[weak]
+        corner_radius_row,
+        #[weak]
+        arrow_color_button,
+        #[weak]
+        arrow_width_row,
+        move || {
+            if state.borrow().syncing_controls {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
+
+            let mut new = current.clone();
+            new.enabled = enabled_switch.is_active();
+            new.text.content = content_row.text().to_string();
+            new.text.background = TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba()));
+            new.text.typography.color = rgba_from_gdk(&color_button.rgba());
+            new.text.corner_radius = CornerRadius::uniform(corner_radius_row.value());
+            new.arrow_color = rgba_from_gdk(&arrow_color_button.rgba());
+            new.arrow_width = arrow_width_row.value();
+            if current == new {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetCallout { element_id, callout_id, old: current, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+
+    enabled_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    content_row.connect_changed(glib::clone!(
+        #[strong]
+        apply,
+        #[weak]
+        row,
+        move |entry| {
+            row.set_title(&title_for(&entry.text()));
+            apply();
+        }
+    ));
+    background_color_button.connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    color_button.connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    corner_radius_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    arrow_color_button.connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    arrow_width_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+
+    delete_button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(index) = element.callouts.iter().position(|c| c.id == callout_id) else { return };
+            let callout = element.callouts[index].clone();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(RemoveCallout { element_id, index, callout }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            sync_callouts_controls(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    row
+}
+
+/// Adds a new callout to the current single-selected screenshot (spec:
+/// "Callouts/Feature-Hinweise") and re-syncs the sidebar so it shows up
+/// immediately, expanded state aside — a no-op if 0 or several screenshots
+/// are selected, same as every other Label/Callout action.
+fn add_callout_to_selected_screenshot(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let Some(element_id) = single_selected_screenshot_id(canvas, state) else { return };
+    let mut state_ref = state.borrow_mut();
+    let Some(natural_width) = state_ref.document.elements.iter().find(|e| e.id == element_id).map(|e| e.natural_width) else { return };
+    let callout = Callout::new_for_width(natural_width);
+    let EditorState { document, undo_stack, .. } = &mut *state_ref;
+    undo_stack.apply(Box::new(AddCallout { element_id, callout }), document);
+    drop(state_ref);
+    refresh_canvas(window, canvas, state);
+    sync_callouts_controls(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+}
+
+/// Wires the sidebar's Callouts section: the initial build for whatever is
+/// selected when the app starts, and the "+ Callout hinzufügen" button.
+fn register_callouts_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    sync_callouts_controls(window, canvas, state);
+
+    window.add_callout_button().connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| add_callout_to_selected_screenshot(&window, &canvas, &state)
+    ));
+}
+
+/// Wires the canvas's own callout-drag gestures (text bubble and arrow
+/// target, each independently draggable) to undoable `SetCallout`s —
+/// mirrors `register_label_drag`; works in every layout mode.
+fn register_callout_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    canvas.connect_callout_box_move(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |element_id, callout_id, new_position| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(old) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
+            let mut new = old.clone();
+            new.text.position = new_position;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetCallout { element_id, callout_id, old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    canvas.connect_callout_target_move(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |element_id, callout_id, new_x, new_y| {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(old) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
+            let mut new = old.clone();
+            new.target_x = new_x;
+            new.target_y = new_y;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetCallout { element_id, callout_id, old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
+
+/// A titled `AdwSpinRow` with a plain numeric adjustment — shared by every
+/// callout row's "Eckenradius"/"Pfeilbreite" controls.
+fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::SpinRow {
+    let adjustment = gtk4::Adjustment::new(value, lower, upper, 1.0, 10.0, 0.0);
+    let row = adw::SpinRow::new(Some(&adjustment), 1.0, 1);
+    row.set_title(title);
+    row
 }
 
 /// Wires the "Bild" background's file picker, fit mode and opacity
@@ -2145,7 +2594,7 @@ async fn save_project_as(window: &Window, state: &Rc<RefCell<EditorState>>) {
 /// here only because ScreenForge itself never saves a document with
 /// per-element shadow/radius variation; that assumption would need
 /// revisiting if per-element controls are added later.
-fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>) {
+fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     state.borrow_mut().syncing_controls = true;
 
     let doc = state.borrow().document.clone();
@@ -2175,7 +2624,8 @@ fn sync_controls_from_document(window: &Window, state: &Rc<RefCell<EditorState>>
     window.export_quality_row().set_value(doc.canvas.export_quality as f64);
     window.export_quality_row().set_sensitive(format_supports_quality(doc.canvas.export_format));
 
-    sync_title_controls(window, &doc.title);
+    sync_label_controls(window, canvas, state);
+    sync_callouts_controls(window, canvas, state);
 
     state.borrow_mut().syncing_controls = false;
 }
@@ -2280,7 +2730,7 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
                             state_ref.undo_stack = UndoStack::new();
                         }
                         refresh_canvas(&window, &canvas, &state);
-                        sync_controls_from_document(&window, &state);
+                        sync_controls_from_document(&window, &canvas, &state);
                         update_undo_redo_sensitivity(&window, &state);
 
                         let toast = if missing > 0 {
@@ -2403,7 +2853,7 @@ fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCel
                     undo_stack.apply(Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, new }), document);
                 }
                 refresh_canvas(&window, &canvas, &state);
-                sync_controls_from_document(&window, &state);
+                sync_controls_from_document(&window, &canvas, &state);
                 update_undo_redo_sensitivity(&window, &state);
                 window.toast_overlay().add_toast(adw::Toast::new("Vorlage angewendet"));
             });
@@ -2494,7 +2944,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.undo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &state);
+            sync_controls_from_document(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -2517,7 +2967,7 @@ fn register_undo_redo_actions(app: &adw::Application, window: &Window, canvas: &
                 undo_stack.redo(document);
             }
             refresh_canvas(&window, &canvas, &state);
-            sync_controls_from_document(&window, &state);
+            sync_controls_from_document(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -2812,10 +3262,6 @@ fn build_context_menu() -> gio::Menu {
     order_section.append(Some("Ganz nach hinten"), Some("win.send-to-back"));
     menu.append_section(None, &order_section);
 
-    let label_section = gio::Menu::new();
-    label_section.append(Some("Beschriftung…"), Some("win.edit-screenshot-label"));
-    menu.append_section(None, &label_section);
-
     let transform_section = gio::Menu::new();
     transform_section.append(Some("Um 90° drehen"), Some("win.rotate-screenshot"));
     transform_section.append(Some("Horizontal spiegeln"), Some("win.flip-horizontal"));
@@ -2941,548 +3387,6 @@ fn register_replace_action(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
 /// Right-click on a screenshot opens a `GtkPopoverMenu` with per-element
 /// actions (spec §21). `context_target` remembers which element it was
 /// opened for, since GAction activation carries no click-position payload.
-/// Opens a small live-editing dialog for one screenshot's own label (spec
-/// §11-§14), reached via the context menu's "Beschriftung…" rather than
-/// living in the main sidebar — most screenshots don't have one, and the
-/// sidebar already carries a very similar control set for the
-/// composition-wide title (`register_title_controls`). Edits apply live
-/// and undoably as controls change, the same as every other control in
-/// this app, rather than needing an OK/Cancel of their own. Looked up by
-/// `element_id` rather than index so the dialog stays valid even if
-/// reordering/undo shifts indices while it's open.
-fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::SpinRow {
-    let adjustment = gtk4::Adjustment::new(value, lower, upper, 1.0, 10.0, 0.0);
-    let row = adw::SpinRow::new(Some(&adjustment), 1.0, 1);
-    row.set_title(title);
-    row
-}
-
-fn open_label_editor(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, element_id: Uuid) {
-    let Some(label) = state.borrow().document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) else { return };
-
-    let dialog = adw::PreferencesDialog::new();
-    dialog.set_title("Beschriftung");
-    dialog.set_content_width(420);
-
-    let page = adw::PreferencesPage::new();
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Beschriftung");
-    group.set_description(Some("Bewegt und skaliert sich mit diesem Screenshot"));
-
-    let enabled_row = adw::SwitchRow::new();
-    enabled_row.set_title("Beschriftung anzeigen");
-    group.add(&enabled_row);
-
-    let content_row = adw::EntryRow::new();
-    content_row.set_title("Text");
-    group.add(&content_row);
-
-    let position_mode_row = adw::ComboRow::new();
-    position_mode_row.set_title("Position");
-    position_mode_row.set_model(Some(&gtk4::StringList::new(&["Automatisch", "Manuell (X/Y)"])));
-    group.add(&position_mode_row);
-
-    let horizontal_row = adw::ComboRow::new();
-    horizontal_row.set_title("Horizontal");
-    horizontal_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
-    group.add(&horizontal_row);
-
-    let vertical_row = adw::ComboRow::new();
-    vertical_row.set_title("Vertikal");
-    vertical_row.set_model(Some(&gtk4::StringList::new(&["Oben", "Mitte", "Unten"])));
-    group.add(&vertical_row);
-
-    let padding_row = spin_row("Randabstand", 0.0, 500.0, 16.0);
-    group.add(&padding_row);
-
-    let x_row = spin_row("X-Position", 0.0, 8000.0, 0.0);
-    x_row.set_subtitle("In Pixeln, relativ zum Screenshot");
-    x_row.set_visible(false);
-    group.add(&x_row);
-
-    let y_row = spin_row("Y-Position", 0.0, 8000.0, 0.0);
-    y_row.set_subtitle("In Pixeln, relativ zum Screenshot");
-    y_row.set_visible(false);
-    group.add(&y_row);
-
-    let background_row = adw::ComboRow::new();
-    background_row.set_title("Hintergrund");
-    background_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
-    group.add(&background_row);
-
-    let background_color_row = adw::ActionRow::new();
-    background_color_row.set_title("Hintergrundfarbe");
-    let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
-    background_color_button.set_valign(gtk4::Align::Center);
-    background_color_row.add_suffix(&background_color_button);
-    group.add(&background_color_row);
-
-    let background_color2_row = adw::ActionRow::new();
-    background_color2_row.set_title("Hintergrundfarbe 2");
-    let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
-    background_color2_button.set_valign(gtk4::Align::Center);
-    background_color2_row.add_suffix(&background_color2_button);
-    group.add(&background_color2_row);
-
-    let corner_radius_row = spin_row("Eckenradius", 0.0, 200.0, 0.0);
-    group.add(&corner_radius_row);
-
-    let font_row = adw::ActionRow::new();
-    font_row.set_title("Schrift");
-    let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
-    font_button.set_valign(gtk4::Align::Center);
-    font_row.add_suffix(&font_button);
-    group.add(&font_row);
-
-    let color_row = adw::ActionRow::new();
-    color_row.set_title("Textfarbe");
-    let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
-    color_button.set_valign(gtk4::Align::Center);
-    color_row.add_suffix(&color_button);
-    group.add(&color_row);
-
-    let letter_spacing_row = adw::SpinRow::new(Some(&gtk4::Adjustment::new(0.0, -5.0, 50.0, 0.5, 2.0, 0.0)), 0.5, 1);
-    letter_spacing_row.set_title("Zeichenabstand");
-    letter_spacing_row.set_subtitle("In Pixeln");
-    group.add(&letter_spacing_row);
-
-    let line_spacing_row = adw::SpinRow::new(Some(&gtk4::Adjustment::new(1.2, 0.5, 3.0, 0.1, 0.5, 0.0)), 0.1, 2);
-    line_spacing_row.set_title("Zeilenabstand");
-    line_spacing_row.set_subtitle("Faktor, 1,0 = normal");
-    group.add(&line_spacing_row);
-
-    let opacity_row = spin_row("Deckkraft (%)", 0.0, 100.0, 100.0);
-    group.add(&opacity_row);
-
-    let shadow_row = adw::ComboRow::new();
-    shadow_row.set_title("Schatten");
-    shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating"])));
-    group.add(&shadow_row);
-
-    let shadow_angle_row = spin_row("Schatten-Winkel", 0.0, 360.0, 90.0);
-    group.add(&shadow_angle_row);
-    let shadow_distance_row = spin_row("Schatten-Distanz", 0.0, 300.0, 6.0);
-    group.add(&shadow_distance_row);
-    let shadow_blur_row = spin_row("Weichzeichner", 0.0, 150.0, 16.0);
-    group.add(&shadow_blur_row);
-
-    page.add(&group);
-    dialog.add(&page);
-
-    // -- reflect the label's current value onto every row --
-    let sync_from = |label: &TextElement| {
-        enabled_row.set_active(label.enabled);
-        content_row.set_text(&label.content);
-        let is_absolute = matches!(label.position, TextPosition::Absolute { .. });
-        position_mode_row.set_selected(if is_absolute { 1 } else { 0 });
-        horizontal_row.set_visible(!is_absolute);
-        vertical_row.set_visible(!is_absolute);
-        padding_row.set_visible(!is_absolute);
-        x_row.set_visible(is_absolute);
-        y_row.set_visible(is_absolute);
-        match label.position {
-            TextPosition::Semantic { horizontal, vertical, padding } => {
-                horizontal_row.set_selected(index_for_horizontal_anchor(horizontal));
-                vertical_row.set_selected(index_for_vertical_anchor(vertical));
-                padding_row.set_value(padding);
-            }
-            TextPosition::Absolute { x, y } => {
-                x_row.set_value(x);
-                y_row.set_value(y);
-            }
-        }
-
-        let background_index = match &label.background {
-            TextBackground::None => 0,
-            TextBackground::Solid(_) => 1,
-            TextBackground::Gradient(_) => 2,
-        };
-        background_row.set_selected(background_index);
-        background_color_row.set_visible(background_index != 0);
-        background_color2_row.set_visible(background_index == 2);
-        match &label.background {
-            TextBackground::Solid(color) => background_color_button.set_rgba(&gdk_rgba_from(color)),
-            TextBackground::Gradient(spec) => {
-                if let Some((_, color)) = spec.stops.first() {
-                    background_color_button.set_rgba(&gdk_rgba_from(color));
-                }
-                if let Some((_, color)) = spec.stops.get(1) {
-                    background_color2_button.set_rgba(&gdk_rgba_from(color));
-                }
-            }
-            TextBackground::None => {}
-        }
-
-        corner_radius_row.set_value(label.corner_radius.top_left);
-        font_button.set_font_desc(&font_desc_from_typography(&label.typography));
-        color_button.set_rgba(&gdk_rgba_from(&label.typography.color));
-        letter_spacing_row.set_value(label.typography.letter_spacing);
-        line_spacing_row.set_value(label.typography.line_spacing);
-        opacity_row.set_value(label.typography.opacity * 100.0);
-
-        shadow_row.set_selected(shadow_preset_index_for(&label.shadow));
-        let (angle, distance) = label.shadow.angle_and_distance();
-        shadow_angle_row.set_value(angle);
-        shadow_distance_row.set_value(distance);
-        shadow_blur_row.set_value(label.shadow.blur);
-
-        let enabled = label.enabled;
-        for widget in [
-            content_row.clone().upcast::<gtk4::Widget>(),
-            position_mode_row.clone().upcast(),
-            horizontal_row.clone().upcast(),
-            vertical_row.clone().upcast(),
-            padding_row.clone().upcast(),
-            x_row.clone().upcast(),
-            y_row.clone().upcast(),
-            background_row.clone().upcast(),
-            background_color_row.clone().upcast(),
-            background_color2_row.clone().upcast(),
-            corner_radius_row.clone().upcast(),
-            font_row.clone().upcast(),
-            color_row.clone().upcast(),
-            letter_spacing_row.clone().upcast(),
-            line_spacing_row.clone().upcast(),
-            opacity_row.clone().upcast(),
-            shadow_row.clone().upcast(),
-        ] {
-            widget.set_sensitive(enabled);
-        }
-        let shadow_geometry_enabled = enabled && label.shadow.enabled;
-        shadow_angle_row.set_sensitive(shadow_geometry_enabled);
-        shadow_distance_row.set_sensitive(shadow_geometry_enabled);
-        shadow_blur_row.set_sensitive(shadow_geometry_enabled);
-    };
-    sync_from(&label);
-
-    // Guards the sync above (and the shadow preset handler's own display-
-    // only writes below) against reentrantly pushing a spurious partial
-    // undo command the same way `register_title_controls` does — this
-    // dialog doesn't share `EditorState.syncing_controls` (it isn't
-    // touching the sidebar), so it keeps its own tiny local flag instead.
-    let syncing = Rc::new(Cell::new(false));
-
-    let apply = glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        #[strong]
-        syncing,
-        #[weak]
-        enabled_row,
-        #[weak]
-        content_row,
-        #[weak]
-        position_mode_row,
-        #[weak]
-        horizontal_row,
-        #[weak]
-        vertical_row,
-        #[weak]
-        padding_row,
-        #[weak]
-        x_row,
-        #[weak]
-        y_row,
-        #[weak]
-        background_row,
-        #[weak]
-        background_color_button,
-        #[weak]
-        background_color2_button,
-        #[weak]
-        corner_radius_row,
-        #[weak]
-        font_button,
-        #[weak]
-        color_button,
-        #[weak]
-        letter_spacing_row,
-        #[weak]
-        line_spacing_row,
-        #[weak]
-        opacity_row,
-        move || {
-            if syncing.get() {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) else { return };
-
-            let background = match background_row.selected() {
-                1 => TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba())),
-                2 => TextBackground::Gradient(GradientSpec {
-                    kind: GradientKind::Linear { angle_deg: 135.0 },
-                    stops: vec![(0.0, rgba_from_gdk(&background_color_button.rgba())), (1.0, rgba_from_gdk(&background_color2_button.rgba()))],
-                }),
-                _ => TextBackground::None,
-            };
-            let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
-            let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
-
-            let position = if position_mode_row.selected() == 1 {
-                TextPosition::Absolute { x: x_row.value(), y: y_row.value() }
-            } else {
-                TextPosition::Semantic {
-                    horizontal: horizontal_anchor_for_index(horizontal_row.selected()),
-                    vertical: vertical_anchor_for_index(vertical_row.selected()),
-                    padding: padding_row.value(),
-                }
-            };
-
-            let new = TextElement {
-                enabled: enabled_row.is_active(),
-                content: content_row.text().to_string(),
-                position,
-                typography: Typography {
-                    font_family,
-                    font_size,
-                    weight,
-                    italic,
-                    color: rgba_from_gdk(&color_button.rgba()),
-                    alignment: current.typography.alignment,
-                    opacity: opacity_row.value() / 100.0,
-                    letter_spacing: letter_spacing_row.value(),
-                    line_spacing: line_spacing_row.value(),
-                    wrap: current.typography.wrap,
-                },
-                background,
-                corner_radius: CornerRadius::uniform(corner_radius_row.value()),
-                background_padding: current.background_padding,
-                shadow: current.shadow,
-            };
-            if current == new {
-                return;
-            }
-            let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new }), document);
-            drop(state_ref);
-            refresh_canvas(&window, &canvas, &state);
-            update_undo_redo_sensitivity(&window, &state);
-        }
-    );
-
-    enabled_row.connect_active_notify(glib::clone!(
-        #[strong]
-        state,
-        #[strong]
-        apply,
-        #[weak]
-        enabled_row,
-        #[weak]
-        content_row,
-        #[weak]
-        position_mode_row,
-        #[weak]
-        horizontal_row,
-        #[weak]
-        vertical_row,
-        #[weak]
-        padding_row,
-        #[weak]
-        x_row,
-        #[weak]
-        y_row,
-        #[weak]
-        background_row,
-        #[weak]
-        background_color_row,
-        #[weak]
-        background_color2_row,
-        #[weak]
-        corner_radius_row,
-        #[weak]
-        font_row,
-        #[weak]
-        color_row,
-        #[weak]
-        letter_spacing_row,
-        #[weak]
-        line_spacing_row,
-        #[weak]
-        opacity_row,
-        #[weak]
-        shadow_row,
-        #[weak]
-        shadow_angle_row,
-        #[weak]
-        shadow_distance_row,
-        #[weak]
-        shadow_blur_row,
-        move |_| {
-            let enabled = enabled_row.is_active();
-            if let Some(label) = state.borrow().document.elements.iter().find(|e| e.id == element_id).map(|e| e.label.clone()) {
-                let shadow_geometry_enabled = enabled && label.shadow.enabled;
-                shadow_angle_row.set_sensitive(shadow_geometry_enabled);
-                shadow_distance_row.set_sensitive(shadow_geometry_enabled);
-                shadow_blur_row.set_sensitive(shadow_geometry_enabled);
-            }
-            for widget in [
-                content_row.clone().upcast::<gtk4::Widget>(),
-                position_mode_row.clone().upcast(),
-                horizontal_row.clone().upcast(),
-                vertical_row.clone().upcast(),
-                padding_row.clone().upcast(),
-                x_row.clone().upcast(),
-                y_row.clone().upcast(),
-                background_row.clone().upcast(),
-                background_color_row.clone().upcast(),
-                background_color2_row.clone().upcast(),
-                corner_radius_row.clone().upcast(),
-                font_row.clone().upcast(),
-                color_row.clone().upcast(),
-                letter_spacing_row.clone().upcast(),
-                line_spacing_row.clone().upcast(),
-                opacity_row.clone().upcast(),
-                shadow_row.clone().upcast(),
-            ] {
-                widget.set_sensitive(enabled);
-            }
-            apply();
-        }
-    ));
-    content_row.connect_changed(glib::clone!(#[strong] apply, move |_| apply()));
-    position_mode_row.connect_selected_notify(glib::clone!(
-        #[weak]
-        horizontal_row,
-        #[weak]
-        vertical_row,
-        #[weak]
-        padding_row,
-        #[weak]
-        x_row,
-        #[weak]
-        y_row,
-        #[strong]
-        apply,
-        move |row| {
-            let is_absolute = row.selected() == 1;
-            horizontal_row.set_visible(!is_absolute);
-            vertical_row.set_visible(!is_absolute);
-            padding_row.set_visible(!is_absolute);
-            x_row.set_visible(is_absolute);
-            y_row.set_visible(is_absolute);
-            apply();
-        }
-    ));
-    x_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    y_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    horizontal_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    vertical_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    padding_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    background_row.connect_selected_notify(glib::clone!(
-        #[weak]
-        background_color_row,
-        #[weak]
-        background_color2_row,
-        #[strong]
-        apply,
-        move |row| {
-            let selected = row.selected();
-            background_color_row.set_visible(selected != 0);
-            background_color2_row.set_visible(selected == 2);
-            apply();
-        }
-    ));
-    background_color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    background_color2_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    corner_radius_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    font_button.connect_font_desc_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    letter_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    line_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-    opacity_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
-
-    shadow_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        state,
-        #[strong]
-        syncing,
-        #[weak]
-        shadow_angle_row,
-        #[weak]
-        shadow_distance_row,
-        #[weak]
-        shadow_blur_row,
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        move |row| {
-            let preset = shadow_preset_for_index(row.selected());
-            let mut state_ref = state.borrow_mut();
-            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
-            let new_shadow = current.label.shadow.with_preset(preset);
-
-            syncing.set(true);
-            shadow_distance_row.set_value(new_shadow.angle_and_distance().1);
-            shadow_blur_row.set_value(new_shadow.blur);
-            shadow_angle_row.set_sensitive(new_shadow.enabled);
-            shadow_distance_row.set_sensitive(new_shadow.enabled);
-            shadow_blur_row.set_sensitive(new_shadow.enabled);
-            syncing.set(false);
-
-            let mut new_label = current.label.clone();
-            new_label.shadow = new_shadow;
-            let old_label = current.label.clone();
-            if old_label == new_label {
-                return;
-            }
-            let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: old_label, new: new_label }), document);
-            drop(state_ref);
-            refresh_canvas(&window, &canvas, &state);
-            update_undo_redo_sensitivity(&window, &state);
-        }
-    ));
-
-    let apply_shadow_geometry = glib::clone!(
-        #[strong]
-        state,
-        #[strong]
-        syncing,
-        #[weak]
-        shadow_angle_row,
-        #[weak]
-        shadow_distance_row,
-        #[weak]
-        shadow_blur_row,
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        move || {
-            if syncing.get() {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            let Some(current) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
-            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(shadow_angle_row.value(), shadow_distance_row.value());
-            let mut new_label = current.label.clone();
-            new_label.shadow.offset_x = offset_x;
-            new_label.shadow.offset_y = offset_y;
-            new_label.shadow.blur = shadow_blur_row.value();
-            let old_label = current.label.clone();
-            if old_label == new_label {
-                return;
-            }
-            let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: old_label, new: new_label }), document);
-            drop(state_ref);
-            refresh_canvas(&window, &canvas, &state);
-            update_undo_redo_sensitivity(&window, &state);
-        }
-    );
-    shadow_angle_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
-    shadow_distance_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
-    shadow_blur_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
-
-    dialog.present(Some(window));
-}
-
 fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let context_target: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
 
@@ -3564,24 +3468,6 @@ fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Ed
     });
 
     register_replace_action(window, canvas, state, &context_target);
-
-    let edit_label_action = gio::SimpleAction::new("edit-screenshot-label", None);
-    edit_label_action.connect_activate(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        #[strong]
-        context_target,
-        move |_, _| {
-            let Some(index) = context_target.get() else { return };
-            let Some(element_id) = state.borrow().document.elements.get(index).map(|e| e.id) else { return };
-            open_label_editor(&window, &canvas, &state, element_id);
-        }
-    ));
-    window.add_action(&edit_label_action);
 }
 
 /// `win.paste` (`Ctrl+V`, spec §1: "Screenshot aus der Zwischenablage

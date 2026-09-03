@@ -48,7 +48,7 @@ pub fn save(document: &Document, path: &Path) -> Result<(), ProjectError> {
 pub fn load(path: &Path) -> Result<Document, ProjectError> {
     let content = std::fs::read_to_string(path)?;
     let mut raw: serde_json::Value = serde_json::from_str(&content)?;
-    migrate_legacy_text_overlay(&mut raw);
+    migrate_legacy_label_padding(&mut raw);
     let project: ProjectFile = serde_json::from_value(raw)?;
     match project.version {
         1 => {
@@ -63,59 +63,25 @@ pub fn load(path: &Path) -> Result<Document, ProjectError> {
     }
 }
 
-/// Projects saved before the title/label system existed used a simpler
-/// `text_overlay` field (`{enabled, content, x, y, font_size, color}`) for
-/// what's now `Document.title` (a full `TextElement`). `Document`'s own
-/// `#[serde(default)]` on `title` already means an old file loads without
-/// error even without this step — but silently as a disabled, empty title,
-/// discarding whatever caption was actually saved. This runs on the raw
-/// JSON, before the typed deserialization ever sees it, converting that
-/// old shape into an equivalent `TextElement` (the same x/y, now as
-/// `TextPosition::Absolute`, and the same content/size/color) so the
-/// caption survives the upgrade instead of quietly vanishing. A no-op
-/// whenever `title` is already present (current-format files, or a file
-/// this has already migrated).
-fn migrate_legacy_text_overlay(raw: &mut serde_json::Value) {
-    let Some(document) = raw.get_mut("document") else { return };
-    if document.get("title").is_some() {
-        return;
+/// A project saved before a label's padding was split into
+/// `padding_x`/`padding_y` used one uniform `background_padding` field.
+/// `TextElement`'s own `#[serde(default = "..")]` on the two new fields
+/// already means such a file loads without error — but silently at the
+/// fallback default, discarding whatever custom padding was actually
+/// saved. This runs on the raw JSON, before the typed deserialization ever
+/// sees it, copying that old value into both new fields (matching the old
+/// uniform-padding look exactly) for every screenshot's `label`. A no-op
+/// wherever `padding_x`/`padding_y` are already present (current-format
+/// files, or one this has already migrated).
+fn migrate_legacy_label_padding(raw: &mut serde_json::Value) {
+    let Some(elements) = raw.pointer_mut("/document/elements").and_then(|v| v.as_array_mut()) else { return };
+    for element in elements {
+        let Some(label) = element.get_mut("label") else { continue };
+        let Some(old_padding) = label.get("background_padding").and_then(|v| v.as_f64()) else { continue };
+        let Some(label_obj) = label.as_object_mut() else { continue };
+        label_obj.entry("padding_x").or_insert(serde_json::json!(old_padding));
+        label_obj.entry("padding_y").or_insert(serde_json::json!(old_padding));
     }
-    let Some(text_overlay) = document.get("text_overlay").cloned() else { return };
-    let Some(document_obj) = document.as_object_mut() else { return };
-
-    let get_f64 = |key: &str, default: f64| text_overlay.get(key).and_then(|v| v.as_f64()).unwrap_or(default);
-    let enabled = text_overlay.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-    let content = text_overlay.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let color = text_overlay
-        .get("color")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({ "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }));
-
-    let title = serde_json::json!({
-        "enabled": enabled,
-        "content": content,
-        "position": { "mode": "absolute", "x": get_f64("x", 48.0), "y": get_f64("y", 24.0) },
-        "typography": {
-            "font_family": "Sans",
-            "font_size": get_f64("font_size", 32.0),
-            "weight": 700,
-            "italic": false,
-            "color": color,
-            "alignment": "center",
-            "opacity": 1.0,
-            "letter_spacing": 0.0,
-            "line_spacing": 1.2,
-            "wrap": false
-        },
-        "background": { "type": "none" },
-        "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
-        "background_padding": 16.0,
-        "shadow": {
-            "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0,
-            "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
-        }
-    });
-    document_obj.insert("title".to_string(), title);
 }
 
 #[cfg(test)]
@@ -267,78 +233,53 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    /// A project saved before the title/label system existed used the
-    /// older, simpler `text_overlay` shape — this pins down that its
-    /// caption survives loading (migrated into `Document.title`) instead
-    /// of silently vanishing behind `#[serde(default)]`.
+    /// A project saved before a label's padding was split into
+    /// `padding_x`/`padding_y` used one uniform `background_padding`
+    /// value — this pins down that it survives loading as both new
+    /// fields, rather than silently resetting to the default.
     #[test]
-    fn migrates_a_legacy_text_overlay_into_the_new_title() {
-        let path = temp_path("legacy-text-overlay.screenforge");
+    fn migrates_a_legacy_uniform_label_padding_into_both_new_fields() {
+        let path = temp_path("legacy-label-padding.screenforge");
         let json = r#"{
             "format": "screenforge",
             "version": 1,
             "document": {
                 "id": "8f14e45f-ceea-467e-adc0-51944115d5c6",
-                "elements": [],
-                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
-                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
-                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 },
-                "text_overlay": {
-                    "enabled": true,
-                    "content": "My App Review",
-                    "x": 100.0,
-                    "y": 50.0,
-                    "font_size": 40.0,
-                    "color": { "r": 0.1, "g": 0.2, "b": 0.3, "a": 1.0 }
-                }
-            }
-        }"#;
-        std::fs::write(&path, json).unwrap();
-
-        let doc = load(&path).unwrap();
-        assert!(doc.title.enabled);
-        assert_eq!(doc.title.content, "My App Review");
-        assert_eq!(doc.title.position, crate::model::TextPosition::Absolute { x: 100.0, y: 50.0 });
-        assert_eq!(doc.title.typography.font_size, 40.0);
-        assert_eq!(doc.title.typography.color, crate::model::Rgba::new(0.1, 0.2, 0.3, 1.0));
-        std::fs::remove_file(&path).ok();
-    }
-
-    /// A file that already carries the new `title` field must not be
-    /// clobbered by a leftover/legacy `text_overlay` also present.
-    #[test]
-    fn a_file_with_both_title_and_legacy_text_overlay_keeps_the_title() {
-        let path = temp_path("title-and-legacy.screenforge");
-        let json = r#"{
-            "format": "screenforge",
-            "version": 1,
-            "document": {
-                "id": "8f14e45f-ceea-467e-adc0-51944115d5c6",
-                "elements": [],
-                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
-                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
-                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 },
-                "text_overlay": { "enabled": true, "content": "Old", "x": 1.0, "y": 1.0, "font_size": 10.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } },
-                "title": {
-                    "enabled": true,
-                    "content": "New Title",
-                    "position": { "mode": "absolute", "x": 5.0, "y": 5.0 },
-                    "typography": {
-                        "font_family": "Sans", "font_size": 20.0, "weight": 700, "italic": false,
-                        "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }, "alignment": "center", "opacity": 1.0,
-                        "letter_spacing": 0.0, "line_spacing": 1.2, "wrap": false
-                    },
-                    "background": { "type": "none" },
+                "elements": [{
+                    "id": "9b2e1a3c-1234-4a3b-8cde-0123456789ab",
+                    "source": { "type": "path", "value": "/tmp/a.png" },
+                    "natural_width": 400.0,
+                    "natural_height": 800.0,
+                    "transform": { "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0, "rotation_deg": 0.0, "aspect_locked": true },
                     "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
-                    "background_padding": 16.0,
-                    "shadow": { "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } }
-                }
+                    "shadow": { "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } },
+                    "label": {
+                        "enabled": true,
+                        "content": "Legacy Label",
+                        "position": { "mode": "absolute", "x": 5.0, "y": 5.0 },
+                        "typography": {
+                            "font_family": "Sans", "font_size": 18.0, "weight": 700, "italic": false,
+                            "color": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 }, "alignment": "center", "opacity": 1.0,
+                            "letter_spacing": 0.0, "line_spacing": 1.2, "wrap": false
+                        },
+                        "background": { "type": "none" },
+                        "corner_radius": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 },
+                        "background_padding": 22.0,
+                        "shadow": { "enabled": false, "offset_x": 0.0, "offset_y": 0.0, "blur": 0.0, "opacity": 0.0, "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } }
+                    },
+                    "visible": true
+                }],
+                "layout": { "mode": "horizontal", "spacing_px": 24.0, "margin_px": 48.0 },
+                "background": { "type": "solid", "value": { "r": 0.95, "g": 0.95, "b": 0.96, "a": 1.0 } },
+                "canvas": { "export_width": 1920, "export_height": 1080, "export_format": "png", "export_quality": 90 }
             }
         }"#;
         std::fs::write(&path, json).unwrap();
 
         let doc = load(&path).unwrap();
-        assert_eq!(doc.title.content, "New Title");
+        assert_eq!(doc.elements[0].label.content, "Legacy Label");
+        assert_eq!(doc.elements[0].label.padding_x, 22.0);
+        assert_eq!(doc.elements[0].label.padding_y, 22.0);
         std::fs::remove_file(&path).ok();
     }
 

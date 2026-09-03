@@ -656,22 +656,23 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwPreferencesGroup">
-                        <property name="title" translatable="yes">Titel</property>
-                        <property name="description" translatable="yes">Eine Überschrift über der gesamten Komposition</property>
+                      <object class="AdwPreferencesGroup" id="label_group">
+                        <property name="title" translatable="yes">Label</property>
+                        <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
+                        <property name="visible">false</property>
                         <child>
-                          <object class="AdwSwitchRow" id="title_enabled_row">
-                            <property name="title" translatable="yes">Titel anzeigen</property>
+                          <object class="AdwSwitchRow" id="label_enabled_row">
+                            <property name="title" translatable="yes">Label anzeigen</property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwEntryRow" id="title_content_row">
+                          <object class="AdwEntryRow" id="label_content_row">
                             <property name="title" translatable="yes">Text</property>
                             <property name="sensitive">false</property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_position_mode_row">
+                          <object class="AdwComboRow" id="label_position_mode_row">
                             <property name="title" translatable="yes">Position</property>
                             <property name="sensitive">false</property>
                             <property name="model">
@@ -685,7 +686,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_horizontal_row">
+                          <object class="AdwComboRow" id="label_horizontal_row">
                             <property name="title" translatable="yes">Horizontal</property>
                             <property name="sensitive">false</property>
                             <property name="model">
@@ -700,7 +701,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_vertical_row">
+                          <object class="AdwComboRow" id="label_vertical_row">
                             <property name="title" translatable="yes">Vertikal</property>
                             <property name="sensitive">false</property>
                             <property name="model">
@@ -715,9 +716,9 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_padding_row">
+                          <object class="AdwSpinRow" id="label_padding_row">
                             <property name="title" translatable="yes">Randabstand</property>
-                            <property name="subtitle" translatable="yes">In Pixeln</property>
+                            <property name="subtitle" translatable="yes">Zum Screenshot-Rand, in Pixeln</property>
                             <property name="sensitive">false</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
@@ -726,47 +727,47 @@
                                 <property name="upper">500</property>
                                 <property name="step-increment">4</property>
                                 <property name="page-increment">20</property>
-                                <property name="value">32</property>
+                                <property name="value">16</property>
                               </object>
                             </property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_x_row">
+                          <object class="AdwSpinRow" id="label_x_row">
                             <property name="title" translatable="yes">X-Position</property>
-                            <property name="subtitle" translatable="yes">In Pixeln, von links</property>
+                            <property name="subtitle" translatable="yes">In Pixeln, relativ zum Screenshot</property>
                             <property name="visible">false</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
-                                <property name="lower">0</property>
+                                <property name="lower">-4000</property>
                                 <property name="upper">8000</property>
                                 <property name="step-increment">4</property>
                                 <property name="page-increment">40</property>
-                                <property name="value">48</property>
+                                <property name="value">0</property>
                               </object>
                             </property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_y_row">
+                          <object class="AdwSpinRow" id="label_y_row">
                             <property name="title" translatable="yes">Y-Position</property>
-                            <property name="subtitle" translatable="yes">In Pixeln, von oben</property>
+                            <property name="subtitle" translatable="yes">In Pixeln, relativ zum Screenshot</property>
                             <property name="visible">false</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
-                                <property name="lower">0</property>
+                                <property name="lower">-4000</property>
                                 <property name="upper">8000</property>
                                 <property name="step-increment">4</property>
                                 <property name="page-increment">40</property>
-                                <property name="value">24</property>
+                                <property name="value">0</property>
                               </object>
                             </property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_background_row">
+                          <object class="AdwComboRow" id="label_background_row">
                             <property name="title" translatable="yes">Hintergrund</property>
                             <property name="sensitive">false</property>
                             <property name="model">
@@ -781,12 +782,22 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwActionRow" id="title_background_color_row">
+                          <object class="AdwActionRow" id="label_background_color_row">
                             <property name="title" translatable="yes">Hintergrundfarbe</property>
                             <property name="subtitle" translatable="yes">Deckkraft über die Farbwahl einstellbar</property>
                             <property name="visible">false</property>
                             <child type="suffix">
-                              <object class="GtkColorDialogButton" id="title_background_color_button">
+                              <object class="GtkButton" id="label_background_auto_button">
+                                <property name="valign">center</property>
+                                <property name="tooltip-text" translatable="yes">Automatisch: kontrastreiche Farbe aus dem Screenshot vorschlagen</property>
+                                <property name="icon-name">color-select-symbolic</property>
+                                <style>
+                                  <class name="flat"/>
+                                </style>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkColorDialogButton" id="label_background_color_button">
                                 <property name="valign">center</property>
                                 <property name="dialog">
                                   <object class="GtkColorDialog">
@@ -798,11 +809,11 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwActionRow" id="title_background_color2_row">
+                          <object class="AdwActionRow" id="label_background_color2_row">
                             <property name="title" translatable="yes">Hintergrundfarbe 2</property>
                             <property name="visible">false</property>
                             <child type="suffix">
-                              <object class="GtkColorDialogButton" id="title_background_color2_button">
+                              <object class="GtkColorDialogButton" id="label_background_color2_button">
                                 <property name="valign">center</property>
                                 <property name="dialog">
                                   <object class="GtkColorDialog">
@@ -814,7 +825,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_corner_radius_row">
+                          <object class="AdwSpinRow" id="label_corner_radius_row">
                             <property name="title" translatable="yes">Eckenradius</property>
                             <property name="sensitive">false</property>
                             <property name="digits">0</property>
@@ -830,11 +841,45 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwActionRow" id="title_font_row">
+                          <object class="AdwSpinRow" id="label_padding_x_row">
+                            <property name="title" translatable="yes">Innenabstand horizontal</property>
+                            <property name="subtitle" translatable="yes">Zwischen Rand und Text, in Pixeln</property>
+                            <property name="sensitive">false</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">200</property>
+                                <property name="step-increment">2</property>
+                                <property name="page-increment">10</property>
+                                <property name="value">8</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="label_padding_y_row">
+                            <property name="title" translatable="yes">Innenabstand vertikal</property>
+                            <property name="subtitle" translatable="yes">Zwischen Rand und Text, in Pixeln</property>
+                            <property name="sensitive">false</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">200</property>
+                                <property name="step-increment">2</property>
+                                <property name="page-increment">10</property>
+                                <property name="value">8</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="label_font_row">
                             <property name="title" translatable="yes">Schrift</property>
                             <property name="sensitive">false</property>
                             <child type="suffix">
-                              <object class="GtkFontDialogButton" id="title_font_button">
+                              <object class="GtkFontDialogButton" id="label_font_button">
                                 <property name="valign">center</property>
                                 <property name="dialog">
                                   <object class="GtkFontDialog"/>
@@ -844,7 +889,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_alignment_row">
+                          <object class="AdwComboRow" id="label_alignment_row">
                             <property name="title" translatable="yes">Textausrichtung</property>
                             <property name="subtitle" translatable="yes">Bei mehrzeiligem Text</property>
                             <property name="sensitive">false</property>
@@ -860,45 +905,11 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_letter_spacing_row">
-                            <property name="title" translatable="yes">Zeichenabstand</property>
-                            <property name="subtitle" translatable="yes">In Pixeln</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">1</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-5</property>
-                                <property name="upper">50</property>
-                                <property name="step-increment">0.5</property>
-                                <property name="page-increment">2</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="title_line_spacing_row">
-                            <property name="title" translatable="yes">Zeilenabstand</property>
-                            <property name="subtitle" translatable="yes">Faktor, 1,0 = normal</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">2</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0.5</property>
-                                <property name="upper">3</property>
-                                <property name="step-increment">0.1</property>
-                                <property name="page-increment">0.5</property>
-                                <property name="value">1.2</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="title_color_row">
+                          <object class="AdwActionRow" id="label_color_row">
                             <property name="title" translatable="yes">Textfarbe</property>
                             <property name="sensitive">false</property>
                             <child type="suffix">
-                              <object class="GtkColorDialogButton" id="title_color_button">
+                              <object class="GtkColorDialogButton" id="label_color_button">
                                 <property name="valign">center</property>
                                 <property name="dialog">
                                   <object class="GtkColorDialog"/>
@@ -908,7 +919,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_opacity_row">
+                          <object class="AdwSpinRow" id="label_opacity_row">
                             <property name="title" translatable="yes">Deckkraft</property>
                             <property name="subtitle" translatable="yes">In Prozent</property>
                             <property name="sensitive">false</property>
@@ -925,7 +936,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="title_shadow_row">
+                          <object class="AdwComboRow" id="label_shadow_row">
                             <property name="title" translatable="yes">Schatten</property>
                             <property name="sensitive">false</property>
                             <property name="model">
@@ -942,7 +953,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_shadow_angle_row">
+                          <object class="AdwSpinRow" id="label_shadow_angle_row">
                             <property name="title" translatable="yes">Schatten-Winkel</property>
                             <property name="sensitive">false</property>
                             <property name="digits">0</property>
@@ -958,7 +969,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_shadow_distance_row">
+                          <object class="AdwSpinRow" id="label_shadow_distance_row">
                             <property name="title" translatable="yes">Schatten-Distanz</property>
                             <property name="sensitive">false</property>
                             <property name="digits">0</property>
@@ -974,7 +985,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="title_shadow_blur_row">
+                          <object class="AdwSpinRow" id="label_shadow_blur_row">
                             <property name="title" translatable="yes">Weichzeichner</property>
                             <property name="sensitive">false</property>
                             <property name="digits">0</property>
@@ -987,6 +998,34 @@
                                 <property name="value">16</property>
                               </object>
                             </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup" id="callouts_group">
+                        <property name="title" translatable="yes">Callouts</property>
+                        <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
+                        <property name="visible">false</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">12</property>
+                            <child>
+                              <object class="GtkListBox" id="callouts_list_box">
+                                <property name="selection-mode">none</property>
+                                <property name="visible">false</property>
+                                <style>
+                                  <class name="boxed-list"/>
+                                </style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="add_callout_button">
+                                <property name="label" translatable="yes">+ Callout hinzufügen</property>
+                                <property name="halign">start</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>

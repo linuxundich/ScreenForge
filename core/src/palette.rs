@@ -76,6 +76,24 @@ pub fn average_color(images: &[PixelSample]) -> Rgba {
     Rgba::new((sum_r / weight).clamp(0.0, 1.0), (sum_g / weight).clamp(0.0, 1.0), (sum_b / weight).clamp(0.0, 1.0), 1.0)
 }
 
+/// Suggests a contrast-aware `(background, text)` color pair for a
+/// screenshot's own label, derived from that screenshot's average color —
+/// the "Automatisch" background-color action. Fully inverts the source's
+/// Oklab lightness (rather than partially, like [`suggest_gradient`]'s
+/// complementary suggestion) and drops chroma to zero, so contrast comes
+/// purely from the lightness gap, never from cranking up saturation: a
+/// bright screenshot gets a near-black label, a dark one a near-white
+/// label, and the label's own text is whichever of near-black/near-white
+/// contrasts more with *that* result.
+pub fn suggest_label_colors(images: &[PixelSample]) -> (Rgba, Rgba) {
+    let avg = average_color(images);
+    let (lightness, _, _) = rgb_to_oklab(avg);
+    let background_lightness = (1.0 - lightness).clamp(0.08, 0.92);
+    let background = oklab_to_rgb(background_lightness, 0.0, 0.0);
+    let text = oklab_to_rgb(if background_lightness > 0.5 { 0.05 } else { 0.97 }, 0.0, 0.0);
+    (background, text)
+}
+
 /// Suggests a two-stop linear gradient that complements `images`' average
 /// color. `seed` only changes *which* complementary hues/angle the
 /// suggestion lands on — every seed still produces a background that
@@ -131,7 +149,7 @@ fn linear_to_srgb(c: f64) -> f64 {
 }
 
 /// sRGB -> Oklab. Coefficients are Björn Ottosson's reference matrices.
-fn rgb_to_oklab(c: Rgba) -> (f64, f64, f64) {
+pub(crate) fn rgb_to_oklab(c: Rgba) -> (f64, f64, f64) {
     let (r, g, b) = (srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b));
 
     let l = 0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b;
@@ -150,7 +168,7 @@ fn rgb_to_oklab(c: Rgba) -> (f64, f64, f64) {
 /// coordinate maps to a representable sRGB color, so the result is
 /// clamped to `0.0..=1.0` per channel — visually this just desaturates a
 /// suggestion slightly rather than producing an invalid color.
-fn oklab_to_rgb(l: f64, a: f64, b: f64) -> Rgba {
+pub(crate) fn oklab_to_rgb(l: f64, a: f64, b: f64) -> Rgba {
     let l_ = l + 0.396_337_777_4 * a + 0.215_803_757_3 * b;
     let m_ = l - 0.105_561_345_8 * a - 0.063_854_172_8 * b;
     let s_ = l - 0.089_484_177_5 * a - 1.291_485_548_0 * b;
@@ -332,6 +350,35 @@ mod tests {
         // Every pixel has alpha 0, so nothing should contribute -- the
         // neutral fallback, not near-black.
         assert_eq!(avg, Rgba::new(0.5, 0.5, 0.5, 1.0));
+    }
+
+    #[test]
+    fn suggest_label_colors_gives_a_bright_screenshot_a_dark_background_and_light_text() {
+        let pixels = solid_pixels(20, 20, 235, 235, 235, 255);
+        let (background, text) = suggest_label_colors(&[PixelSample { bytes: &pixels, width: 20, height: 20 }]);
+        let (bg_l, bg_a, bg_b) = rgb_to_oklab(background);
+        assert!(bg_l < 0.5, "expected a dark label background for a bright screenshot, got lightness {bg_l}");
+        assert!(bg_a.abs() < 1e-6 && bg_b.abs() < 1e-6, "expected zero chroma, contrast should come from lightness alone");
+        let (text_l, _, _) = rgb_to_oklab(text);
+        assert!(text_l > bg_l, "expected the suggested text color to be lighter than its own background");
+    }
+
+    #[test]
+    fn suggest_label_colors_gives_a_dark_screenshot_a_light_background_and_dark_text() {
+        let pixels = solid_pixels(20, 20, 15, 15, 15, 255);
+        let (background, text) = suggest_label_colors(&[PixelSample { bytes: &pixels, width: 20, height: 20 }]);
+        let (bg_l, _, _) = rgb_to_oklab(background);
+        assert!(bg_l > 0.5, "expected a light label background for a dark screenshot, got lightness {bg_l}");
+        let (text_l, _, _) = rgb_to_oklab(text);
+        assert!(text_l < bg_l, "expected the suggested text color to be darker than its own background");
+    }
+
+    #[test]
+    fn suggest_label_colors_of_no_images_does_not_panic_and_stays_in_range() {
+        let (background, text) = suggest_label_colors(&[]);
+        for c in [background, text] {
+            assert!((0.0..=1.0).contains(&c.r) && (0.0..=1.0).contains(&c.g) && (0.0..=1.0).contains(&c.b));
+        }
     }
 
     #[test]

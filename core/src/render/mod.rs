@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::layout::compute_layout;
 use crate::model::{
-    Background, BackgroundImageFit, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, TextAlign, TextBackground,
-    TextElement,
+    Background, BackgroundImageFit, Callout, CornerRadius, Document, GradientKind, ScreenshotElement, ShadowParams, TextAlign,
+    TextBackground, TextElement,
 };
 use crate::shadow_cache::{ShadowCache, MAX_SHADOW_SURFACE_DIM};
 
@@ -114,30 +114,84 @@ pub fn compose(
             draw_text_element(&ctx, &el.label, placement.width, placement.height, scale, shadow_cache)?;
         }
 
-        ctx.restore()?;
-    }
+        // Drawn after the label, in the same screenshot-relative space, so
+        // a callout's arrow can point anywhere within (or, via a bubble
+        // placed near an edge, right up against) the screenshot regardless
+        // of where the label itself sits.
+        for callout in &el.callouts {
+            if callout.enabled && !callout.text.content.is_empty() {
+                draw_callout(&ctx, callout, placement.width, placement.height, scale, shadow_cache)?;
+            }
+        }
 
-    if doc.title.enabled && !doc.title.content.is_empty() {
-        draw_text_element(&ctx, &doc.title, doc.canvas.export_width as f64, doc.canvas.export_height as f64, scale, shadow_cache)?;
+        ctx.restore()?;
     }
 
     Ok(())
 }
 
-/// Draws one [`TextElement`] — its box shadow, background, and the text
-/// itself, in that order — within a `ref_w`×`ref_h` reference rect. `ctx`
-/// is expected to already be at that rect's own origin (`(0, 0)` is the
-/// rect's top-left) — the whole canvas for a composition title, or one
-/// screenshot's own placement for a label; see `compose`'s two call sites.
-/// A no-op when `text` is disabled or empty (checked by the caller too, so
-/// this never runs Pango layout on nothing).
-///
-/// Uses Pango (via `pangocairo`), the GNOME stack's own text layout engine
-/// — not Cairo's "toy" text API — so font family/weight/italic/alignment/
-/// wrapping/letter- and line-spacing all come from the same fontconfig-
-/// backed shaping every other GTK app on the system uses, rather than a
-/// second, ad-hoc text system.
-fn draw_text_element(ctx: &Context, text: &TextElement, ref_w: f64, ref_h: f64, scale: f64, cache: &ShadowCache) -> Result<(), RenderError> {
+/// Draws one [`Callout`] — its text bubble (via `draw_text_element`) plus a
+/// straight arrow from the bubble's edge to `callout.target_x/target_y`
+/// (a fraction of `ref_w`×`ref_h`). The arrow starts at whichever point on
+/// the bubble's own rectangle faces the target, rather than its center, so
+/// the line never gets drawn underneath the text itself.
+fn draw_callout(ctx: &Context, callout: &Callout, ref_w: f64, ref_h: f64, scale: f64, cache: &ShadowCache) -> Result<(), RenderError> {
+    let (box_x, box_y, box_w, box_h) = measure_text_box(&callout.text, ref_w, ref_h)?;
+    let target = (callout.target_x.clamp(0.0, 1.0) * ref_w, callout.target_y.clamp(0.0, 1.0) * ref_h);
+    let start = box_edge_toward((box_x, box_y, box_w, box_h), target);
+
+    let c = callout.arrow_color;
+    ctx.set_source_rgba(c.r, c.g, c.b, c.a);
+    ctx.set_line_width(callout.arrow_width.max(0.1));
+    ctx.set_line_cap(cairo::LineCap::Round);
+    ctx.move_to(start.0, start.1);
+    ctx.line_to(target.0, target.1);
+    ctx.stroke()?;
+    draw_arrowhead(ctx, start, target, (callout.arrow_width * 3.0).max(4.0));
+
+    draw_text_element(ctx, &callout.text, ref_w, ref_h, scale, cache)
+}
+
+/// The point on a `box_w`×`box_h` rectangle's own perimeter (at `box_x`,
+/// `box_y`) that faces `target` — found by projecting the center-to-target
+/// direction out to whichever axis (horizontal or vertical) the box's own
+/// half-extent is reached first. Falls back to the box's center if `target`
+/// coincides with it (a zero-length direction has no "facing" side).
+fn box_edge_toward(box_rect: (f64, f64, f64, f64), target: (f64, f64)) -> (f64, f64) {
+    let (box_x, box_y, box_w, box_h) = box_rect;
+    let (cx, cy) = (box_x + box_w / 2.0, box_y + box_h / 2.0);
+    let (dx, dy) = (target.0 - cx, target.1 - cy);
+    if dx == 0.0 && dy == 0.0 {
+        return (cx, cy);
+    }
+    let t_x = if dx != 0.0 { (box_w / 2.0) / dx.abs() } else { f64::INFINITY };
+    let t_y = if dy != 0.0 { (box_h / 2.0) / dy.abs() } else { f64::INFINITY };
+    let t = t_x.min(t_y);
+    (cx + dx * t, cy + dy * t)
+}
+
+/// Fills a small triangular arrowhead at `to`, oriented along the
+/// `from`→`to` direction — drawn as a separate filled path rather than a
+/// stroke join, so its size doesn't depend on `arrow_width`'s own line-cap
+/// rendering.
+fn draw_arrowhead(ctx: &Context, from: (f64, f64), to: (f64, f64), size: f64) {
+    let angle = (to.1 - from.1).atan2(to.0 - from.0);
+    const SPREAD: f64 = 0.45;
+    let p1 = (to.0 - size * (angle - SPREAD).cos(), to.1 - size * (angle - SPREAD).sin());
+    let p2 = (to.0 - size * (angle + SPREAD).cos(), to.1 - size * (angle + SPREAD).sin());
+    ctx.move_to(to.0, to.1);
+    ctx.line_to(p1.0, p1.1);
+    ctx.line_to(p2.0, p2.1);
+    ctx.close_path();
+    let _ = ctx.fill();
+}
+
+/// Builds the Pango layout for `text` — font, alignment, line spacing,
+/// letter spacing, wrapping — and returns it alongside its measured content
+/// size in pixels. Shared by `draw_text_element` (which also shows the
+/// layout) and `measure_text_box` (which only needs the size), so the two
+/// never risk disagreeing about how big a label's text actually is.
+fn build_text_layout(ctx: &Context, text: &TextElement, ref_w: f64) -> (pango::Layout, f64, f64) {
     let layout = pangocairo::functions::create_layout(ctx);
 
     let mut font_desc = pango::FontDescription::new();
@@ -171,10 +225,41 @@ fn draw_text_element(ctx: &Context, text: &TextElement, ref_w: f64, ref_h: f64, 
     layout.set_text(&text.content);
 
     let (_, logical) = layout.pixel_extents();
-    let content_w = logical.width() as f64;
-    let content_h = logical.height() as f64;
-    let box_w = content_w + 2.0 * text.background_padding;
-    let box_h = content_h + 2.0 * text.background_padding;
+    (layout, logical.width() as f64, logical.height() as f64)
+}
+
+/// The `(box_x, box_y, box_w, box_h)` a [`TextElement`] would occupy within
+/// a `ref_w`×`ref_h` reference rect, without drawing anything — pure
+/// measurement, for hit-testing/dragging a label on the canvas widget
+/// (which needs to know where it is without re-running the whole
+/// composition). Pango layout needs a `cairo::Context` to measure against
+/// even when nothing is painted, hence the scratch 1x1 surface.
+pub fn measure_text_box(text: &TextElement, ref_w: f64, ref_h: f64) -> Result<(f64, f64, f64, f64), RenderError> {
+    let scratch = cairo::ImageSurface::create(cairo::Format::ARgb32, 1, 1)?;
+    let ctx = Context::new(&scratch)?;
+    let (_, content_w, content_h) = build_text_layout(&ctx, text, ref_w);
+    let box_w = content_w + 2.0 * text.padding_x;
+    let box_h = content_h + 2.0 * text.padding_y;
+    let (box_x, box_y) = text.position.resolve_box_origin(ref_w, ref_h, box_w, box_h);
+    Ok((box_x, box_y, box_w, box_h))
+}
+
+/// Draws one [`TextElement`] — its box shadow, background, and the text
+/// itself, in that order — within a `ref_w`×`ref_h` reference rect. `ctx`
+/// is expected to already be at that rect's own origin (`(0, 0)` is the
+/// rect's top-left) — one screenshot's own placement for its label; see
+/// `compose`'s call site. A no-op when `text` is disabled or empty (checked
+/// by the caller too, so this never runs Pango layout on nothing).
+///
+/// Uses Pango (via `pangocairo`), the GNOME stack's own text layout engine
+/// — not Cairo's "toy" text API — so font family/weight/italic/alignment/
+/// wrapping/letter- and line-spacing all come from the same fontconfig-
+/// backed shaping every other GTK app on the system uses, rather than a
+/// second, ad-hoc text system.
+fn draw_text_element(ctx: &Context, text: &TextElement, ref_w: f64, ref_h: f64, scale: f64, cache: &ShadowCache) -> Result<(), RenderError> {
+    let (layout, content_w, content_h) = build_text_layout(ctx, text, ref_w);
+    let box_w = content_w + 2.0 * text.padding_x;
+    let box_h = content_h + 2.0 * text.padding_y;
 
     let (box_x, box_y) = text.position.resolve_box_origin(ref_w, ref_h, box_w, box_h);
 
@@ -203,7 +288,7 @@ fn draw_text_element(ctx: &Context, text: &TextElement, ref_w: f64, ref_h: f64, 
 
     let c = text.typography.color;
     ctx.set_source_rgba(c.r, c.g, c.b, c.a * text.typography.opacity.clamp(0.0, 1.0));
-    ctx.move_to(text.background_padding, text.background_padding);
+    ctx.move_to(text.padding_x, text.padding_y);
     pangocairo::functions::show_layout(ctx, &layout);
 
     ctx.restore()?;
@@ -905,24 +990,40 @@ mod tests {
         assert!(just_outside.0 < 0.99, "expected blur to darken the background past the sharp edge, got {just_outside:?}");
     }
 
-    fn text_test_doc(title: crate::model::TextElement) -> Document {
+    /// A document with one screenshot placed exactly at the canvas origin
+    /// (margin/spacing 0, natural size == canvas size), so the screenshot's
+    /// own local coordinate space lines up 1:1 with document space —
+    /// letting these tests use the same absolute coordinates a canvas-wide
+    /// element would have used, while actually exercising a screenshot's
+    /// own label.
+    fn text_test_doc(label: crate::model::TextElement) -> Document {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.title = title;
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 100.0);
+        el.label = label;
+        doc.elements = vec![el];
         doc
     }
 
-    /// A title/label with absolute placement at `(10, 10)`, black text,
-    /// no background/shadow -- the minimal shape most of these tests only
+    fn resolved_for(doc: &Document) -> HashMap<Uuid, ImageSurface> {
+        let mut resolved = HashMap::new();
+        let el = &doc.elements[0];
+        resolved.insert(el.id, solid_surface(el.natural_width as i32, el.natural_height as i32, Rgba::WHITE));
+        resolved
+    }
+
+    /// A label with absolute placement at `(10, 10)`, black text, no
+    /// background/shadow -- the minimal shape most of these tests only
     /// need to vary `content`/`enabled` on.
     fn absolute_title(enabled: bool, content: &str) -> crate::model::TextElement {
         crate::model::TextElement {
             enabled,
             content: content.to_string(),
             position: crate::model::TextPosition::Absolute { x: 10.0, y: 10.0 },
-            typography: crate::model::Typography { font_size: 24.0, color: Rgba::BLACK, ..crate::model::Typography::title_default() },
-            ..crate::model::TextElement::title_default()
+            typography: crate::model::Typography { font_size: 24.0, color: Rgba::BLACK, ..crate::model::Typography::label_default() },
+            ..crate::model::TextElement::label_default()
         }
     }
 
@@ -945,8 +1046,9 @@ mod tests {
     #[test]
     fn disabled_title_draws_nothing() {
         let doc = text_test_doc(absolute_title(false, "Hallo"));
+        let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
 
         assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "a disabled title should draw no ink at all");
     }
@@ -954,8 +1056,9 @@ mod tests {
     #[test]
     fn empty_content_draws_nothing_even_when_enabled() {
         let doc = text_test_doc(absolute_title(true, ""));
+        let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
 
         assert!(!any_ink_in_region(&mut target, 0, 0, 200, 100), "empty content should draw no ink");
     }
@@ -963,8 +1066,9 @@ mod tests {
     #[test]
     fn enabled_title_draws_ink_near_its_position() {
         let doc = text_test_doc(absolute_title(true, "Hallo"));
+        let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
 
         assert!(any_ink_in_region(&mut target, 5, 5, 120, 45), "expected the caption's glyphs somewhere near (10, 10)");
         assert!(!any_ink_in_region(&mut target, 0, 60, 200, 100), "far from the caption, the background should stay untouched");
@@ -984,8 +1088,8 @@ mod tests {
                 vertical: crate::model::VerticalAnchor::Top,
                 padding: 4.0,
             },
-            typography: crate::model::Typography { font_size: 16.0, color: Rgba::BLACK, ..crate::model::Typography::title_default() },
-            ..crate::model::TextElement::title_default()
+            typography: crate::model::Typography { font_size: 16.0, color: Rgba::BLACK, ..crate::model::Typography::label_default() },
+            ..crate::model::TextElement::label_default()
         };
 
         // The 200px-wide canvas's own horizontal center is x=100 — check
@@ -995,16 +1099,22 @@ mod tests {
         let ink_near_x100_at_200_wide = {
             let mut doc = text_test_doc(title.clone());
             doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
+            doc.elements[0].natural_width = 200.0;
+            doc.elements[0].natural_height = 100.0;
+            let resolved = resolved_for(&doc);
             let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-            compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
             any_ink_in_region(&mut target, 70, 0, 130, 40)
         };
 
         let ink_near_x100_at_800_wide = {
             let mut doc = text_test_doc(title);
             doc.canvas = CanvasSettings { export_width: 800, export_height: 100, ..CanvasSettings::default() };
+            doc.elements[0].natural_width = 800.0;
+            doc.elements[0].natural_height = 100.0;
+            let resolved = resolved_for(&doc);
             let mut target = ImageSurface::create(Format::ARgb32, 800, 100).unwrap();
-            compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
             any_ink_in_region(&mut target, 70, 0, 130, 40)
         };
 
@@ -1022,13 +1132,15 @@ mod tests {
             content: "Hi".to_string(),
             position: crate::model::TextPosition::Absolute { x: 20.0, y: 20.0 },
             background: crate::model::TextBackground::Solid(Rgba::new(0.0, 0.0, 1.0, 1.0)),
-            background_padding: 10.0,
-            typography: crate::model::Typography { font_size: 16.0, color: Rgba::WHITE, ..crate::model::Typography::title_default() },
-            ..crate::model::TextElement::title_default()
+            padding_x: 10.0,
+            padding_y: 10.0,
+            typography: crate::model::Typography { font_size: 16.0, color: Rgba::WHITE, ..crate::model::Typography::label_default() },
+            ..crate::model::TextElement::label_default()
         };
         let doc = text_test_doc(title);
+        let resolved = resolved_for(&doc);
         let mut target = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
-        compose(&doc, &target, 1.0, &HashMap::new(), None, &ShadowCache::new()).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
 
         // Just inside the box's padding (before any glyph ink starts),
         // the background's blue fill should show through untouched.
@@ -1069,6 +1181,22 @@ mod tests {
     }
 
     #[test]
+    fn measure_text_box_matches_where_the_label_actually_renders() {
+        let label = crate::model::TextElement {
+            enabled: true,
+            content: "Hi".to_string(),
+            position: crate::model::TextPosition::Absolute { x: 20.0, y: 20.0 },
+            padding_x: 10.0,
+            padding_y: 5.0,
+            typography: crate::model::Typography { font_size: 16.0, ..crate::model::Typography::label_default() },
+            ..crate::model::TextElement::label_default()
+        };
+        let (box_x, box_y, box_w, box_h) = measure_text_box(&label, 200.0, 100.0).unwrap();
+        assert_eq!((box_x, box_y), (20.0, 20.0), "absolute position should be the box's own top-left, unchanged");
+        assert!(box_w > 20.0 && box_h > 10.0, "expected the measured box to be at least as big as its own padding, got {box_w}x{box_h}");
+    }
+
+    #[test]
     fn disabled_screenshot_label_draws_nothing() {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
@@ -1088,5 +1216,72 @@ mod tests {
         // Below the screenshot (where a bottom-anchored label would land
         // if it were somehow enabled) should stay pure background.
         assert!(!any_ink_in_region(&mut target, 50, 150, 150, 200), "a disabled label should draw no ink at all");
+    }
+
+    #[test]
+    fn enabled_callout_draws_a_bubble_and_an_arrow_to_its_target() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
+        doc.background = Background::Solid(Rgba::WHITE);
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+
+        let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0);
+        let mut callout = crate::model::Callout::new_for_width(200.0);
+        callout.text.typography.color = Rgba::BLACK;
+        callout.arrow_color = Rgba::BLACK;
+        callout.target_x = 0.9;
+        callout.target_y = 0.9;
+        el.callouts = vec![callout];
+        let id = el.id;
+        doc.elements = vec![el];
+
+        let mut resolved = HashMap::new();
+        resolved.insert(id, solid_surface(200, 200, Rgba::WHITE));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+
+        // The bubble sits near the top-left corner (its default position).
+        assert!(any_ink_in_region(&mut target, 0, 0, 60, 60), "expected the callout's text bubble near the top-left corner");
+        // The arrow's target is near the bottom-right corner.
+        assert!(any_ink_in_region(&mut target, 170, 170, 190, 190), "expected the arrow to reach near its target point");
+    }
+
+    #[test]
+    fn disabled_callout_draws_nothing() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
+        doc.background = Background::Solid(Rgba::WHITE);
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+
+        let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0);
+        let mut callout = crate::model::Callout::new_for_width(200.0);
+        callout.enabled = false;
+        el.callouts = vec![callout];
+        let id = el.id;
+        doc.elements = vec![el];
+
+        let mut resolved = HashMap::new();
+        resolved.insert(id, solid_surface(200, 200, Rgba::WHITE));
+
+        let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+        compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new()).unwrap();
+
+        assert!(!any_ink_in_region(&mut target, 0, 0, 200, 200), "a disabled callout should draw no ink at all");
+    }
+
+    #[test]
+    fn box_edge_toward_picks_the_side_of_the_box_facing_the_target() {
+        let box_rect = (50.0, 50.0, 100.0, 40.0); // spans x:[50,150], y:[50,90]
+        // Target far to the right, roughly level with the box's own
+        // vertical center -- should land on the box's right edge (x=150).
+        let (x, y) = box_edge_toward(box_rect, (500.0, 70.0));
+        assert!((x - 150.0).abs() < 1e-9, "expected the right edge, got x={x}");
+        assert!((50.0..=90.0).contains(&y));
+
+        // Target straight below -- should land on the box's bottom edge (y=90).
+        let (x, y) = box_edge_toward(box_rect, (100.0, 500.0));
+        assert!((y - 90.0).abs() < 1e-9, "expected the bottom edge, got y={y}");
+        assert!((50.0..=150.0).contains(&x));
     }
 }

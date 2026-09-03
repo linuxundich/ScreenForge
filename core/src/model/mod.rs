@@ -339,28 +339,17 @@ pub struct Typography {
 }
 
 impl Typography {
-    pub fn title_default() -> Self {
-        Self {
-            font_family: "Sans".to_string(),
-            font_size: 32.0,
-            weight: 700,
-            italic: false,
-            color: Rgba::BLACK,
-            alignment: TextAlign::Center,
-            opacity: 1.0,
-            letter_spacing: 0.0,
-            line_spacing: 1.2,
-            wrap: false,
-        }
-    }
-
     pub fn label_default() -> Self {
         Self {
             font_family: "Sans".to_string(),
             font_size: 18.0,
             weight: 700,
             italic: false,
-            color: Rgba::WHITE,
+            // Black, not white -- the label's own default background is a
+            // solid white box (see `TextElement::label_default`), so the
+            // text needs to contrast against *that*, not the screenshot
+            // behind it.
+            color: Rgba::BLACK,
             alignment: TextAlign::Center,
             opacity: 1.0,
             letter_spacing: 0.0,
@@ -383,13 +372,11 @@ pub enum TextBackground {
     Gradient(GradientSpec),
 }
 
-/// A reusable text/label object (spec: composition title and per-screenshot
-/// labels share this one shape rather than being separate hard-coded draw
-/// calls). Two positioning *contexts* reuse the same type: a
-/// canvas-relative title lives on [`Document`], a screenshot-relative
-/// label lives on [`ScreenshotElement`] — which reference rect
-/// `position`/`shadow` resolve against is entirely up to the caller
-/// (`core::render`), not encoded in this struct itself.
+/// A reusable text/label object — every screenshot's own [`TextElement`]
+/// label (see [`ScreenshotElement::label`]) shares this one shape rather
+/// than a bespoke hard-coded draw call. `position`/`shadow` resolve against
+/// whatever reference rect the caller (`core::render`) passes in — for a
+/// label, that's its own screenshot's placement rect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextElement {
     pub enabled: bool,
@@ -400,24 +387,26 @@ pub struct TextElement {
     pub corner_radius: CornerRadius,
     /// Padding, in pixels, between the background box's own edge and the
     /// text inside it — distinct from `TextPosition::Semantic`'s
-    /// `padding`, which is the gap between the box and the canvas/
-    /// screenshot edge.
-    pub background_padding: f64,
+    /// `padding`, which is the gap between the box and the screenshot's own
+    /// edge. Kept as separate horizontal/vertical fields (rather than one
+    /// uniform value) so a label can be, say, wide and flat or narrow and
+    /// tall independent of its text size.
+    ///
+    /// `#[serde(default = "..")]` so a project saved before this field
+    /// split still loads; `crate::project::load` additionally migrates the
+    /// old single `background_padding` value into both fields before
+    /// typed deserialization ever sees it, so an existing label's padding
+    /// isn't silently reset to the default.
+    #[serde(default = "TextElement::default_padding")]
+    pub padding_x: f64,
+    #[serde(default = "TextElement::default_padding")]
+    pub padding_y: f64,
     pub shadow: ShadowParams,
 }
 
 impl TextElement {
-    pub fn title_default() -> Self {
-        Self {
-            enabled: false,
-            content: String::new(),
-            position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 32.0 },
-            typography: Typography::title_default(),
-            background: TextBackground::None,
-            corner_radius: CornerRadius::none(),
-            background_padding: 16.0,
-            shadow: ShadowParams::none(),
-        }
+    fn default_padding() -> f64 {
+        8.0
     }
 
     pub fn label_default() -> Self {
@@ -426,10 +415,32 @@ impl TextElement {
             content: String::new(),
             position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Bottom, padding: 16.0 },
             typography: Typography::label_default(),
-            background: TextBackground::None,
+            background: TextBackground::Solid(Rgba::WHITE),
             corner_radius: CornerRadius::none(),
-            background_padding: 8.0,
+            padding_x: 8.0,
+            padding_y: 8.0,
             shadow: ShadowParams::none(),
+        }
+    }
+
+    /// A label sized proportionally to its own screenshot's width, for a
+    /// freshly imported screenshot (see `ScreenshotElement::new`) — a fixed
+    /// pixel size looked comically oversized on a small screenshot and
+    /// near-invisible on a large one, since screenshots imported side by
+    /// side can span anything from a phone thumbnail to a 4K capture.
+    /// Padding and the screenshot-edge margin scale off the resulting font
+    /// size (not `width` directly a second time), so they stay in the same
+    /// visual proportion to the text at every size rather than needing
+    /// their own separate tuning.
+    pub fn label_default_for_width(width: f64) -> Self {
+        let font_size = (width * 0.03).clamp(12.0, 64.0);
+        let padding = (font_size * 0.45).clamp(4.0, 32.0);
+        Self {
+            position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Bottom, padding },
+            typography: Typography { font_size, ..Typography::label_default() },
+            padding_x: padding,
+            padding_y: padding,
+            ..Self::label_default()
         }
     }
 
@@ -444,6 +455,52 @@ impl TextElement {
             TextPosition::Absolute { .. } => ref_w.max(1.0),
             TextPosition::Semantic { padding, .. } => (ref_w - 2.0 * padding).max(1.0),
         }
+    }
+}
+
+/// A "look, feature X" callout (spec: "Callouts/Feature-Hinweise") — a text
+/// bubble with an arrow pointing at a specific spot inside its own
+/// screenshot. Unlike `ScreenshotElement::label` (exactly one, or none),
+/// a screenshot can carry any number of these, so each needs its own
+/// stable `id` for undo commands and canvas hit-testing to address it by,
+/// the same way `ScreenshotElement.id` addresses an element.
+///
+/// Reuses `TextElement` for the bubble itself (position, background,
+/// typography, corner radius, padding, shadow — spec's "Textmarker" half)
+/// rather than inventing a parallel type; only the arrow itself (spec's
+/// "Pfeile" half) is new here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Callout {
+    pub id: Uuid,
+    pub enabled: bool,
+    pub text: TextElement,
+    /// The point the arrow points at, as a fraction (`0.0..=1.0`) of the
+    /// screenshot's own current placement — not an absolute pixel offset,
+    /// so the arrow keeps pointing at the same *content* (e.g. a specific
+    /// button) when the screenshot is later resized, the same way
+    /// `GradientKind::Radial`'s `center_x`/`center_y` track a resized
+    /// canvas rather than staying at a stale pixel.
+    pub target_x: f64,
+    pub target_y: f64,
+    pub arrow_color: Rgba,
+    pub arrow_width: f64,
+}
+
+impl Callout {
+    /// A new callout pointing at its screenshot's own center, with a text
+    /// bubble placed near the top-left corner — a sensible, always-visible
+    /// starting point the user then drags into place, rather than
+    /// something requiring a dialog to configure before it can be seen.
+    pub fn new_for_width(width: f64) -> Self {
+        let mut text = TextElement::label_default_for_width(width);
+        text.enabled = true;
+        text.content = "Feature".to_string();
+        let padding = match text.position {
+            TextPosition::Semantic { padding, .. } => padding,
+            TextPosition::Absolute { .. } => 16.0,
+        };
+        text.position = TextPosition::Semantic { horizontal: HorizontalAnchor::Left, vertical: VerticalAnchor::Top, padding };
+        Self { id: Uuid::new_v4(), enabled: true, text, target_x: 0.5, target_y: 0.5, arrow_color: Rgba::BLACK, arrow_width: (width * 0.004).clamp(1.5, 6.0) }
     }
 }
 
@@ -467,6 +524,12 @@ pub struct ScreenshotElement {
     /// existing screenshot getting a disabled default label.
     #[serde(default = "TextElement::label_default")]
     pub label: TextElement,
+    /// "Look, feature X" callouts (spec: "Callouts/Feature-Hinweise") —
+    /// any number, unlike the singular `label`. `#[serde(default)]` so a
+    /// project saved before callouts existed still loads, with none on
+    /// any existing screenshot.
+    #[serde(default)]
+    pub callouts: Vec<Callout>,
     pub visible: bool,
 }
 
@@ -480,7 +543,8 @@ impl ScreenshotElement {
             transform: Transform::default(),
             corner_radius: CornerRadius::default(),
             shadow: ShadowParams::default(),
-            label: TextElement::label_default(),
+            label: TextElement::label_default_for_width(natural_width),
+            callouts: Vec::new(),
             visible: true,
         }
     }
@@ -736,15 +800,6 @@ pub struct Document {
     pub layout: LayoutSettings,
     pub background: Background,
     pub canvas: CanvasSettings,
-    /// The composition-wide title (spec §5) — canvas-relative; see
-    /// [`ScreenshotElement::label`] for the screenshot-relative kind.
-    /// `#[serde(default)]` so a project saved before titles existed, or
-    /// one saved with the older single-purpose `TextOverlay`, still loads
-    /// (with no title rather than a load error — the older overlay's
-    /// content isn't migrated, since its shape doesn't map cleanly onto
-    /// `TextElement`'s).
-    #[serde(default = "TextElement::title_default")]
-    pub title: TextElement,
 }
 
 impl Document {
@@ -755,7 +810,6 @@ impl Document {
             layout: LayoutSettings::default(),
             background: Background::default(),
             canvas: CanvasSettings::default(),
-            title: TextElement::title_default(),
         }
     }
 }
@@ -945,13 +999,13 @@ mod tests {
 
     #[test]
     fn wrap_width_is_bounded_by_semantic_padding_on_both_sides() {
-        let el = TextElement { position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 50.0 }, ..TextElement::title_default() };
+        let el = TextElement { position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: 50.0 }, ..TextElement::label_default() };
         assert_eq!(el.wrap_width(1000.0), 900.0);
     }
 
     #[test]
     fn wrap_width_for_absolute_position_falls_back_to_the_full_reference_width() {
-        let el = TextElement { position: TextPosition::Absolute { x: 10.0, y: 10.0 }, ..TextElement::title_default() };
+        let el = TextElement { position: TextPosition::Absolute { x: 10.0, y: 10.0 }, ..TextElement::label_default() };
         assert_eq!(el.wrap_width(1000.0), 1000.0);
     }
 
@@ -963,8 +1017,19 @@ mod tests {
     }
 
     #[test]
-    fn document_gets_a_disabled_default_title() {
-        let doc = Document::new();
-        assert!(!doc.title.enabled);
+    fn a_wider_screenshot_gets_a_larger_default_label_font_and_padding() {
+        let narrow = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("a.png")), 360.0, 720.0);
+        let wide = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("b.png")), 2160.0, 3840.0);
+        assert!(wide.label.typography.font_size > narrow.label.typography.font_size);
+        assert!(wide.label.padding_x > narrow.label.padding_x);
+        assert!(wide.label.padding_y > narrow.label.padding_y);
+    }
+
+    #[test]
+    fn default_label_font_size_stays_within_sane_bounds_at_extreme_widths() {
+        let tiny = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("a.png")), 1.0, 1.0);
+        let huge = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("b.png")), 100_000.0, 100_000.0);
+        assert!(tiny.label.typography.font_size >= 12.0);
+        assert!(huge.label.typography.font_size <= 64.0);
     }
 }

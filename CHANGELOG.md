@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-03
+
+### Added
+
+- Callouts ("Feature-Hinweise"): add any number of "look, feature X" text
+  bubbles with an arrow to a screenshot, each editable inline in the
+  sidebar — text, background/text color, corner radius, arrow color and
+  width — with no dialog. Drag the bubble and its arrow's target
+  independently on the canvas; the target is stored relative to the
+  screenshot, so it keeps pointing at the same spot if the screenshot is
+  later resized.
+
+### Changed
+
+- Replaced the single composition-wide "Titel" with a "Label" per
+  screenshot: select a screenshot to show and edit its own label
+  directly in the sidebar (no dialog), with independent text,
+  background (solid, gradient, or a contrast-aware "Automatisch"
+  suggestion derived from that screenshot's own colors — never by
+  raising saturation), font, text color/alignment, corner radius,
+  separate horizontal/vertical padding, and an optional shadow. Drag the
+  label freely on the canvas in any layout mode; its position is stored
+  relative to its own screenshot, so it stays put through moves,
+  resizes and layout changes.
+- A newly imported screenshot's default label now scales its font size
+  and padding to the screenshot's own width, and starts with a solid
+  white background, instead of a fixed small size with no background
+  that could look mismatched across very different screenshot sizes.
+
+### Removed
+
+- The composition-wide "Titel" feature (`Document.title`) — replaced by
+  the per-screenshot Label above. Old project files with a saved title
+  still load; the title text itself doesn't carry over.
+
 ## [0.21.0] - 2026-09-03
 
 ### Changed

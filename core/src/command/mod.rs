@@ -9,7 +9,10 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use crate::model::{Background, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextElement, Transform};
+use crate::model::{
+    Background, Callout, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextElement,
+    Transform,
+};
 
 /// A single reversible mutation of a [`Document`]. Implementations should
 /// store enough state to invert themselves cheaply (e.g. the old and new
@@ -436,24 +439,6 @@ impl Command for SetCornerRadiusForAllElements {
     }
 }
 
-/// Sets the composition-wide title (spec §5) — canvas-relative; see
-/// [`SetScreenshotLabel`] for the screenshot-relative kind.
-#[derive(Debug)]
-pub struct SetTitle {
-    pub old: TextElement,
-    pub new: TextElement,
-}
-
-impl Command for SetTitle {
-    fn apply(&self, doc: &mut Document) {
-        doc.title = self.new.clone();
-    }
-
-    fn undo(&self, doc: &mut Document) {
-        doc.title = self.old.clone();
-    }
-}
-
 /// Sets one screenshot's own label (spec §11) — looked up by id like
 /// [`SetTransform`], since a label edit always targets whichever specific
 /// element is selected, not "every element" the way shadow/corner-radius
@@ -475,6 +460,85 @@ impl Command for SetScreenshotLabel {
     fn undo(&self, doc: &mut Document) {
         if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
             element.label = self.old.clone();
+        }
+    }
+}
+
+/// Appends one new callout to a screenshot (spec: "Callouts/Feature-
+/// Hinweise"). Undo removes it by its own `id`, safe even if more callouts
+/// were added or reordered on the same screenshot in between.
+#[derive(Debug)]
+pub struct AddCallout {
+    pub element_id: Uuid,
+    pub callout: Callout,
+}
+
+impl Command for AddCallout {
+    fn apply(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.callouts.push(self.callout.clone());
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.callouts.retain(|c| c.id != self.callout.id);
+        }
+    }
+}
+
+/// Removes one callout from a screenshot. Keeps its original index so undo
+/// can restore it exactly where it was, mirroring [`RemoveScreenshot`].
+#[derive(Debug)]
+pub struct RemoveCallout {
+    pub element_id: Uuid,
+    pub index: usize,
+    pub callout: Callout,
+}
+
+impl Command for RemoveCallout {
+    fn apply(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            if self.index < element.callouts.len() {
+                element.callouts.remove(self.index);
+            }
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            let index = self.index.min(element.callouts.len());
+            element.callouts.insert(index, self.callout.clone());
+        }
+    }
+}
+
+/// Changes one existing callout in place — looked up by its own `id` (not
+/// index) within its screenshot's `callouts`, the same way
+/// [`SetScreenshotLabel`] looks up its screenshot by id rather than
+/// position.
+#[derive(Debug)]
+pub struct SetCallout {
+    pub element_id: Uuid,
+    pub callout_id: Uuid,
+    pub old: Callout,
+    pub new: Callout,
+}
+
+impl Command for SetCallout {
+    fn apply(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            if let Some(callout) = element.callouts.iter_mut().find(|c| c.id == self.callout_id) {
+                *callout = self.new.clone();
+            }
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            if let Some(callout) = element.callouts.iter_mut().find(|c| c.id == self.callout_id) {
+                *callout = self.old.clone();
+            }
         }
     }
 }
@@ -931,5 +995,68 @@ mod tests {
         stack.undo(&mut doc);
         assert_eq!(doc.elements[0].transform, old0);
         assert_eq!(doc.elements[1].transform, old1);
+    }
+
+    #[test]
+    fn add_callout_appends_it_and_undo_removes_exactly_that_one() {
+        let mut doc = Document::new();
+        doc.elements = vec![ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0)];
+        let element_id = doc.elements[0].id;
+        let callout = crate::model::Callout::new_for_width(200.0);
+        let callout_id = callout.id;
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(AddCallout { element_id, callout }), &mut doc);
+        assert_eq!(doc.elements[0].callouts.len(), 1);
+        assert_eq!(doc.elements[0].callouts[0].id, callout_id);
+
+        stack.undo(&mut doc);
+        assert!(doc.elements[0].callouts.is_empty());
+
+        stack.redo(&mut doc);
+        assert_eq!(doc.elements[0].callouts.len(), 1);
+    }
+
+    #[test]
+    fn remove_callout_restores_it_at_its_original_index() {
+        let mut doc = Document::new();
+        doc.elements = vec![ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0)];
+        let element_id = doc.elements[0].id;
+        let first = crate::model::Callout::new_for_width(200.0);
+        let second = crate::model::Callout::new_for_width(200.0);
+        let (first_id, second_id) = (first.id, second.id);
+        doc.elements[0].callouts = vec![first, second.clone()];
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(RemoveCallout { element_id, index: 0, callout: doc.elements[0].callouts[0].clone() }), &mut doc);
+        assert_eq!(doc.elements[0].callouts.len(), 1);
+        assert_eq!(doc.elements[0].callouts[0].id, second_id);
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.elements[0].callouts.len(), 2);
+        assert_eq!(doc.elements[0].callouts[0].id, first_id);
+        assert_eq!(doc.elements[0].callouts[1].id, second_id);
+    }
+
+    #[test]
+    fn set_callout_updates_the_matching_callout_by_id_and_undoes_cleanly() {
+        let mut doc = Document::new();
+        doc.elements = vec![ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0)];
+        let element_id = doc.elements[0].id;
+        let old = crate::model::Callout::new_for_width(200.0);
+        let callout_id = old.id;
+        doc.elements[0].callouts = vec![old.clone()];
+
+        let mut new = old.clone();
+        new.text.content = "Neuer Text".to_string();
+        new.target_x = 0.1;
+
+        let mut stack = UndoStack::new();
+        stack.apply(Box::new(SetCallout { element_id, callout_id, old: old.clone(), new: new.clone() }), &mut doc);
+        assert_eq!(doc.elements[0].callouts[0].text.content, "Neuer Text");
+        assert_eq!(doc.elements[0].callouts[0].target_x, 0.1);
+
+        stack.undo(&mut doc);
+        assert_eq!(doc.elements[0].callouts[0], old);
     }
 }

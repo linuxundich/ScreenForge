@@ -232,108 +232,128 @@ impl Window {
         self.imp().corner_radius_row.get().clone()
     }
 
-    pub fn title_enabled_row(&self) -> adw::SwitchRow {
-        self.imp().title_enabled_row.get().clone()
+    pub fn label_group(&self) -> adw::PreferencesGroup {
+        self.imp().label_group.get().clone()
     }
 
-    pub fn title_content_row(&self) -> adw::EntryRow {
-        self.imp().title_content_row.get().clone()
+    pub fn callouts_group(&self) -> adw::PreferencesGroup {
+        self.imp().callouts_group.get().clone()
     }
 
-    pub fn title_position_mode_row(&self) -> adw::ComboRow {
-        self.imp().title_position_mode_row.get().clone()
+    pub fn callouts_list_box(&self) -> gtk4::ListBox {
+        self.imp().callouts_list_box.get().clone()
     }
 
-    pub fn title_horizontal_row(&self) -> adw::ComboRow {
-        self.imp().title_horizontal_row.get().clone()
+    pub fn add_callout_button(&self) -> gtk4::Button {
+        self.imp().add_callout_button.get().clone()
     }
 
-    pub fn title_vertical_row(&self) -> adw::ComboRow {
-        self.imp().title_vertical_row.get().clone()
+    pub fn label_enabled_row(&self) -> adw::SwitchRow {
+        self.imp().label_enabled_row.get().clone()
     }
 
-    pub fn title_padding_row(&self) -> adw::SpinRow {
-        self.imp().title_padding_row.get().clone()
+    pub fn label_content_row(&self) -> adw::EntryRow {
+        self.imp().label_content_row.get().clone()
     }
 
-    pub fn title_x_row(&self) -> adw::SpinRow {
-        self.imp().title_x_row.get().clone()
+    pub fn label_position_mode_row(&self) -> adw::ComboRow {
+        self.imp().label_position_mode_row.get().clone()
     }
 
-    pub fn title_y_row(&self) -> adw::SpinRow {
-        self.imp().title_y_row.get().clone()
+    pub fn label_horizontal_row(&self) -> adw::ComboRow {
+        self.imp().label_horizontal_row.get().clone()
     }
 
-    pub fn title_background_row(&self) -> adw::ComboRow {
-        self.imp().title_background_row.get().clone()
+    pub fn label_vertical_row(&self) -> adw::ComboRow {
+        self.imp().label_vertical_row.get().clone()
     }
 
-    pub fn title_background_color_row(&self) -> adw::ActionRow {
-        self.imp().title_background_color_row.get().clone()
+    pub fn label_padding_row(&self) -> adw::SpinRow {
+        self.imp().label_padding_row.get().clone()
     }
 
-    pub fn title_background_color_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().title_background_color_button.get().clone()
+    pub fn label_x_row(&self) -> adw::SpinRow {
+        self.imp().label_x_row.get().clone()
     }
 
-    pub fn title_background_color2_row(&self) -> adw::ActionRow {
-        self.imp().title_background_color2_row.get().clone()
+    pub fn label_y_row(&self) -> adw::SpinRow {
+        self.imp().label_y_row.get().clone()
     }
 
-    pub fn title_background_color2_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().title_background_color2_button.get().clone()
+    pub fn label_background_row(&self) -> adw::ComboRow {
+        self.imp().label_background_row.get().clone()
     }
 
-    pub fn title_corner_radius_row(&self) -> adw::SpinRow {
-        self.imp().title_corner_radius_row.get().clone()
+    pub fn label_background_color_row(&self) -> adw::ActionRow {
+        self.imp().label_background_color_row.get().clone()
     }
 
-    pub fn title_font_row(&self) -> adw::ActionRow {
-        self.imp().title_font_row.get().clone()
+    pub fn label_background_color_button(&self) -> gtk4::ColorDialogButton {
+        self.imp().label_background_color_button.get().clone()
     }
 
-    pub fn title_font_button(&self) -> gtk4::FontDialogButton {
-        self.imp().title_font_button.get().clone()
+    pub fn label_background_auto_button(&self) -> gtk4::Button {
+        self.imp().label_background_auto_button.get().clone()
     }
 
-    pub fn title_alignment_row(&self) -> adw::ComboRow {
-        self.imp().title_alignment_row.get().clone()
+    pub fn label_background_color2_row(&self) -> adw::ActionRow {
+        self.imp().label_background_color2_row.get().clone()
     }
 
-    pub fn title_letter_spacing_row(&self) -> adw::SpinRow {
-        self.imp().title_letter_spacing_row.get().clone()
+    pub fn label_background_color2_button(&self) -> gtk4::ColorDialogButton {
+        self.imp().label_background_color2_button.get().clone()
     }
 
-    pub fn title_line_spacing_row(&self) -> adw::SpinRow {
-        self.imp().title_line_spacing_row.get().clone()
+    pub fn label_corner_radius_row(&self) -> adw::SpinRow {
+        self.imp().label_corner_radius_row.get().clone()
     }
 
-    pub fn title_color_row(&self) -> adw::ActionRow {
-        self.imp().title_color_row.get().clone()
+    pub fn label_padding_x_row(&self) -> adw::SpinRow {
+        self.imp().label_padding_x_row.get().clone()
     }
 
-    pub fn title_color_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().title_color_button.get().clone()
+    pub fn label_padding_y_row(&self) -> adw::SpinRow {
+        self.imp().label_padding_y_row.get().clone()
     }
 
-    pub fn title_opacity_row(&self) -> adw::SpinRow {
-        self.imp().title_opacity_row.get().clone()
+    pub fn label_font_row(&self) -> adw::ActionRow {
+        self.imp().label_font_row.get().clone()
     }
 
-    pub fn title_shadow_row(&self) -> adw::ComboRow {
-        self.imp().title_shadow_row.get().clone()
+    pub fn label_font_button(&self) -> gtk4::FontDialogButton {
+        self.imp().label_font_button.get().clone()
     }
 
-    pub fn title_shadow_angle_row(&self) -> adw::SpinRow {
-        self.imp().title_shadow_angle_row.get().clone()
+    pub fn label_alignment_row(&self) -> adw::ComboRow {
+        self.imp().label_alignment_row.get().clone()
     }
 
-    pub fn title_shadow_distance_row(&self) -> adw::SpinRow {
-        self.imp().title_shadow_distance_row.get().clone()
+    pub fn label_color_row(&self) -> adw::ActionRow {
+        self.imp().label_color_row.get().clone()
     }
 
-    pub fn title_shadow_blur_row(&self) -> adw::SpinRow {
-        self.imp().title_shadow_blur_row.get().clone()
+    pub fn label_color_button(&self) -> gtk4::ColorDialogButton {
+        self.imp().label_color_button.get().clone()
+    }
+
+    pub fn label_opacity_row(&self) -> adw::SpinRow {
+        self.imp().label_opacity_row.get().clone()
+    }
+
+    pub fn label_shadow_row(&self) -> adw::ComboRow {
+        self.imp().label_shadow_row.get().clone()
+    }
+
+    pub fn label_shadow_angle_row(&self) -> adw::SpinRow {
+        self.imp().label_shadow_angle_row.get().clone()
+    }
+
+    pub fn label_shadow_distance_row(&self) -> adw::SpinRow {
+        self.imp().label_shadow_distance_row.get().clone()
+    }
+
+    pub fn label_shadow_blur_row(&self) -> adw::SpinRow {
+        self.imp().label_shadow_blur_row.get().clone()
     }
 
     pub fn export_width_row(&self) -> adw::SpinRow {
@@ -487,57 +507,67 @@ mod imp {
         #[template_child]
         pub corner_radius_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_enabled_row: TemplateChild<adw::SwitchRow>,
+        pub label_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub title_content_row: TemplateChild<adw::EntryRow>,
+        pub callouts_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub title_position_mode_row: TemplateChild<adw::ComboRow>,
+        pub callouts_list_box: TemplateChild<gtk4::ListBox>,
         #[template_child]
-        pub title_horizontal_row: TemplateChild<adw::ComboRow>,
+        pub add_callout_button: TemplateChild<gtk4::Button>,
         #[template_child]
-        pub title_vertical_row: TemplateChild<adw::ComboRow>,
+        pub label_enabled_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub title_padding_row: TemplateChild<adw::SpinRow>,
+        pub label_content_row: TemplateChild<adw::EntryRow>,
         #[template_child]
-        pub title_x_row: TemplateChild<adw::SpinRow>,
+        pub label_position_mode_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub title_y_row: TemplateChild<adw::SpinRow>,
+        pub label_horizontal_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub title_background_row: TemplateChild<adw::ComboRow>,
+        pub label_vertical_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub title_background_color_row: TemplateChild<adw::ActionRow>,
+        pub label_padding_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_background_color_button: TemplateChild<gtk4::ColorDialogButton>,
+        pub label_x_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_background_color2_row: TemplateChild<adw::ActionRow>,
+        pub label_y_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_background_color2_button: TemplateChild<gtk4::ColorDialogButton>,
+        pub label_background_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub title_corner_radius_row: TemplateChild<adw::SpinRow>,
+        pub label_background_color_row: TemplateChild<adw::ActionRow>,
         #[template_child]
-        pub title_font_row: TemplateChild<adw::ActionRow>,
+        pub label_background_color_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
-        pub title_font_button: TemplateChild<gtk4::FontDialogButton>,
+        pub label_background_auto_button: TemplateChild<gtk4::Button>,
         #[template_child]
-        pub title_alignment_row: TemplateChild<adw::ComboRow>,
+        pub label_background_color2_row: TemplateChild<adw::ActionRow>,
         #[template_child]
-        pub title_letter_spacing_row: TemplateChild<adw::SpinRow>,
+        pub label_background_color2_button: TemplateChild<gtk4::ColorDialogButton>,
         #[template_child]
-        pub title_line_spacing_row: TemplateChild<adw::SpinRow>,
+        pub label_corner_radius_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_color_row: TemplateChild<adw::ActionRow>,
+        pub label_padding_x_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_color_button: TemplateChild<gtk4::ColorDialogButton>,
+        pub label_padding_y_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub title_opacity_row: TemplateChild<adw::SpinRow>,
+        pub label_font_row: TemplateChild<adw::ActionRow>,
         #[template_child]
-        pub title_shadow_row: TemplateChild<adw::ComboRow>,
+        pub label_font_button: TemplateChild<gtk4::FontDialogButton>,
         #[template_child]
-        pub title_shadow_angle_row: TemplateChild<adw::SpinRow>,
+        pub label_alignment_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub title_shadow_distance_row: TemplateChild<adw::SpinRow>,
+        pub label_color_row: TemplateChild<adw::ActionRow>,
         #[template_child]
-        pub title_shadow_blur_row: TemplateChild<adw::SpinRow>,
+        pub label_color_button: TemplateChild<gtk4::ColorDialogButton>,
+        #[template_child]
+        pub label_opacity_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub label_shadow_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub label_shadow_angle_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub label_shadow_distance_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub label_shadow_blur_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub export_width_row: TemplateChild<adw::SpinRow>,
         #[template_child]

@@ -113,6 +113,43 @@ impl Canvas {
     pub fn sample_color_at(&self, wx: f64, wy: f64) -> Option<screenforge_core::model::Rgba> {
         self.imp().sample_color_at(wx, wy)
     }
+
+    /// Called whenever the set of selected elements changes — a click, a
+    /// Shift-click, or a marquee drag (spec §5), including a click on empty
+    /// canvas space that clears it. Carries no payload; a handler reads the
+    /// new selection back via [`Canvas::selected_ids`], since it needs the
+    /// full document lookup anyway to decide what to show (e.g. a single
+    /// screenshot's own Label sidebar panel).
+    pub fn connect_selection_changed<F: Fn() + 'static>(&self, f: F) {
+        self.imp().set_selection_callback(f);
+    }
+
+    /// Called at the end of a drag that moved a screenshot's own label
+    /// (element id, new position — always `TextPosition::Absolute`,
+    /// screenshot-local, since a manual drag always ends in manual
+    /// placement). Never fires for a drag that starts on empty canvas
+    /// space or ends back where it started. Works in every layout mode,
+    /// not just Free — a label's position is always relative to its own
+    /// screenshot regardless of how the screenshots themselves are
+    /// arranged.
+    pub fn connect_label_move<F: Fn(Uuid, screenforge_core::model::TextPosition) + 'static>(&self, f: F) {
+        self.imp().set_label_move_callback(f);
+    }
+
+    /// Called at the end of a drag that moved a callout's own text bubble
+    /// (screenshot id, callout id, new position — always
+    /// `TextPosition::Absolute`, screenshot-local). Mirrors
+    /// `connect_label_move`; works in every layout mode.
+    pub fn connect_callout_box_move<F: Fn(Uuid, Uuid, screenforge_core::model::TextPosition) + 'static>(&self, f: F) {
+        self.imp().set_callout_box_move_callback(f);
+    }
+
+    /// Called at the end of a drag that moved a callout's own arrow target
+    /// (screenshot id, callout id, new `target_x`/`target_y` fractions of
+    /// the screenshot's own placement). Works in every layout mode.
+    pub fn connect_callout_target_move<F: Fn(Uuid, Uuid, f64, f64) + 'static>(&self, f: F) {
+        self.imp().set_callout_target_move_callback(f);
+    }
 }
 
 impl Default for Canvas {
@@ -124,6 +161,7 @@ impl Default for Canvas {
 mod imp {
     use std::cell::{Cell, RefCell};
     use std::collections::{HashMap, HashSet};
+    use std::f64::consts::PI;
 
     use gtk4::cairo;
     use gtk4::gdk;
@@ -132,7 +170,7 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::{Corner, Document, LayoutMode, Rgba, Transform};
+    use screenforge_core::model::{Corner, Document, LayoutMode, Rgba, TextPosition, Transform};
     use screenforge_core::snap::{self, Guide};
     use uuid::Uuid;
 
@@ -140,6 +178,10 @@ mod imp {
     type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
     type MoveCallback = Box<dyn Fn(Vec<(Uuid, f64, f64)>)>;
     type ResizeCallback = Box<dyn Fn(usize, Transform)>;
+    type SelectionCallback = Box<dyn Fn()>;
+    type LabelMoveCallback = Box<dyn Fn(Uuid, TextPosition)>;
+    type CalloutBoxMoveCallback = Box<dyn Fn(Uuid, Uuid, TextPosition)>;
+    type CalloutTargetMoveCallback = Box<dyn Fn(Uuid, Uuid, f64, f64)>;
     /// `(drag-start point, moved elements' own (id, original x, original y))`
     /// — one entry per element for a multi-selection group move, or a
     /// single entry for an ordinary single-element move.
@@ -147,6 +189,47 @@ mod imp {
     /// `(corner grabbed, dragged element's original transform, drag-start
     /// point in document space)`.
     type ResizeDragOrigin = (Corner, Transform, (f64, f64));
+    /// `(dragged element's index, drag-start point in document space,
+    /// label's own screenshot-local box origin at drag start)` — mirrors
+    /// `MoveDragOrigin`'s shape, but for a screenshot's label rather than
+    /// the screenshot itself, and always a single element (a label can't
+    /// be part of a multi-selection group move).
+    type LabelDragOrigin = (usize, (f64, f64), (f64, f64));
+
+    /// Which part of a callout a drag grabbed: its text bubble (behaves
+    /// exactly like a label drag) or its arrow's target point (stored as a
+    /// fraction of the screenshot's own placement — see
+    /// `Callout::target_x`/`target_y`).
+    #[derive(Debug, Clone, Copy)]
+    enum CalloutDragKind {
+        Box { local_origin: (f64, f64) },
+        Target { start_fraction: (f64, f64) },
+    }
+
+    /// `(index into `last_callout_placements`, drag-start point in document
+    /// space, which part was grabbed)`.
+    type CalloutDragOrigin = (usize, (f64, f64), CalloutDragKind);
+
+    /// One callout's hit-testable geometry from the last render, in its own
+    /// screenshot's local space (matching `last_label_placements`'
+    /// convention) — flat across every visible screenshot's callouts
+    /// together, since hit-testing scans all of them regardless of which
+    /// screenshot they belong to.
+    #[derive(Debug, Clone, Copy)]
+    struct CalloutPlacement {
+        element_index: usize,
+        callout_id: Uuid,
+        box_rect: (f64, f64, f64, f64),
+        target: (f64, f64),
+    }
+
+    /// How close (in *screen* pixels, regardless of zoom) a press has to
+    /// land to a callout's arrow target to grab that instead of its text
+    /// bubble.
+    const CALLOUT_TARGET_HIT_RADIUS_PX: f64 = 10.0;
+    /// Radius (in *screen* pixels) of the small handle `snapshot()` draws
+    /// at each callout's arrow target, so it reads as grabbable.
+    const CALLOUT_TARGET_DRAW_RADIUS_PX: f64 = 5.0;
 
     /// How close (in *screen* pixels, regardless of zoom) a press has to
     /// land to a Free-mode element's corner to grab it for resizing rather
@@ -187,6 +270,18 @@ mod imp {
         /// index alongside each placement instead of relying on them lining
         /// up positionally).
         last_placements: RefCell<Vec<Placement>>,
+        /// Each visible element's own label box, in that element's
+        /// screenshot-local space (i.e. *not* yet offset by the element's
+        /// own placement) — `None` where the label is disabled/empty.
+        /// Index-aligned with `last_placements`. Kept local-space (rather
+        /// than pre-offset into document space) since a label drag needs
+        /// exactly this local origin to build its new
+        /// `TextPosition::Absolute`.
+        last_label_placements: RefCell<Vec<Option<(f64, f64, f64, f64)>>>,
+        /// Every visible screenshot's enabled, non-empty callouts from the
+        /// last render, flat (not index-aligned with `last_placements`) —
+        /// see `CalloutPlacement`.
+        last_callout_placements: RefCell<Vec<CalloutPlacement>>,
         last_scale: Cell<f64>,
         /// Index into `last_placements`/`Document.elements` the current
         /// reorder drag picked up, if any.
@@ -209,6 +304,18 @@ mod imp {
         /// checked first, so grabbing near a corner always resizes rather
         /// than moves.
         resize_drag_origin: Cell<Option<ResizeDragOrigin>>,
+        /// Set instead of `move_drag_origin`/`resize_drag_origin` when the
+        /// drag that picked up `drag_from` grabbed a screenshot's own
+        /// label rather than the screenshot itself — checked first in
+        /// `on_drag_begin`, in every layout mode, since a label's position
+        /// is always screenshot-local regardless of how the screenshots
+        /// themselves are arranged.
+        label_drag_origin: Cell<Option<LabelDragOrigin>>,
+        /// Set instead of every other drag-origin slot when the drag that
+        /// picked up `drag_from` grabbed a callout's text bubble or its
+        /// arrow target — checked before the label and before the
+        /// screenshot itself, in every layout mode.
+        callout_drag_origin: Cell<Option<CalloutDragOrigin>>,
         /// Alignment guides from the current Free-mode move drag, drawn by
         /// `snapshot()`; empty outside of a move drag that's actually
         /// snapped to something. Only a single-element move snaps — a
@@ -232,6 +339,10 @@ mod imp {
         context_menu_callback: RefCell<Option<ContextMenuCallback>>,
         move_callback: RefCell<Option<MoveCallback>>,
         resize_callback: RefCell<Option<ResizeCallback>>,
+        selection_callback: RefCell<Option<SelectionCallback>>,
+        label_move_callback: RefCell<Option<LabelMoveCallback>>,
+        callout_box_move_callback: RefCell<Option<CalloutBoxMoveCallback>>,
+        callout_target_move_callback: RefCell<Option<CalloutTargetMoveCallback>>,
     }
 
     impl Default for Canvas {
@@ -246,11 +357,15 @@ mod imp {
                 drag_active: Cell::new(false),
                 manual_zoom: Cell::new(None),
                 last_placements: RefCell::new(Vec::new()),
+                last_label_placements: RefCell::new(Vec::new()),
+                last_callout_placements: RefCell::new(Vec::new()),
                 last_scale: Cell::new(1.0),
                 drag_from: Cell::new(None),
                 drag_hover: Cell::new(None),
                 move_drag_origin: RefCell::new(None),
                 resize_drag_origin: Cell::new(None),
+                label_drag_origin: Cell::new(None),
+                callout_drag_origin: Cell::new(None),
                 active_guides: RefCell::new(Vec::new()),
                 selected: RefCell::new(HashSet::new()),
                 marquee_start: Cell::new(None),
@@ -260,6 +375,10 @@ mod imp {
                 context_menu_callback: RefCell::new(None),
                 move_callback: RefCell::new(None),
                 resize_callback: RefCell::new(None),
+                selection_callback: RefCell::new(None),
+                label_move_callback: RefCell::new(None),
+                callout_box_move_callback: RefCell::new(None),
+                callout_target_move_callback: RefCell::new(None),
             }
         }
     }
@@ -435,6 +554,26 @@ mod imp {
                     }
                 }
 
+                // A small draggable handle at every callout's own arrow
+                // target — drawn in every layout mode (unlike the resize
+                // handles above), since a callout's target is always
+                // screenshot-relative regardless of how screenshots
+                // themselves are arranged.
+                {
+                    let scale = self.last_scale.get();
+                    let placements = self.last_placements.borrow();
+                    for callout in self.last_callout_placements.borrow().iter() {
+                        let Some(p) = placements.get(callout.element_index) else { continue };
+                        let (cx, cy) = (offset_x + (p.x + callout.target.0) * scale, offset_y + (p.y + callout.target.1) * scale);
+                        ctx.arc(cx, cy, CALLOUT_TARGET_DRAW_RADIUS_PX, 0.0, 2.0 * PI);
+                        ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                        let _ = ctx.fill_preserve();
+                        ctx.set_source_rgba(0.29, 0.56, 0.89, 1.0);
+                        ctx.set_line_width(1.5);
+                        let _ = ctx.stroke();
+                    }
+                }
+
                 // Alignment guides from an in-progress Free-mode move.
                 let scale = self.last_scale.get();
                 ctx.set_source_rgba(0.95, 0.25, 0.55, 0.95);
@@ -528,6 +667,28 @@ mod imp {
             *self.resize_callback.borrow_mut() = Some(Box::new(f));
         }
 
+        pub fn set_selection_callback<F: Fn() + 'static>(&self, f: F) {
+            *self.selection_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub fn set_label_move_callback<F: Fn(Uuid, TextPosition) + 'static>(&self, f: F) {
+            *self.label_move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub fn set_callout_box_move_callback<F: Fn(Uuid, Uuid, TextPosition) + 'static>(&self, f: F) {
+            *self.callout_box_move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        pub fn set_callout_target_move_callback<F: Fn(Uuid, Uuid, f64, f64) + 'static>(&self, f: F) {
+            *self.callout_target_move_callback.borrow_mut() = Some(Box::new(f));
+        }
+
+        fn notify_selection_changed(&self) {
+            if let Some(cb) = self.selection_callback.borrow().as_ref() {
+                cb();
+            }
+        }
+
         pub(super) fn on_secondary_click(&self, x: f64, y: f64) {
             let Some(index) = self.widget_to_document(x, y).and_then(|(dx, dy)| self.element_index_at(dx, dy)) else {
                 return;
@@ -581,8 +742,43 @@ mod imp {
             drop(resolved);
 
             let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
-            *self.last_placements.borrow_mut() =
+            let placements =
                 screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+
+            // Screenshot-local label boxes, index-aligned with `placements`
+            // — used for hit-testing/dragging a label on the canvas (see
+            // `label_hit_at`), computed here rather than on every pointer
+            // event since it needs a Pango layout pass per visible label.
+            *self.last_label_placements.borrow_mut() = visible
+                .iter()
+                .zip(placements.iter())
+                .map(|(el, placement)| {
+                    if !el.label.enabled || el.label.content.is_empty() {
+                        return None;
+                    }
+                    screenforge_core::render::measure_text_box(&el.label, placement.width, placement.height).ok()
+                })
+                .collect();
+
+            // Every visible, enabled, non-empty callout's text-bubble box
+            // and arrow target, in the same screenshot-local space as
+            // `last_label_placements` — flat across screenshots, since
+            // hit-testing needs to scan all of them together regardless of
+            // which one they belong to.
+            *self.last_callout_placements.borrow_mut() = visible
+                .iter()
+                .zip(placements.iter())
+                .enumerate()
+                .flat_map(|(element_index, (el, placement))| {
+                    el.callouts.iter().filter(|c| c.enabled && !c.text.content.is_empty()).filter_map(move |callout| {
+                        let box_rect = screenforge_core::render::measure_text_box(&callout.text, placement.width, placement.height).ok()?;
+                        let target = (callout.target_x.clamp(0.0, 1.0) * placement.width, callout.target_y.clamp(0.0, 1.0) * placement.height);
+                        Some(CalloutPlacement { element_index, callout_id: callout.id, box_rect, target })
+                    })
+                })
+                .collect();
+
+            *self.last_placements.borrow_mut() = placements;
             self.last_scale.set(scale);
 
             *self.cached.borrow_mut() = Some((surface, render_w, render_h));
@@ -643,6 +839,55 @@ mod imp {
                 .borrow()
                 .iter()
                 .position(|p| doc_x >= p.x && doc_x <= p.x + p.width && doc_y >= p.y && doc_y <= p.y + p.height)
+        }
+
+        /// Which visible element's own label (if any) covers `(doc_x,
+        /// doc_y)` — checked in `on_drag_begin` before any other hit-test,
+        /// in every layout mode, so a label sitting over or near its own
+        /// screenshot is always grabbable rather than shadowed by it.
+        fn label_hit_at(&self, doc_x: f64, doc_y: f64) -> Option<usize> {
+            let placements = self.last_placements.borrow();
+            let labels = self.last_label_placements.borrow();
+            placements.iter().zip(labels.iter()).position(|(p, label)| match label {
+                Some((lx, ly, lw, lh)) => {
+                    let (bx, by) = (p.x + lx, p.y + ly);
+                    doc_x >= bx && doc_x <= bx + lw && doc_y >= by && doc_y <= by + lh
+                }
+                None => false,
+            })
+        }
+
+        /// Which callout's arrow target (if any) covers `(doc_x, doc_y)` —
+        /// an index into `last_callout_placements`. Checked before
+        /// `callout_box_hit_at`/`label_hit_at` in `on_drag_begin`, since the
+        /// target handle is small and deliberate; a screen-pixel radius
+        /// converted through `last_scale`, matching `corner_handle_at`.
+        fn callout_target_hit_at(&self, doc_x: f64, doc_y: f64) -> Option<usize> {
+            let scale = self.last_scale.get();
+            if scale <= 0.0 {
+                return None;
+            }
+            let tolerance = CALLOUT_TARGET_HIT_RADIUS_PX / scale;
+            let tolerance_sq = tolerance * tolerance;
+            let placements = self.last_placements.borrow();
+            self.last_callout_placements.borrow().iter().position(|callout| {
+                let Some(p) = placements.get(callout.element_index) else { return false };
+                let (tx, ty) = (p.x + callout.target.0, p.y + callout.target.1);
+                let (dx, dy) = (doc_x - tx, doc_y - ty);
+                dx * dx + dy * dy <= tolerance_sq
+            })
+        }
+
+        /// Which callout's text bubble (if any) covers `(doc_x, doc_y)` —
+        /// an index into `last_callout_placements`.
+        fn callout_box_hit_at(&self, doc_x: f64, doc_y: f64) -> Option<usize> {
+            let placements = self.last_placements.borrow();
+            self.last_callout_placements.borrow().iter().position(|callout| {
+                let Some(p) = placements.get(callout.element_index) else { return false };
+                let (bx, by, bw, bh) = callout.box_rect;
+                let (bx, by) = (p.x + bx, p.y + by);
+                doc_x >= bx && doc_x <= bx + bw && doc_y >= by && doc_y <= by + bh
+            })
         }
 
         /// Which element's corner handle (if any) covers `(doc_x, doc_y)` —
@@ -730,6 +975,32 @@ mod imp {
         pub(super) fn on_drag_begin(&self, x: f64, y: f64, shift: bool) {
             self.active_guides.borrow_mut().clear();
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
+
+            if !shift {
+                if let Some(index) = self.callout_target_hit_at(doc_x, doc_y) {
+                    let start_fraction = self.last_callout_placements.borrow()[index].target;
+                    let placement = self.last_placements.borrow()[self.last_callout_placements.borrow()[index].element_index];
+                    let start_fraction = (start_fraction.0 / placement.width.max(1.0), start_fraction.1 / placement.height.max(1.0));
+                    self.drag_from.set(Some(index));
+                    self.callout_drag_origin.set(Some((index, (doc_x, doc_y), CalloutDragKind::Target { start_fraction })));
+                    return;
+                }
+                if let Some(index) = self.callout_box_hit_at(doc_x, doc_y) {
+                    let (local_x, local_y, _, _) = self.last_callout_placements.borrow()[index].box_rect;
+                    self.drag_from.set(Some(index));
+                    self.callout_drag_origin.set(Some((index, (doc_x, doc_y), CalloutDragKind::Box { local_origin: (local_x, local_y) })));
+                    return;
+                }
+                if let Some(index) = self.label_hit_at(doc_x, doc_y) {
+                    if let Some(origin) = self.last_label_placements.borrow()[index] {
+                        let (local_x, local_y, _, _) = origin;
+                        self.drag_from.set(Some(index));
+                        self.label_drag_origin.set(Some((index, (doc_x, doc_y), (local_x, local_y))));
+                        return;
+                    }
+                }
+            }
+
             let free_mode = self.document.borrow().layout.mode == LayoutMode::Free;
 
             if free_mode {
@@ -764,6 +1035,7 @@ mod imp {
                     selected.insert(id);
                 }
                 drop(selected);
+                self.notify_selection_changed();
                 self.drag_from.set(None);
                 self.obj().queue_draw();
                 return;
@@ -775,6 +1047,7 @@ mod imp {
             };
             if !already_in_group {
                 *self.selected.borrow_mut() = std::iter::once(id).collect();
+                self.notify_selection_changed();
             }
             self.obj().queue_draw();
 
@@ -798,6 +1071,42 @@ mod imp {
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if let Some((index, (start_x, start_y), kind)) = self.callout_drag_origin.get() {
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    let Some(placement_info) = self.last_callout_placements.borrow().get(index).copied() else { return };
+                    let Some(placement) = self.last_placements.borrow().get(placement_info.element_index).copied() else { return };
+                    if let Some(el) = self.document.borrow_mut().elements.get_mut(placement_info.element_index) {
+                        if let Some(callout) = el.callouts.iter_mut().find(|c| c.id == placement_info.callout_id) {
+                            match kind {
+                                CalloutDragKind::Box { local_origin: (orig_x, orig_y) } => {
+                                    callout.text.position = TextPosition::Absolute { x: orig_x + dx, y: orig_y + dy };
+                                }
+                                CalloutDragKind::Target { start_fraction: (orig_fx, orig_fy) } => {
+                                    callout.target_x = (orig_fx + dx / placement.width.max(1.0)).clamp(0.0, 1.0);
+                                    callout.target_y = (orig_fy + dy / placement.height.max(1.0)).clamp(0.0, 1.0);
+                                }
+                            }
+                        }
+                    }
+                    self.content_dirty.set(true);
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
+            if let Some((index, (start_x, start_y), (orig_x, orig_y))) = self.label_drag_origin.get() {
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                        el.label.position = TextPosition::Absolute { x: orig_x + dx, y: orig_y + dy };
+                    }
+                    self.content_dirty.set(true);
+                    self.obj().queue_draw();
+                }
+                return;
+            }
+
             if let Some((corner, original, (start_x, start_y))) = self.resize_drag_origin.get() {
                 let Some(index) = self.drag_from.get() else { return };
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
@@ -853,6 +1162,61 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some((index, (start_x, start_y), kind)) = self.callout_drag_origin.take() {
+                self.drag_from.set(None);
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    let placement_info = self.last_callout_placements.borrow().get(index).copied();
+                    if let Some(placement_info) = placement_info {
+                        let element_id = self.document.borrow().elements.get(placement_info.element_index).map(|e| e.id);
+                        if let Some(element_id) = element_id {
+                            match kind {
+                                CalloutDragKind::Box { local_origin: (orig_x, orig_y) } => {
+                                    let (new_x, new_y) = (orig_x + dx, orig_y + dy);
+                                    if new_x != orig_x || new_y != orig_y {
+                                        if let Some(cb) = self.callout_box_move_callback.borrow().as_ref() {
+                                            cb(element_id, placement_info.callout_id, TextPosition::Absolute { x: new_x, y: new_y });
+                                        }
+                                    }
+                                }
+                                CalloutDragKind::Target { start_fraction: (orig_fx, orig_fy) } => {
+                                    let placement = self.last_placements.borrow().get(placement_info.element_index).copied();
+                                    if let Some(placement) = placement {
+                                        let new_fx = (orig_fx + dx / placement.width.max(1.0)).clamp(0.0, 1.0);
+                                        let new_fy = (orig_fy + dy / placement.height.max(1.0)).clamp(0.0, 1.0);
+                                        if new_fx != orig_fx || new_fy != orig_fy {
+                                            if let Some(cb) = self.callout_target_move_callback.borrow().as_ref() {
+                                                cb(element_id, placement_info.callout_id, new_fx, new_fy);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.obj().queue_draw();
+                return;
+            }
+
+            if let Some((index, (start_x, start_y), (orig_x, orig_y))) = self.label_drag_origin.take() {
+                self.drag_from.set(None);
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    let (dx, dy) = (doc_x - start_x, doc_y - start_y);
+                    let (new_x, new_y) = (orig_x + dx, orig_y + dy);
+                    if new_x != orig_x || new_y != orig_y {
+                        let element_id = self.document.borrow().elements.get(index).map(|e| e.id);
+                        if let Some(id) = element_id {
+                            if let Some(cb) = self.label_move_callback.borrow().as_ref() {
+                                cb(id, TextPosition::Absolute { x: new_x, y: new_y });
+                            }
+                        }
+                    }
+                }
+                self.obj().queue_draw();
+                return;
+            }
+
             if let Some((corner, original, (start_x, start_y))) = self.resize_drag_origin.take() {
                 let Some(index) = self.drag_from.take() else { return };
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
@@ -914,6 +1278,7 @@ mod imp {
                     }
                     selected.extend(hits);
                 }
+                self.notify_selection_changed();
                 self.obj().queue_draw();
                 return;
             }
@@ -950,6 +1315,8 @@ mod imp {
             let index = self.drag_from.take();
             let resize_origin = self.resize_drag_origin.take();
             let move_origin = self.move_drag_origin.take();
+            let label_origin = self.label_drag_origin.take();
+            let callout_origin = self.callout_drag_origin.take();
             self.marquee_start.set(None);
             self.marquee_current.set(None);
 
@@ -961,6 +1328,29 @@ mod imp {
             } else if let Some((_, origins)) = move_origin {
                 for (id, orig_x, orig_y) in origins {
                     self.apply_live_position(id, orig_x, orig_y);
+                }
+                self.content_dirty.set(true);
+            } else if let Some((index, _, (orig_x, orig_y))) = label_origin {
+                if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
+                    el.label.position = TextPosition::Absolute { x: orig_x, y: orig_y };
+                }
+                self.content_dirty.set(true);
+            } else if let Some((index, _, kind)) = callout_origin {
+                let placement_info = self.last_callout_placements.borrow().get(index).copied();
+                if let Some(placement_info) = placement_info {
+                    if let Some(el) = self.document.borrow_mut().elements.get_mut(placement_info.element_index) {
+                        if let Some(callout) = el.callouts.iter_mut().find(|c| c.id == placement_info.callout_id) {
+                            match kind {
+                                CalloutDragKind::Box { local_origin: (orig_x, orig_y) } => {
+                                    callout.text.position = TextPosition::Absolute { x: orig_x, y: orig_y };
+                                }
+                                CalloutDragKind::Target { start_fraction: (orig_fx, orig_fy) } => {
+                                    callout.target_x = orig_fx;
+                                    callout.target_y = orig_fy;
+                                }
+                            }
+                        }
+                    }
                 }
                 self.content_dirty.set(true);
             }
