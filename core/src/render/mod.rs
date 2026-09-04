@@ -58,7 +58,7 @@ pub fn compose(
     ctx.scale(scale, scale);
 
     let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
-    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
     let screenshot_regions: Vec<crate::generator::ScreenshotRegion> = placements
         .iter()
         .map(|p| crate::generator::ScreenshotRegion { x: p.x, y: p.y, width: p.width, height: p.height })
@@ -103,7 +103,7 @@ pub fn compose_elements(
     ctx.scale(scale, scale);
 
     let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
-    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
 
     draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)
 }
@@ -171,7 +171,8 @@ fn draw_elements(
         // commonly sits outside the screenshot's own rounded-rect bounds
         // (e.g. a caption below it) and must not be clipped away.
         if el.label.enabled && !el.label.content.is_empty() {
-            draw_text_element(ctx, &el.label, placement.width, placement.height, scale, shadow_cache)?;
+            let resolved_label = el.label.resolve(&doc.label_defaults);
+            draw_text_element(ctx, &resolved_label, placement.width, placement.height, scale, shadow_cache)?;
         }
 
         // Drawn after the label, in the same screenshot-relative space, so
@@ -209,6 +210,19 @@ fn draw_callout(ctx: &Context, callout: &Callout, ref_w: f64, ref_h: f64, scale:
     ctx.line_to(target.0, target.1);
     ctx.stroke()?;
     draw_arrowhead(ctx, start, target, (callout.arrow_width * 3.0).max(4.0));
+
+    // A small filled marker at the exact target point, on top of the line
+    // (which runs to the same point, so it ends up hidden under the dot) —
+    // makes the thing the callout is actually pointing at unambiguous, the
+    // way an on-screen annotation tool's marker dot does. Reuses the arrow's
+    // own color rather than adding a separate one, since the dot and arrow
+    // read as one "pointer" unit; only its size was ever meant to be its
+    // own setting.
+    if callout.dot_radius > 0.0 {
+        ctx.set_source_rgba(c.r, c.g, c.b, c.a);
+        ctx.arc(target.0, target.1, callout.dot_radius, 0.0, 2.0 * PI);
+        ctx.fill()?;
+    }
 
     draw_text_element(ctx, &callout.text, ref_w, ref_h, scale, cache)
 }
@@ -675,9 +689,33 @@ fn rounded_rect_path(ctx: &Context, x: f64, y: f64, w: f64, h: f64, r: &CornerRa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Background, CanvasSettings, Document, GradientKind, GradientSpec, ImageSource, LayoutSettings, Rgba, ScreenshotElement};
+    use crate::model::{
+        Background, CanvasSettings, Document, GradientKind, GradientSpec, ImageSource, Label, LabelStyle, LayoutSettings, Rgba,
+        ScreenshotElement,
+    };
     use cairo::{Format, ImageSurface};
     use std::path::PathBuf;
+
+    /// Splits a fully-specified `TextElement` (as most of these tests
+    /// already build one, via `absolute_title`/inline construction) into
+    /// the shared `LabelStyle` it implies plus the plain `Label` for one
+    /// element — `resolve()`ing that `Label` against the returned style
+    /// then reproduces the input `TextElement` unchanged. Lets every
+    /// existing "build a `TextElement`, render it" test keep working
+    /// unmodified now that a label's look always comes from
+    /// `Document::label_defaults` rather than anything per-label.
+    fn split_label_style(text: crate::model::TextElement) -> (LabelStyle, Label) {
+        let style = LabelStyle {
+            position: text.position,
+            typography: text.typography.clone(),
+            background: text.background.clone(),
+            corner_radius: text.corner_radius,
+            padding_x: text.padding_x,
+            padding_y: text.padding_y,
+            shadow: text.shadow,
+        };
+        (style, Label { enabled: text.enabled, content: text.content })
+    }
 
     /// A solid-color `w`x`h` surface, standing in for a decoded screenshot
     /// without needing an actual image file.
@@ -761,7 +799,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
         doc.background = Background::Generated(crate::model::GeneratedBackground::new(11));
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 10.0, margin_px: 20.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 10.0, margin_x: 20.0, margin_y: 20.0 };
         let el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 60.0, 60.0);
         let el_id = el.id;
         doc.elements = vec![el];
@@ -820,7 +858,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 300, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 10.0, margin_px: 20.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 10.0, margin_x: 20.0, margin_y: 20.0 };
 
         let red = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 160.0);
         let blue = ScreenshotElement::new(ImageSource::Path(PathBuf::from("b.png")), 100.0, 160.0);
@@ -857,7 +895,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         el.corner_radius = CornerRadius::uniform(20.0);
@@ -896,7 +934,7 @@ mod tests {
     fn flip_horizontal_mirrors_the_element() {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         el.transform.flip_horizontal = true;
@@ -918,7 +956,7 @@ mod tests {
     fn no_flip_keeps_original_orientation() {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 100, export_height: 100, ..CanvasSettings::default() };
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
 
         let el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         let id = el.id;
@@ -1028,7 +1066,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 50.0, margin_y: 50.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         el.shadow = shadow;
@@ -1083,7 +1121,8 @@ mod tests {
         // "Move" the element without changing its size/shape/shadow — a
         // different margin shifts every placement exactly like a drag
         // would, with nothing the shadow's own bitmap depends on changed.
-        doc.layout.margin_px = 65.0;
+        doc.layout.margin_x = 65.0;
+        doc.layout.margin_y = 65.0;
         compose(&doc, &target, 1.0, &resolved, None, &cache, &BackgroundCache::new()).unwrap();
         assert_eq!(cache.len(), 1, "moving the element should not have minted a second cached shadow bitmap");
     }
@@ -1096,7 +1135,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 400, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 20.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 20.0, margin_y: 20.0 };
 
         let mut a = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         a.shadow = ShadowParams::standard();
@@ -1127,7 +1166,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 20_100, export_height: 20_100, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 50.0, margin_y: 50.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("huge.png")), 20_000.0, 20_000.0);
         el.shadow = ShadowParams::floating();
@@ -1158,7 +1197,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 20_100, export_height: 20_100, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 50.0, margin_y: 50.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("huge.png")), 20_000.0, 20_000.0);
         el.shadow = ShadowParams::floating();
@@ -1229,9 +1268,11 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 100, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 100.0);
-        el.label = label;
+        let (style, plain_label) = split_label_style(label);
+        doc.label_defaults = style;
+        el.label = plain_label;
         doc.elements = vec![el];
         doc
     }
@@ -1385,16 +1426,18 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 300, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 50.0, margin_y: 50.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
-        el.label = crate::model::TextElement {
+        let (style, plain_label) = split_label_style(crate::model::TextElement {
             enabled: true,
             content: "Label".to_string(),
             position: crate::model::TextPosition::Absolute { x: 5.0, y: 5.0 },
             typography: crate::model::Typography { font_size: 16.0, color: Rgba::BLACK, ..crate::model::Typography::label_default() },
             ..crate::model::TextElement::label_default()
-        };
+        });
+        doc.label_defaults = style;
+        el.label = plain_label;
         let id = el.id;
         doc.elements = vec![el];
 
@@ -1476,7 +1519,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 50.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 50.0, margin_y: 50.0 };
 
         let el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 100.0);
         let id = el.id;
@@ -1498,7 +1541,7 @@ mod tests {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0);
         let mut callout = crate::model::Callout::new_for_width(200.0);
@@ -1523,11 +1566,46 @@ mod tests {
     }
 
     #[test]
+    fn callout_dot_radius_controls_the_size_of_the_marker_at_the_target() {
+        let mut doc = Document::new();
+        doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
+        doc.background = Background::Solid(Rgba::WHITE);
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
+
+        let render_with_dot_radius = |dot_radius: f64| {
+            let mut doc = doc.clone();
+            let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0);
+            let mut callout = crate::model::Callout::new_for_width(200.0);
+            callout.arrow_color = Rgba::BLACK;
+            // A near-zero arrow width keeps the arrowhead itself tiny (its
+            // size floors at 4px regardless), so ink well outside that
+            // reach can only have come from the dot.
+            callout.arrow_width = 0.1;
+            callout.dot_radius = dot_radius;
+            callout.target_x = 0.5;
+            callout.target_y = 0.5;
+            el.callouts = vec![callout];
+            let id = el.id;
+            doc.elements = vec![el];
+
+            let mut resolved = HashMap::new();
+            resolved.insert(id, solid_surface(200, 200, Rgba::WHITE));
+            let mut target = ImageSurface::create(Format::ARgb32, 200, 200).unwrap();
+            compose(&doc, &target, 1.0, &resolved, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
+            // A band well clear of the tiny arrowhead but inside a 20px-radius dot.
+            any_ink_in_region(&mut target, 85, 95, 90, 105)
+        };
+
+        assert!(!render_with_dot_radius(0.0), "expected no ink from a zero-radius dot");
+        assert!(render_with_dot_radius(20.0), "expected the enlarged dot to paint ink well beyond the tiny arrowhead");
+    }
+
+    #[test]
     fn disabled_callout_draws_nothing() {
         let mut doc = Document::new();
         doc.canvas = CanvasSettings { export_width: 200, export_height: 200, ..CanvasSettings::default() };
         doc.background = Background::Solid(Rgba::WHITE);
-        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_px: 0.0 };
+        doc.layout = LayoutSettings { mode: crate::model::LayoutMode::Horizontal, spacing_px: 0.0, margin_x: 0.0, margin_y: 0.0 };
 
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 200.0, 200.0);
         let mut callout = crate::model::Callout::new_for_width(200.0);

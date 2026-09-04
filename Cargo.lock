@@ -1369,7 +1369,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "screenforge"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "screenforge-core"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "cairo-rs",
  "pango",
@@ -1398,6 +1398,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -1637,6 +1638,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1791,6 +1798,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "zip"
+version = "8.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "typed-path",
 ]
 
 [[package]]

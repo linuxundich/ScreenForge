@@ -1,30 +1,42 @@
 //! Reusable style presets: everything that makes a composition *look* the
 //! way it does (layout mode/spacing/margin, background, shadow, corner
-//! radius) captured separately from the screenshots themselves, so it can
-//! be saved once and reapplied to a different set of images later. JSON
-//! (de)serialization mirrors `crate::project` closely — same `version`
-//! field for the same forward-migration reason.
-
-use std::path::Path;
+//! radius, and global label defaults) captured separately from the
+//! screenshots/labels themselves, so it can be saved once — under a name
+//! the user picks — and reapplied to a different composition later.
+//!
+//! Deliberately *not* file-based: earlier versions of this saved/loaded a
+//! standalone `.screenforge-template` file the user managed themselves.
+//! Presets now live inside the app's own persistent settings (the app
+//! layer serializes/deserializes the list this module defines to/from a
+//! single `GSettings` string key — see `app/src/main.rs`'s
+//! `PresetStore`), so this module only defines the data shape and its
+//! JSON (de)serialization, with no `Path`/file-I/O of its own.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::{Background, CornerRadius, Document, LayoutSettings, ShadowParams};
+use crate::model::{Background, CornerRadius, Document, LabelStyle, LayoutSettings, ShadowParams};
 
 pub const CURRENT_VERSION: u32 = 1;
 
-/// A document's style, independent of which screenshots it holds. Shadow
-/// and corner radius are captured as a single value rather than
-/// per-element, matching the existing assumption elsewhere (spec §27) that
-/// these apply uniformly across the whole composition — there's no
-/// per-element UI for them yet.
+/// A document's style, independent of which screenshots (or their
+/// individual label content) it holds. Shadow and corner radius are
+/// captured as a single value rather than per-element, matching the
+/// existing assumption elsewhere (spec §27) that these apply uniformly
+/// across the whole composition — there's no per-element UI for them yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Template {
     pub layout: LayoutSettings,
     pub background: Background,
     pub shadow: ShadowParams,
     pub corner_radius: CornerRadius,
+    /// The shared label look every label in the project uses (spec:
+    /// "globale Label-Einstellungen" is one of the things a preset
+    /// captures) — never any label's own *content*, which stays exactly
+    /// what it was before the preset was applied (see
+    /// `crate::command::ApplyTemplate`).
+    #[serde(default)]
+    pub label_defaults: LabelStyle,
 }
 
 impl Template {
@@ -36,40 +48,102 @@ impl Template {
             Some(el) => (el.shadow, el.corner_radius),
             None => (ShadowParams::default(), CornerRadius::default()),
         };
-        Template { layout: doc.layout, background: doc.background.clone(), shadow, corner_radius }
+        Template { layout: doc.layout, background: doc.background.clone(), shadow, corner_radius, label_defaults: doc.label_defaults.clone() }
+    }
+}
+
+/// One saved preset together with the name the user gave it (spec: "Der
+/// Benutzer kann: neues Preset speichern, Preset auswählen, ... Preset
+/// umbenennen, Preset löschen" — `name` is the only thing a rename
+/// touches).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NamedPreset {
+    pub name: String,
+    pub template: Template,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PresetListFile {
+    format: String,
+    version: u32,
+    presets: Vec<NamedPreset>,
+}
+
+#[derive(Debug, Error)]
+pub enum PresetError {
+    #[error("saved presets are damaged or not valid ScreenForge JSON: {0}")]
+    Parse(#[from] serde_json::Error),
+    #[error("unsupported preset list format version {found} (this version of ScreenForge supports up to {supported})")]
+    UnsupportedVersion { found: u32, supported: u32 },
+}
+
+/// Serializes the full list of saved presets to one JSON string, the shape
+/// `app/src/main.rs`'s `PresetStore` writes straight into a `GSettings`
+/// string key (`presets`) — see this module's own doc comment for why
+/// that's the only persistence this needs to support, unlike the old
+/// per-file `Template::save`/`load` it replaces.
+pub fn serialize_presets(presets: &[NamedPreset]) -> String {
+    let file = PresetListFile { format: "screenforge-presets".to_string(), version: CURRENT_VERSION, presets: presets.to_vec() };
+    // Only fails on a type that can't be represented as JSON at all (e.g.
+    // a non-string map key) — nothing in `Template`'s own shape can ever
+    // trigger that, so this is safe to unwrap rather than thread a
+    // `Result` through every caller for a case that cannot occur.
+    serde_json::to_string(&file).expect("Template/NamedPreset are always JSON-serializable")
+}
+
+/// The inverse of `serialize_presets`. An empty or corrupt `json` (e.g.
+/// the `GSettings` key's own un-set default, or a value from a future,
+/// incompatible ScreenForge version) is reported as an error rather than
+/// silently discarding whatever the user had saved — callers should
+/// surface this rather than treat it as "no presets yet".
+pub fn deserialize_presets(json: &str) -> Result<Vec<NamedPreset>, PresetError> {
+    let file: PresetListFile = serde_json::from_str(json)?;
+    match file.version {
+        1 => Ok(file.presets),
+        other => Err(PresetError::UnsupportedVersion { found: other, supported: CURRENT_VERSION }),
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TemplateFile {
-    pub format: String,
-    pub version: u32,
-    pub template: Template,
+struct LabelStyleFile {
+    format: String,
+    version: u32,
+    style: LabelStyle,
 }
 
 #[derive(Debug, Error)]
-pub enum TemplateError {
-    #[error("could not read template file: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("template file is damaged or not valid ScreenForge JSON: {0}")]
+pub enum LabelStyleError {
+    #[error("the saved default label style is damaged or not valid ScreenForge JSON: {0}")]
     Parse(#[from] serde_json::Error),
-    #[error("unsupported template format version {found} (this version of ScreenForge supports up to {supported})")]
+    #[error("unsupported default-label-style format version {found} (this version of ScreenForge supports up to {supported})")]
     UnsupportedVersion { found: u32, supported: u32 },
 }
 
-pub fn save(template: &Template, path: &Path) -> Result<(), TemplateError> {
-    let file = TemplateFile { format: "screenforge-template".to_string(), version: CURRENT_VERSION, template: template.clone() };
-    let json = serde_json::to_string_pretty(&file)?;
-    std::fs::write(path, json)?;
-    Ok(())
+/// Serializes the app-wide default label style — the top tier of the
+/// three-level label configuration (spec: "globale Anwendungseinstellungen
+/// → Projekt-Defaults → Screenshot-Overrides") — to one JSON string for
+/// `app/src/main.rs` to write into the `default-label-style` `GSettings`
+/// key. Used *only* to seed `Document::label_defaults` when a brand-new
+/// project is created (`EditorState::new`); changing it afterward never
+/// touches any already-open or already-saved project, since a `Document`
+/// carries its own independent `label_defaults` copy from that point on.
+pub fn serialize_label_style(style: &LabelStyle) -> String {
+    let file = LabelStyleFile { format: "screenforge-label-style".to_string(), version: CURRENT_VERSION, style: style.clone() };
+    serde_json::to_string(&file).expect("LabelStyle is always JSON-serializable")
 }
 
-pub fn load(path: &Path) -> Result<Template, TemplateError> {
-    let content = std::fs::read_to_string(path)?;
-    let file: TemplateFile = serde_json::from_str(&content)?;
+/// The inverse of `serialize_label_style`. An empty or corrupt `json`
+/// (e.g. the `GSettings` key's own un-set default, or a value from a
+/// future, incompatible ScreenForge version) is reported as an error
+/// rather than silently discarding a customized global default — callers
+/// should fall back to [`LabelStyle::default`] themselves on `Err`, the
+/// same way `app/src/main.rs`'s `load_presets` falls back to an empty
+/// list.
+pub fn deserialize_label_style(json: &str) -> Result<LabelStyle, LabelStyleError> {
+    let file: LabelStyleFile = serde_json::from_str(json)?;
     match file.version {
-        1 => Ok(file.template),
-        other => Err(TemplateError::UnsupportedVersion { found: other, supported: CURRENT_VERSION }),
+        1 => Ok(file.style),
+        other => Err(LabelStyleError::UnsupportedVersion { found: other, supported: CURRENT_VERSION }),
     }
 }
 
@@ -78,19 +152,11 @@ mod tests {
     use super::*;
     use crate::model::{ImageSource, LayoutMode, Rgba, ScreenshotElement};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-    fn temp_path(name: &str) -> PathBuf {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("screenforge-template-test-{}-{n}-{name}", std::process::id()))
-    }
 
     #[test]
     fn from_document_captures_style_but_not_elements() {
         let mut doc = Document::new();
-        doc.layout = LayoutSettings { mode: LayoutMode::Grid, spacing_px: 10.0, margin_px: 20.0 };
+        doc.layout = LayoutSettings { mode: LayoutMode::Grid, spacing_px: 10.0, margin_x: 20.0, margin_y: 20.0 };
         doc.background = Background::Solid(Rgba::new(0.1, 0.2, 0.3, 1.0));
         let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0);
         el.shadow = ShadowParams::strong();
@@ -118,52 +184,94 @@ mod tests {
     }
 
     #[test]
-    fn save_then_load_round_trips() {
-        let path = temp_path("roundtrip.screenforge-template");
+    fn from_document_captures_the_documents_label_defaults() {
         let mut doc = Document::new();
-        doc.layout = LayoutSettings { mode: LayoutMode::Vertical, spacing_px: 16.0, margin_px: 32.0 };
-        doc.background = Background::Solid(Rgba::new(0.5, 0.5, 0.5, 1.0));
+        doc.label_defaults.padding_x = 42.0;
         let template = Template::from_document(&doc);
-
-        save(&template, &path).unwrap();
-        let loaded = load(&path).unwrap();
-
-        assert_eq!(loaded, template);
-        std::fs::remove_file(&path).ok();
+        assert_eq!(template.label_defaults.padding_x, 42.0);
     }
 
     #[test]
-    fn missing_file_is_reported_as_io_error() {
-        let path = temp_path("does-not-exist.screenforge-template");
-        let err = load(&path).unwrap_err();
-        assert!(matches!(err, TemplateError::Io(_)));
+    fn serialize_then_deserialize_round_trips_a_named_list() {
+        let mut doc = Document::new();
+        doc.layout = LayoutSettings { mode: LayoutMode::Vertical, spacing_px: 16.0, margin_x: 32.0, margin_y: 32.0 };
+        doc.background = Background::Solid(Rgba::new(0.5, 0.5, 0.5, 1.0));
+        let presets = vec![
+            NamedPreset { name: "Blog".to_string(), template: Template::from_document(&doc) },
+            NamedPreset { name: "Standard".to_string(), template: Template::from_document(&Document::new()) },
+        ];
+
+        let json = serialize_presets(&presets);
+        let loaded = deserialize_presets(&json).unwrap();
+
+        assert_eq!(loaded, presets);
     }
 
     #[test]
-    fn corrupted_file_is_reported_as_a_parse_error_not_a_panic() {
-        let path = temp_path("corrupted.screenforge-template");
-        std::fs::write(&path, b"not json").unwrap();
-        let err = load(&path).unwrap_err();
-        assert!(matches!(err, TemplateError::Parse(_)));
-        std::fs::remove_file(&path).ok();
+    fn deserializing_garbage_is_reported_as_a_parse_error_not_a_panic() {
+        let err = deserialize_presets("not json").unwrap_err();
+        assert!(matches!(err, PresetError::Parse(_)));
+    }
+
+    #[test]
+    fn deserializing_an_empty_string_is_reported_as_a_parse_error() {
+        // The `GSettings` key's own un-set state — callers (`PresetStore`)
+        // are responsible for treating that as "no presets yet" rather
+        // than calling this at all; this function itself must not panic.
+        let err = deserialize_presets("").unwrap_err();
+        assert!(matches!(err, PresetError::Parse(_)));
     }
 
     #[test]
     fn unsupported_future_version_is_reported_clearly() {
-        let path = temp_path("future.screenforge-template");
         let template = Template::from_document(&Document::new());
-        let json =
-            serde_json::to_string(&TemplateFile { format: "screenforge-template".into(), version: 99, template }).unwrap();
-        std::fs::write(&path, json).unwrap();
+        let json = serde_json::to_string(&PresetListFile {
+            format: "screenforge-presets".into(),
+            version: 99,
+            presets: vec![NamedPreset { name: "X".to_string(), template }],
+        })
+        .unwrap();
 
-        let err = load(&path).unwrap_err();
+        let err = deserialize_presets(&json).unwrap_err();
         match err {
-            TemplateError::UnsupportedVersion { found, supported } => {
+            PresetError::UnsupportedVersion { found, supported } => {
                 assert_eq!(found, 99);
                 assert_eq!(supported, CURRENT_VERSION);
             }
             other => panic!("expected UnsupportedVersion, got {other:?}"),
         }
-        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn label_style_serialize_then_deserialize_round_trips() {
+        let style = LabelStyle { padding_x: 42.0, ..LabelStyle::label_default() };
+        let json = serialize_label_style(&style);
+        let loaded = deserialize_label_style(&json).unwrap();
+        assert_eq!(loaded, style);
+    }
+
+    #[test]
+    fn label_style_deserializing_an_empty_string_is_a_parse_error_not_a_panic() {
+        let err = deserialize_label_style("").unwrap_err();
+        assert!(matches!(err, LabelStyleError::Parse(_)));
+    }
+
+    #[test]
+    fn label_style_unsupported_future_version_is_reported_clearly() {
+        let json = serde_json::to_string(&LabelStyleFile {
+            format: "screenforge-label-style".into(),
+            version: 99,
+            style: LabelStyle::label_default(),
+        })
+        .unwrap();
+
+        let err = deserialize_label_style(&json).unwrap_err();
+        match err {
+            LabelStyleError::UnsupportedVersion { found, supported } => {
+                assert_eq!(found, 99);
+                assert_eq!(supported, CURRENT_VERSION);
+            }
+            other => panic!("expected UnsupportedVersion, got {other:?}"),
+        }
     }
 }

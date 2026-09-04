@@ -124,15 +124,17 @@ impl Canvas {
         self.imp().set_selection_callback(f);
     }
 
-    /// Called at the end of a drag that moved a screenshot's own label
-    /// (element id, new position — always `TextPosition::Absolute`,
-    /// screenshot-local, since a manual drag always ends in manual
-    /// placement). Never fires for a drag that starts on empty canvas
-    /// space or ends back where it started. Works in every layout mode,
-    /// not just Free — a label's position is always relative to its own
-    /// screenshot regardless of how the screenshots themselves are
+    /// Called at the end of a drag that moved a label (new position —
+    /// always `TextPosition::Absolute`, screenshot-local, since a manual
+    /// drag always ends in manual placement). Since every label in the
+    /// project shares one position (`Document::label_defaults.position`),
+    /// this carries no element id — dragging any one label's box moves
+    /// them all identically. Never fires for a drag that starts on empty
+    /// canvas space or ends back where it started. Works in every layout
+    /// mode, not just Free — a label's position is always relative to its
+    /// own screenshot regardless of how the screenshots themselves are
     /// arranged.
-    pub fn connect_label_move<F: Fn(Uuid, screenforge_core::model::TextPosition) + 'static>(&self, f: F) {
+    pub fn connect_label_move<F: Fn(screenforge_core::model::TextPosition) + 'static>(&self, f: F) {
         self.imp().set_label_move_callback(f);
     }
 
@@ -190,7 +192,7 @@ mod imp {
     type MoveCallback = Box<dyn Fn(Vec<(Uuid, f64, f64)>)>;
     type ResizeCallback = Box<dyn Fn(usize, Transform)>;
     type SelectionCallback = Box<dyn Fn()>;
-    type LabelMoveCallback = Box<dyn Fn(Uuid, TextPosition)>;
+    type LabelMoveCallback = Box<dyn Fn(TextPosition)>;
     type CalloutBoxMoveCallback = Box<dyn Fn(Uuid, Uuid, TextPosition)>;
     type CalloutTargetMoveCallback = Box<dyn Fn(Uuid, Uuid, f64, f64)>;
     type WallpaperMoveCallback = Box<dyn Fn(f64, f64)>;
@@ -201,12 +203,16 @@ mod imp {
     /// `(corner grabbed, dragged element's original transform, drag-start
     /// point in document space)`.
     type ResizeDragOrigin = (Corner, Transform, (f64, f64));
-    /// `(dragged element's index, drag-start point in document space,
-    /// label's own screenshot-local box origin at drag start)` — mirrors
-    /// `MoveDragOrigin`'s shape, but for a screenshot's label rather than
-    /// the screenshot itself, and always a single element (a label can't
-    /// be part of a multi-selection group move).
-    type LabelDragOrigin = (usize, (f64, f64), (f64, f64));
+    /// `(dragged element's index, drag-start point in document space, the
+    /// label's resolved screenshot-local box origin at drag start, the
+    /// shared `Document::label_defaults.position` at drag start)`. The
+    /// resolved origin drives the live delta during the drag; the original
+    /// shared position (not just its resolved coordinates) is what
+    /// `cancel_drag` restores. Every label in the project shares one
+    /// position, so dragging any one label's box moves them all —
+    /// `index` only identifies which label was grabbed for the live-delta
+    /// math, not which one gets repositioned.
+    type LabelDragOrigin = (usize, (f64, f64), (f64, f64), TextPosition);
 
     /// `(drag-start point in document space, the generated background's
     /// original (offset_x, offset_y))` — the same shape as the other
@@ -801,7 +807,7 @@ mod imp {
             *self.selection_callback.borrow_mut() = Some(Box::new(f));
         }
 
-        pub fn set_label_move_callback<F: Fn(Uuid, TextPosition) + 'static>(&self, f: F) {
+        pub fn set_label_move_callback<F: Fn(TextPosition) + 'static>(&self, f: F) {
             *self.label_move_callback.borrow_mut() = Some(Box::new(f));
         }
 
@@ -883,7 +889,7 @@ mod imp {
 
             let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
             let placements =
-                screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+                screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
 
             // Screenshot-local label boxes, index-aligned with `placements`
             // — used for hit-testing/dragging a label on the canvas (see
@@ -896,7 +902,8 @@ mod imp {
                     if !el.label.enabled || el.label.content.is_empty() {
                         return None;
                     }
-                    screenforge_core::render::measure_text_box(&el.label, placement.width, placement.height).ok()
+                    let resolved = el.label.resolve(&doc.label_defaults);
+                    screenforge_core::render::measure_text_box(&resolved, placement.width, placement.height).ok()
                 })
                 .collect();
 
@@ -1133,7 +1140,7 @@ mod imp {
 
             let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
             let placements =
-                screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+                screenforge_core::layout::compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
             let regions: Vec<_> = placements
                 .iter()
                 .map(|p| screenforge_core::generator::ScreenshotRegion { x: p.x, y: p.y, width: p.width, height: p.height })
@@ -1196,8 +1203,9 @@ mod imp {
                 if let Some(index) = self.label_hit_at(doc_x, doc_y) {
                     if let Some(origin) = self.last_label_placements.borrow()[index] {
                         let (local_x, local_y, _, _) = origin;
+                        let orig_position = self.document.borrow().label_defaults.position;
                         self.drag_from.set(Some(index));
-                        self.label_drag_origin.set(Some((index, (doc_x, doc_y), (local_x, local_y))));
+                        self.label_drag_origin.set(Some((index, (doc_x, doc_y), (local_x, local_y), orig_position)));
                         return;
                     }
                 }
@@ -1318,12 +1326,14 @@ mod imp {
                 return;
             }
 
-            if let Some((index, (start_x, start_y), (orig_x, orig_y))) = self.label_drag_origin.get() {
+            if let Some((_, (start_x, start_y), (orig_x, orig_y), _)) = self.label_drag_origin.get() {
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
                     let (dx, dy) = (doc_x - start_x, doc_y - start_y);
-                    if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
-                        el.label.position = TextPosition::Absolute { x: orig_x + dx, y: orig_y + dy };
-                    }
+                    // Every label in the project shares one position, so
+                    // dragging any one label's box moves them all — this
+                    // updates the document-level shared default, not any
+                    // one element.
+                    self.document.borrow_mut().label_defaults.position = TextPosition::Absolute { x: orig_x + dx, y: orig_y + dy };
                     self.content_dirty.set(true);
                     self.obj().queue_draw();
                 }
@@ -1445,17 +1455,14 @@ mod imp {
                 return;
             }
 
-            if let Some((index, (start_x, start_y), (orig_x, orig_y))) = self.label_drag_origin.take() {
+            if let Some((_, (start_x, start_y), (orig_x, orig_y), _)) = self.label_drag_origin.take() {
                 self.drag_from.set(None);
                 if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
                     let (dx, dy) = (doc_x - start_x, doc_y - start_y);
                     let (new_x, new_y) = (orig_x + dx, orig_y + dy);
                     if new_x != orig_x || new_y != orig_y {
-                        let element_id = self.document.borrow().elements.get(index).map(|e| e.id);
-                        if let Some(id) = element_id {
-                            if let Some(cb) = self.label_move_callback.borrow().as_ref() {
-                                cb(id, TextPosition::Absolute { x: new_x, y: new_y });
-                            }
+                        if let Some(cb) = self.label_move_callback.borrow().as_ref() {
+                            cb(TextPosition::Absolute { x: new_x, y: new_y });
                         }
                     }
                 }
@@ -1577,10 +1584,8 @@ mod imp {
                     self.apply_live_position(id, orig_x, orig_y);
                 }
                 self.content_dirty.set(true);
-            } else if let Some((index, _, (orig_x, orig_y))) = label_origin {
-                if let Some(el) = self.document.borrow_mut().elements.get_mut(index) {
-                    el.label.position = TextPosition::Absolute { x: orig_x, y: orig_y };
-                }
+            } else if let Some((_, _, _, orig_position)) = label_origin {
+                self.document.borrow_mut().label_defaults.position = orig_position;
                 self.content_dirty.set(true);
             } else if let Some((index, _, kind)) = callout_origin {
                 let placement_info = self.last_callout_placements.borrow().get(index).copied();

@@ -16,11 +16,6 @@ Screenshot in ein Handy-/Tablet-Gehäuse legen, statt nur als Rechteck mit
 Schatten/Eckradius. Braucht gepflegte Bild-Assets pro Gerätetyp — laufender
 Pflegeaufwand, nicht nur einmalige Implementierung.
 
-## Callouts/Feature-Hinweise
-
-Pfeile oder Textmarker, die auf einen Punkt im Screenshot zeigen — der
-klassische "Look, Feature X"-Stil bei Store-Screenshots.
-
 ## Serien-Verwaltung
 
 Mehrere Kompositionen mit demselben Stil als zusammengehöriges Set
@@ -34,4 +29,5 @@ Zusätzlich zu PNG/JPEG/WebP/AVIF.
 ---
 
 Bereits umgesetzt aus derselben Ideensammlung: Ausrichtungswerkzeug für
-das freie Layout und die Farbpipette (beide v0.19.0) — siehe CHANGELOG.md.
+das freie Layout und die Farbpipette (beide v0.19.0), sowie Callouts/
+Feature-Hinweise (v0.22.0) — siehe CHANGELOG.md.

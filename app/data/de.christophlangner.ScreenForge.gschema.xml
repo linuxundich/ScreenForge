@@ -9,12 +9,20 @@
         created document.
       </description>
     </key>
-    <key name="default-margin" type="d">
+    <key name="default-margin-x" type="d">
       <default>48.0</default>
-      <summary>Default margin</summary>
+      <summary>Default horizontal margin</summary>
       <description>
-        Outer margin around the composition, in pixels, used for every
-        newly created document.
+        Outer margin left/right of the composition, in pixels, used for
+        every newly created document.
+      </description>
+    </key>
+    <key name="default-margin-y" type="d">
+      <default>48.0</default>
+      <summary>Default vertical margin</summary>
+      <description>
+        Outer margin above/below the composition, in pixels, used for
+        every newly created document.
       </description>
     </key>
     <key name="default-export-quality" type="d">
@@ -26,6 +34,30 @@
         created document. Ignored for PNG, which is always lossless.
         Stored as a double (not an int) purely so it can bind directly
         to AdwSpinRow's "value" property without a custom mapping.
+      </description>
+    </key>
+    <key name="default-label-style" type="s">
+      <default>''</default>
+      <summary>Default label style for new projects</summary>
+      <description>
+        JSON-encoded label style (position, typography, background,
+        padding, corner radius, shadow) used to seed a brand-new project's
+        own Document::label_defaults when it's created. An empty string
+        falls back to the built-in default style. Purely a starting point:
+        changing this setting never touches any project that already
+        exists — from the moment a project is created, its own
+        label_defaults is completely independent of this key.
+      </description>
+    </key>
+    <key name="presets" type="s">
+      <default>''</default>
+      <summary>Saved settings presets</summary>
+      <description>
+        JSON-encoded list of named style presets (layout, background,
+        shadow, corner radius, global label defaults) the user has saved.
+        Applied through the in-app preset picker rather than any external
+        template file — an empty string means no presets have been saved
+        yet.
       </description>
     </key>
   </schema>

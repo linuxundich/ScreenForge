@@ -20,6 +20,14 @@ impl Window {
         self.imp().canvas.get().clone()
     }
 
+    pub fn split_view(&self) -> adw::OverlaySplitView {
+        self.imp().split_view.get().clone()
+    }
+
+    pub fn sidebar_toggle_button(&self) -> gtk4::ToggleButton {
+        self.imp().sidebar_toggle_button.get().clone()
+    }
+
     pub fn layout_mode_row(&self) -> adw::ComboRow {
         self.imp().layout_mode_row.get().clone()
     }
@@ -28,8 +36,12 @@ impl Window {
         self.imp().spacing_row.get().clone()
     }
 
-    pub fn margin_row(&self) -> adw::SpinRow {
-        self.imp().margin_row.get().clone()
+    pub fn margin_x_row(&self) -> adw::SpinRow {
+        self.imp().margin_x_row.get().clone()
+    }
+
+    pub fn margin_y_row(&self) -> adw::SpinRow {
+        self.imp().margin_y_row.get().clone()
     }
 
     pub fn alignment_group(&self) -> adw::PreferencesGroup {
@@ -224,12 +236,20 @@ impl Window {
         self.imp().corner_radius_row.get().clone()
     }
 
+    pub fn sidebar_page(&self) -> adw::PreferencesPage {
+        self.imp().sidebar_page.get().clone()
+    }
+
     pub fn label_group(&self) -> adw::PreferencesGroup {
         self.imp().label_group.get().clone()
     }
 
     pub fn callouts_group(&self) -> adw::PreferencesGroup {
         self.imp().callouts_group.get().clone()
+    }
+
+    pub fn export_group(&self) -> adw::PreferencesGroup {
+        self.imp().export_group.get().clone()
     }
 
     pub fn callouts_list_box(&self) -> gtk4::ListBox {
@@ -246,110 +266,6 @@ impl Window {
 
     pub fn label_content_view(&self) -> gtk4::TextView {
         self.imp().label_content_view.get().clone()
-    }
-
-    pub fn label_wrap_row(&self) -> adw::SwitchRow {
-        self.imp().label_wrap_row.get().clone()
-    }
-
-    pub fn label_position_mode_row(&self) -> adw::ComboRow {
-        self.imp().label_position_mode_row.get().clone()
-    }
-
-    pub fn label_horizontal_row(&self) -> adw::ComboRow {
-        self.imp().label_horizontal_row.get().clone()
-    }
-
-    pub fn label_vertical_row(&self) -> adw::ComboRow {
-        self.imp().label_vertical_row.get().clone()
-    }
-
-    pub fn label_padding_row(&self) -> adw::SpinRow {
-        self.imp().label_padding_row.get().clone()
-    }
-
-    pub fn label_x_row(&self) -> adw::SpinRow {
-        self.imp().label_x_row.get().clone()
-    }
-
-    pub fn label_y_row(&self) -> adw::SpinRow {
-        self.imp().label_y_row.get().clone()
-    }
-
-    pub fn label_background_row(&self) -> adw::ComboRow {
-        self.imp().label_background_row.get().clone()
-    }
-
-    pub fn label_background_color_row(&self) -> adw::ActionRow {
-        self.imp().label_background_color_row.get().clone()
-    }
-
-    pub fn label_background_color_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().label_background_color_button.get().clone()
-    }
-
-    pub fn label_background_auto_button(&self) -> gtk4::Button {
-        self.imp().label_background_auto_button.get().clone()
-    }
-
-    pub fn label_background_color2_row(&self) -> adw::ActionRow {
-        self.imp().label_background_color2_row.get().clone()
-    }
-
-    pub fn label_background_color2_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().label_background_color2_button.get().clone()
-    }
-
-    pub fn label_corner_radius_row(&self) -> adw::SpinRow {
-        self.imp().label_corner_radius_row.get().clone()
-    }
-
-    pub fn label_padding_x_row(&self) -> adw::SpinRow {
-        self.imp().label_padding_x_row.get().clone()
-    }
-
-    pub fn label_padding_y_row(&self) -> adw::SpinRow {
-        self.imp().label_padding_y_row.get().clone()
-    }
-
-    pub fn label_font_row(&self) -> adw::ActionRow {
-        self.imp().label_font_row.get().clone()
-    }
-
-    pub fn label_font_button(&self) -> gtk4::FontDialogButton {
-        self.imp().label_font_button.get().clone()
-    }
-
-    pub fn label_alignment_row(&self) -> adw::ComboRow {
-        self.imp().label_alignment_row.get().clone()
-    }
-
-    pub fn label_color_row(&self) -> adw::ActionRow {
-        self.imp().label_color_row.get().clone()
-    }
-
-    pub fn label_color_button(&self) -> gtk4::ColorDialogButton {
-        self.imp().label_color_button.get().clone()
-    }
-
-    pub fn label_opacity_row(&self) -> adw::SpinRow {
-        self.imp().label_opacity_row.get().clone()
-    }
-
-    pub fn label_shadow_row(&self) -> adw::ComboRow {
-        self.imp().label_shadow_row.get().clone()
-    }
-
-    pub fn label_shadow_angle_row(&self) -> adw::SpinRow {
-        self.imp().label_shadow_angle_row.get().clone()
-    }
-
-    pub fn label_shadow_distance_row(&self) -> adw::SpinRow {
-        self.imp().label_shadow_distance_row.get().clone()
-    }
-
-    pub fn label_shadow_blur_row(&self) -> adw::SpinRow {
-        self.imp().label_shadow_blur_row.get().clone()
     }
 
     pub fn export_width_row(&self) -> adw::SpinRow {
@@ -376,6 +292,14 @@ impl Window {
         self.imp().hide_screenshots_button.get().clone()
     }
 
+    pub fn android_import_button(&self) -> gtk4::Button {
+        self.imp().android_import_button.get().clone()
+    }
+
+    pub fn presets_menu_button(&self) -> gtk4::MenuButton {
+        self.imp().presets_menu_button.get().clone()
+    }
+
     pub fn toast_overlay(&self) -> adw::ToastOverlay {
         self.imp().toast_overlay.get().clone()
     }
@@ -397,11 +321,19 @@ mod imp {
         #[template_child]
         pub canvas: TemplateChild<Canvas>,
         #[template_child]
+        pub split_view: TemplateChild<adw::OverlaySplitView>,
+        #[template_child]
+        pub sidebar_toggle_button: TemplateChild<gtk4::ToggleButton>,
+        #[template_child]
+        pub sidebar_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
         pub layout_mode_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub spacing_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub margin_row: TemplateChild<adw::SpinRow>,
+        pub margin_x_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub margin_y_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub alignment_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
@@ -511,57 +443,7 @@ mod imp {
         #[template_child]
         pub label_content_view: TemplateChild<gtk4::TextView>,
         #[template_child]
-        pub label_wrap_row: TemplateChild<adw::SwitchRow>,
-        #[template_child]
-        pub label_position_mode_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_horizontal_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_vertical_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_padding_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_x_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_y_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_background_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_background_color_row: TemplateChild<adw::ActionRow>,
-        #[template_child]
-        pub label_background_color_button: TemplateChild<gtk4::ColorDialogButton>,
-        #[template_child]
-        pub label_background_auto_button: TemplateChild<gtk4::Button>,
-        #[template_child]
-        pub label_background_color2_row: TemplateChild<adw::ActionRow>,
-        #[template_child]
-        pub label_background_color2_button: TemplateChild<gtk4::ColorDialogButton>,
-        #[template_child]
-        pub label_corner_radius_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_padding_x_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_padding_y_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_font_row: TemplateChild<adw::ActionRow>,
-        #[template_child]
-        pub label_font_button: TemplateChild<gtk4::FontDialogButton>,
-        #[template_child]
-        pub label_alignment_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_color_row: TemplateChild<adw::ActionRow>,
-        #[template_child]
-        pub label_color_button: TemplateChild<gtk4::ColorDialogButton>,
-        #[template_child]
-        pub label_opacity_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_shadow_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
-        pub label_shadow_angle_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_shadow_distance_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
-        pub label_shadow_blur_row: TemplateChild<adw::SpinRow>,
+        pub export_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
         pub export_width_row: TemplateChild<adw::SpinRow>,
         #[template_child]
@@ -574,6 +456,10 @@ mod imp {
         pub export_button: TemplateChild<gtk4::Button>,
         #[template_child]
         pub hide_screenshots_button: TemplateChild<gtk4::ToggleButton>,
+        #[template_child]
+        pub android_import_button: TemplateChild<gtk4::Button>,
+        #[template_child]
+        pub presets_menu_button: TemplateChild<gtk4::MenuButton>,
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
     }

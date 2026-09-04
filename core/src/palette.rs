@@ -13,6 +13,21 @@
 
 use std::f64::consts::PI;
 
+/// The starting palette shown for `ColorStrategy::Manual` — four genuinely
+/// distinct, contrasting hues (blue/teal/purple/orange, matching GNOME's
+/// own accent-color family so they already work harmoniously together)
+/// rather than four barely-different shades of one hue. Used wherever the
+/// generator UI needs *some* starting point for manual editing but hasn't
+/// been given a real prior manual choice to preserve — see
+/// `app/src/main.rs`'s `generator_color_strategy_row` handler, which is
+/// what a switch *into* Manual mode actually reaches for.
+pub const DEFAULT_MANUAL_PALETTE: [Rgba; 4] = [
+    Rgba::new(0.2078, 0.5176, 0.8941, 1.0),
+    Rgba::new(0.1294, 0.5647, 0.6431, 1.0),
+    Rgba::new(0.5686, 0.2549, 0.6745, 1.0),
+    Rgba::new(0.9294, 0.3569, 0.0, 1.0),
+];
+
 use crate::model::{ColorStrategy, GradientKind, GradientSpec, Rgba};
 
 /// One decoded image's premultiplied ARGB32 pixel bytes (native-endian
@@ -311,9 +326,17 @@ fn hue_variations(base_hue: f64, lightness: f64, chroma: f64, spread_radians: f6
 fn random_palette(seed: u64) -> Vec<Rgba> {
     let mut rng = crate::rng::Rng::new(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
     let base_hue = rng.range(0.0, PI * 2.0);
-    let chroma = rng.range(0.06, 0.14);
+    // Wider than the old 0.06..0.14/0.6..1.6 range on both axes: the
+    // previous spread topped out around 92° across all 4 stops (~30°
+    // between neighbors), which read as "shades of one hue" rather than
+    // genuinely distinct colors — exactly the complaint this widening
+    // fixes ("keine vier nahezu identischen Farbtöne"). Chroma raised too,
+    // for visible depth rather than a washed-out result; the upper bounds
+    // still stop short of a full-circle rainbow spread, so the result
+    // stays a plausible, harmonious palette rather than clashing hues.
+    let chroma = rng.range(0.09, 0.19);
     let lightness = rng.range(0.3, 0.7);
-    let spread = rng.range(0.6, 1.6);
+    let spread = rng.range(1.8, 3.4);
     hue_variations(base_hue, lightness, chroma, spread, 4)
 }
 
@@ -524,6 +547,43 @@ mod tests {
         let a = resolve_palette(&[], ColorStrategy::Random, 0.5, 1);
         let b = resolve_palette(&[], ColorStrategy::Random, 0.5, 2);
         assert_ne!(a, b);
+    }
+
+    /// A straight-line RGB distance — coarse, but enough to catch "these
+    /// two colors are basically the same" without needing a full
+    /// perceptual metric.
+    fn rgb_distance(a: Rgba, b: Rgba) -> f64 {
+        ((a.r - b.r).powi(2) + (a.g - b.g).powi(2) + (a.b - b.b).powi(2)).sqrt()
+    }
+
+    #[test]
+    fn the_default_manual_palette_has_four_genuinely_distinct_colors() {
+        // Regression guard for the "vier Felder enthalten lediglich
+        // unterschiedliche Rotwerte" complaint: every pair must clear a
+        // real distance, not just differ in the last decimal place.
+        for (i, a) in DEFAULT_MANUAL_PALETTE.iter().enumerate() {
+            for (j, b) in DEFAULT_MANUAL_PALETTE.iter().enumerate().skip(i + 1) {
+                let d = rgb_distance(*a, *b);
+                assert!(d > 0.2, "colors {i} and {j} are too close together: {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn random_palettes_have_visibly_different_neighboring_colors() {
+        // Regression guard for the same complaint, applied to
+        // `ColorStrategy::Random`: across a spread of seeds, no adjacent
+        // pair of the 4 generated colors should read as "the same color
+        // twice" — the old, narrower hue spread could produce exactly
+        // that for an unlucky seed.
+        for seed in 0..20u64 {
+            let palette = resolve_palette(&[], ColorStrategy::Random, 0.5, seed);
+            assert_eq!(palette.len(), 4);
+            for pair in palette.windows(2) {
+                let d = rgb_distance(pair[0], pair[1]);
+                assert!(d > 0.12, "seed {seed}: neighboring colors {:?} and {:?} are too close (distance {d})", pair[0], pair[1]);
+            }
+        }
     }
 
     #[test]

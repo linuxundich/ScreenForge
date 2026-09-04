@@ -8,6 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gtk4::gdk;
 use gtk4::gio;
@@ -17,13 +18,13 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddCallout, AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveCallout, RemoveScreenshot,
-    RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLayoutMode,
-    SetMargin, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack,
+    RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLabelDefaults,
+    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GradientKind,
-    GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, LayoutMode, Rgba, ScreenshotElement, ShadowParams, ShadowPreset,
-    TextAlign, TextBackground, TextElement, TextPosition, Typography, VerticalAnchor,
+    GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, Label, LabelStyle, LayoutMode, Rgba, ScreenshotElement, ShadowParams,
+    ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor,
 };
 use uuid::Uuid;
 
@@ -32,6 +33,10 @@ use import::DecodedImage;
 use window::Window;
 
 const APP_ID: &str = "de.christophlangner.ScreenForge";
+
+/// Repopulates a `LabelStyle`-editing group of sidebar/dialog rows from a
+/// given style — see `build_label_style_groups`'s own doc comment.
+type LabelStyleSync = Rc<dyn Fn(&LabelStyle)>;
 
 /// Everything import/inspector/export actions mutate. Kept as one `Rc<RefCell<_>>`
 /// shared between the window's actions and the canvas widget rather than
@@ -73,18 +78,36 @@ struct EditorState {
     /// `document.elements` or its `visible` flags, so it leaves undo
     /// history and the saved project completely untouched.
     hide_screenshots: bool,
+    /// Repopulates the sidebar's project-wide label-style rows
+    /// (`register_label_style_controls`) from a given `LabelStyle` — set
+    /// once during that function's own setup and called from
+    /// `sync_controls_from_document` afterward, since (unlike the
+    /// Settings dialog's copy of the same rows) the sidebar's widgets live
+    /// for the whole session and must reflect undo/redo, project load,
+    /// preset apply, and canvas label-drags. `None` only during the brief
+    /// window before that setup runs.
+    label_style_sync: Option<LabelStyleSync>,
 }
 
 impl EditorState {
     /// A fresh document seeded from the user's saved preferences (default
-    /// spacing/margin/export quality) rather than `LayoutSettings`'s own
-    /// hardcoded defaults — see `app_settings()`.
+    /// spacing/margin/export quality, and the global default label style)
+    /// rather than `LayoutSettings`'s/`LabelStyle`'s own hardcoded
+    /// defaults — see `app_settings()`. This is the *only* place the
+    /// global `default-label-style` setting is ever read: from here on,
+    /// `document.label_defaults` is this specific document's own
+    /// independent copy (spec: "Eine Änderung der globalen
+    /// Anwendungseinstellungen darf bestehende Projekte nicht automatisch
+    /// verändern") — changing the global setting later, or loading a
+    /// different/older project, never reaches back into it.
     fn new() -> Self {
         let settings = app_settings();
         let mut document = Document::new();
         document.layout.spacing_px = settings.double("default-spacing");
-        document.layout.margin_px = settings.double("default-margin");
+        document.layout.margin_x = settings.double("default-margin-x");
+        document.layout.margin_y = settings.double("default-margin-y");
         document.canvas.export_quality = settings.double("default-export-quality").round().clamp(1.0, 100.0) as u8;
+        document.label_defaults = load_global_label_defaults();
         Self {
             document,
             image_cache: HashMap::new(),
@@ -93,6 +116,7 @@ impl EditorState {
             syncing_controls: false,
             gradient_auto_seed: 0,
             hide_screenshots: false,
+            label_style_sync: None,
         }
     }
 }
@@ -137,7 +161,6 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("screenforge.gresource").expect("failed to register GResource bundle");
 
     let app = adw::Application::builder().application_id(APP_ID).build();
-    register_preferences_action(&app);
     register_about_action(&app);
     app.connect_activate(build_ui);
     app.run()
@@ -173,11 +196,15 @@ fn build_ui(app: &adw::Application) {
 
     register_open_action(app, &window, &canvas, &state);
     register_import_android_action(app, &window, &canvas, &state);
+    register_adb_watch(&window);
     register_drop_target(&window, &canvas, &state);
     register_layout_controls(&window, &canvas, &state);
     register_effect_controls(&window, &canvas, &state);
     register_generator_controls(&window, &canvas, &state);
     register_label_controls(&window, &canvas, &state);
+    register_label_style_controls(&window, &canvas, &state);
+    register_settings_action(app);
+    register_presets_menu(&window, &canvas, &state);
     register_selection_sync(&window, &canvas, &state);
     register_label_drag(&window, &canvas, &state);
     register_wallpaper_drag(&window, &canvas, &state);
@@ -186,7 +213,6 @@ fn build_ui(app: &adw::Application) {
     register_export_controls(&window, &state);
     register_export_action(app, &window, &state);
     register_project_actions(app, &window, &canvas, &state);
-    register_template_actions(&window, &canvas, &state);
     register_undo_redo_actions(app, &window, &canvas, &state);
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
@@ -197,6 +223,7 @@ fn build_ui(app: &adw::Application) {
     register_delete_selected(app, &window, &canvas, &state);
     register_paste_action(app, &window, &canvas, &state);
     register_hide_screenshots_toggle(&window, &canvas, &state);
+    register_sidebar_toggle(&window);
     register_eyedroppers(&window, &canvas);
     register_text_focus_guards(&window);
 
@@ -206,6 +233,17 @@ fn build_ui(app: &adw::Application) {
 /// Wires the header bar's "Screenshots ausblenden" toggle to
 /// `EditorState::hide_screenshots` — a pure preview flag (see its own doc
 /// comment), so this never touches the undo stack.
+/// Wires the header bar's sidebar-toggle button to `split_view`'s own
+/// `show-sidebar` property (not `collapsed`, which is normally
+/// breakpoint-driven and doesn't hide anything by itself) — pure UI state,
+/// not part of `Document`/undo, so a plain bidirectional property binding
+/// is enough: either side (a click, or `show-sidebar` changing for any
+/// other reason) stays in sync with no manual `connect_toggled` bookkeeping.
+fn register_sidebar_toggle(window: &Window) {
+    window.sidebar_toggle_button().set_active(window.split_view().shows_sidebar());
+    window.sidebar_toggle_button().bind_property("active", &window.split_view(), "show-sidebar").bidirectional().sync_create().build();
+}
+
 fn register_hide_screenshots_toggle(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     window.hide_screenshots_button().connect_toggled(glib::clone!(
         #[weak]
@@ -379,6 +417,75 @@ fn register_import_android_action(app: &adw::Application, window: &Window, canva
     app.set_accels_for_action("win.import-android", &["<Ctrl><Shift>a"]);
 }
 
+/// How often `register_adb_watch` re-checks device state. Deliberately a
+/// plain, modest-interval poll rather than shelling out to `adb
+/// track-devices` (its push-based, no-polling protocol) — that needs a
+/// long-lived subprocess with its own reconnect/parsing logic for real
+/// gains, where this needs only what's already this app's established
+/// idiom for talking to `adb` (`gio::spawn_blocking`, see
+/// `register_import_android_action`) at an interval far below "aggressive"
+/// while still noticing a plugged-in phone within a couple of seconds.
+const ADB_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Starts one off-thread ADB check and, on completion, updates
+/// `android_import_button` — but only if the resulting state actually
+/// differs from `last_state`, so a device that's already connected costs
+/// nothing beyond the `adb devices` call itself on every subsequent tick.
+/// A plain fn (not a closure) so `register_adb_watch` below can call it
+/// both immediately and from its repeating timer without fighting the
+/// borrow checker over which one owns it.
+fn check_adb_state_once(window: &Window, last_state: &Rc<RefCell<Option<adb::AdbDeviceState>>>) {
+    glib::spawn_future_local(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        last_state,
+        async move {
+            let state = gio::spawn_blocking(adb::detect_state)
+                .await
+                .unwrap_or_else(|_| adb::AdbDeviceState::AdbUnavailable("Geräteprüfung abgebrochen".to_string()));
+            if last_state.borrow().as_ref() == Some(&state) {
+                return;
+            }
+            let button = window.android_import_button();
+            button.set_sensitive(state.is_usable());
+            button.set_tooltip_text(Some(&state.tooltip()));
+            *last_state.borrow_mut() = Some(state);
+        }
+    ));
+}
+
+/// Keeps `android_import_button` in sync with whatever `adb` can currently
+/// see (spec: the button must reflect a *working ADB connection*, not
+/// just "some USB device is plugged in", and must update on its own
+/// without the user re-opening anything). Every check happens off the
+/// main thread via `gio::spawn_blocking` (see `check_adb_state_once`) —
+/// the periodic timer here only ever *starts* one, never runs `adb`
+/// inline. Runs the first check immediately rather than waiting a full
+/// interval, so the button's initial disabled state (set in `window.ui`)
+/// resolves to the truth as soon as the window appears. The timer itself
+/// holds only a weak reference to `window` and stops itself
+/// (`ControlFlow::Break`) once that upgrade fails, rather than running
+/// forever against a widget that's gone.
+fn register_adb_watch(window: &Window) {
+    let last_state: Rc<RefCell<Option<adb::AdbDeviceState>>> = Rc::new(RefCell::new(None));
+
+    check_adb_state_once(window, &last_state);
+    glib::timeout_add_local(
+        ADB_POLL_INTERVAL,
+        glib::clone!(
+            #[weak]
+            window,
+            #[upgrade_or]
+            glib::ControlFlow::Break,
+            move || {
+                check_adb_state_once(&window, &last_state);
+                glib::ControlFlow::Continue
+            }
+        ),
+    );
+}
+
 /// Lets screenshots be dragged in directly from a file manager (spec §1).
 /// Shares [`import_paths`] with the file-open action so both routes decode
 /// identically.
@@ -458,13 +565,15 @@ fn sync_alignment_group_visibility(window: &Window, mode: LayoutMode) {
 fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let layout_mode_row = window.layout_mode_row();
     let spacing_row = window.spacing_row();
-    let margin_row = window.margin_row();
+    let margin_x_row = window.margin_x_row();
+    let margin_y_row = window.margin_y_row();
 
     {
         let state_ref = state.borrow();
         layout_mode_row.set_selected(index_for_layout_mode(state_ref.document.layout.mode));
         spacing_row.set_value(state_ref.document.layout.spacing_px);
-        margin_row.set_value(state_ref.document.layout.margin_px);
+        margin_x_row.set_value(state_ref.document.layout.margin_x);
+        margin_y_row.set_value(state_ref.document.layout.margin_y);
         sync_alignment_group_visibility(window, state_ref.document.layout.mode);
     }
 
@@ -490,8 +599,13 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
                 // collapsed onto Transform::default()'s (0, 0) origin.
                 let doc = &state_ref.document;
                 let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
-                let placements =
-                    screenforge_core::layout::compute_layout(old, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+                let placements = screenforge_core::layout::compute_layout(
+                    old,
+                    &visible,
+                    doc.layout.spacing_px,
+                    doc.layout.margin_x,
+                    doc.layout.margin_y,
+                );
                 let transforms = visible
                     .iter()
                     .zip(placements.iter())
@@ -537,7 +651,7 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
-    margin_row.connect_value_notify(glib::clone!(
+    margin_x_row.connect_value_notify(glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -547,12 +661,33 @@ fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         move |row| {
             let new = row.value();
             let mut state_ref = state.borrow_mut();
-            let old = state_ref.document.layout.margin_px;
+            let old = state_ref.document.layout.margin_x;
             if state_ref.syncing_controls || old == new {
                 return;
             }
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetMargin { old, new }), document);
+            undo_stack.apply(Box::new(SetMarginX { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+    margin_y_row.connect_value_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |row| {
+            let new = row.value();
+            let mut state_ref = state.borrow_mut();
+            let old = state_ref.document.layout.margin_y;
+            if state_ref.syncing_controls || old == new {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetMarginY { old, new }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
             update_undo_redo_sensitivity(&window, &state);
@@ -598,6 +733,18 @@ fn sync_generator_controls(window: &Window, generated: &GeneratedBackground) {
     window.generator_seed_row().set_value(generated.seed as f64);
 }
 
+/// The dropdown index reserved for "Angepasst" — a sixth, display-only
+/// entry appended after the four real presets on every shadow dropdown in
+/// the app (screenshot Effekte, project/global label style, callouts).
+/// Never a valid *choice* to build a new shadow from — it only ever shows
+/// up as the reflected state of a shadow that doesn't match any of the
+/// four named presets (see `shadow_preset_index_for`), which happens any
+/// time someone fine-tunes the angle/distance/blur rows directly rather
+/// than picking a preset. Every shadow-dropdown handler in this file
+/// treats selecting it as a no-op (nothing coherent to "apply"), rather
+/// than silently falling back to some other preset's exact values.
+const CUSTOM_SHADOW_PRESET_INDEX: u32 = 5;
+
 fn shadow_preset_for_index(index: u32) -> ShadowPreset {
     match index {
         0 => ShadowPreset::NONE,
@@ -611,9 +758,13 @@ fn shadow_preset_for_index(index: u32) -> ShadowPreset {
 /// The preset dropdown index matching `shadow`'s current distance/blur/
 /// opacity/color — deliberately ignoring `angle_and_distance().0` (the
 /// angle), so a shadow with a custom angle still shows its actual
-/// Subtle/Standard/Strong/Floating preset instead of falling back to "Kein
-/// Schatten" just because a plain `ShadowParams` equality check would fail
-/// once the angle no longer matches the preset's own baked-in 90°.
+/// Subtle/Standard/Strong/Floating preset instead of falling back to
+/// "Angepasst" just because a plain `ShadowParams` equality check would
+/// fail once the angle no longer matches the preset's own baked-in 90°.
+/// Falls back to `CUSTOM_SHADOW_PRESET_INDEX` — never `0`/"Kein
+/// Schatten" — for a shadow that doesn't match any of the four presets on
+/// every other axis, so a hand-tuned (but very much enabled) shadow is
+/// never mislabeled as no shadow at all.
 fn shadow_preset_index_for(shadow: &ShadowParams) -> u32 {
     let (_, distance) = shadow.angle_and_distance();
     let presets = [ShadowPreset::NONE, ShadowPreset::SUBTLE, ShadowPreset::STANDARD, ShadowPreset::STRONG, ShadowPreset::FLOATING];
@@ -626,7 +777,7 @@ fn shadow_preset_index_for(shadow: &ShadowParams) -> u32 {
                 && p.color == shadow.color
         })
         .map(|i| i as u32)
-        .unwrap_or(0)
+        .unwrap_or(CUSTOM_SHADOW_PRESET_INDEX)
 }
 
 fn horizontal_anchor_for_index(index: u32) -> HorizontalAnchor {
@@ -710,7 +861,7 @@ fn font_desc_from_typography(typography: &Typography) -> pango::FontDescription 
 /// current single-selected screenshot, or `None` when 0 or several are
 /// selected (in which case the whole `label_group` stays hidden — see
 /// `sync_label_controls`).
-fn single_selected_label_target(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) -> Option<(Uuid, TextElement)> {
+fn single_selected_label_target(canvas: &Canvas, state: &Rc<RefCell<EditorState>>) -> Option<(Uuid, Label)> {
     let selected = canvas.selected_ids();
     if selected.len() != 1 {
         return None;
@@ -739,90 +890,7 @@ fn sync_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
 
     window.label_enabled_row().set_active(label.enabled);
     window.label_content_view().buffer().set_text(&label.content);
-    window.label_wrap_row().set_active(label.typography.wrap);
-
-    let is_absolute = matches!(label.position, TextPosition::Absolute { .. });
-    window.label_position_mode_row().set_selected(if is_absolute { 1 } else { 0 });
-    window.label_horizontal_row().set_visible(!is_absolute);
-    window.label_vertical_row().set_visible(!is_absolute);
-    window.label_padding_row().set_visible(!is_absolute);
-    window.label_x_row().set_visible(is_absolute);
-    window.label_y_row().set_visible(is_absolute);
-    match label.position {
-        TextPosition::Semantic { horizontal, vertical, padding } => {
-            window.label_horizontal_row().set_selected(index_for_horizontal_anchor(horizontal));
-            window.label_vertical_row().set_selected(index_for_vertical_anchor(vertical));
-            window.label_padding_row().set_value(padding);
-        }
-        TextPosition::Absolute { x, y } => {
-            window.label_x_row().set_value(x);
-            window.label_y_row().set_value(y);
-        }
-    }
-
-    let background_index = match &label.background {
-        TextBackground::None => 0,
-        TextBackground::Solid(_) => 1,
-        TextBackground::Gradient(_) => 2,
-    };
-    window.label_background_row().set_selected(background_index);
-    window.label_background_color_row().set_visible(background_index != 0);
-    window.label_background_color2_row().set_visible(background_index == 2);
-    match &label.background {
-        TextBackground::Solid(color) => window.label_background_color_button().set_rgba(&gdk_rgba_from(color)),
-        TextBackground::Gradient(spec) => {
-            if let Some((_, color)) = spec.stops.first() {
-                window.label_background_color_button().set_rgba(&gdk_rgba_from(color));
-            }
-            if let Some((_, color)) = spec.stops.get(1) {
-                window.label_background_color2_button().set_rgba(&gdk_rgba_from(color));
-            }
-        }
-        TextBackground::None => {}
-    }
-
-    window.label_corner_radius_row().set_value(label.corner_radius.top_left);
-    window.label_padding_x_row().set_value(label.padding_x);
-    window.label_padding_y_row().set_value(label.padding_y);
-    window.label_font_button().set_font_desc(&font_desc_from_typography(&label.typography));
-    window.label_alignment_row().set_selected(index_for_text_align(label.typography.alignment));
-    window.label_color_button().set_rgba(&gdk_rgba_from(&label.typography.color));
-    window.label_opacity_row().set_value(label.typography.opacity * 100.0);
-
-    window.label_shadow_row().set_selected(shadow_preset_index_for(&label.shadow));
-    let (angle, distance) = label.shadow.angle_and_distance();
-    window.label_shadow_angle_row().set_value(angle);
-    window.label_shadow_distance_row().set_value(distance);
-    window.label_shadow_blur_row().set_value(label.shadow.blur);
-
-    let controls_enabled = label.enabled;
-    for row in [
-        &window.label_content_view().clone().upcast::<gtk4::Widget>(),
-        &window.label_wrap_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_position_mode_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_background_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_corner_radius_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_padding_x_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_padding_y_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_font_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_alignment_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_color_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_opacity_row().clone().upcast::<gtk4::Widget>(),
-        &window.label_shadow_row().clone().upcast::<gtk4::Widget>(),
-    ] {
-        row.set_sensitive(controls_enabled);
-    }
-    window.label_horizontal_row().set_sensitive(controls_enabled);
-    window.label_vertical_row().set_sensitive(controls_enabled);
-    window.label_padding_row().set_sensitive(controls_enabled);
-    window.label_x_row().set_sensitive(controls_enabled);
-    window.label_y_row().set_sensitive(controls_enabled);
-    window.label_background_color_row().set_sensitive(controls_enabled);
-    window.label_background_color2_row().set_sensitive(controls_enabled);
-    let shadow_geometry_enabled = controls_enabled && label.shadow.enabled;
-    window.label_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
-    window.label_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
-    window.label_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+    window.label_content_view().set_sensitive(label.enabled);
 
     state.borrow_mut().syncing_controls = was_syncing;
 }
@@ -1148,6 +1216,27 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
         #[strong]
         state,
         move |row| {
+            // Bail out *before* touching any sibling widget — this handler
+            // reenters whenever `sync_controls_from_document` (including
+            // via a preset apply) sets this row's selection while a resync
+            // is already in progress. Checking `syncing_controls` only
+            // before the undo-push (as this used to) still let the writes
+            // below run unconditionally, clobbering the sync's own
+            // just-set, correct distance/blur/sensitivity with values
+            // derived from `shadow_preset_for_index`'s lossy classification
+            // — the Effekte section would then visibly show the wrong
+            // shadow even though the document's own shadow was correct all
+            // along.
+            if state.borrow().syncing_controls {
+                return;
+            }
+            // "Angepasst" is a display-only reflection of a shadow that
+            // doesn't match any of the four real presets — never something
+            // to actively apply (there's no single "the custom shadow" to
+            // build from just this label), so selecting it is a no-op.
+            if row.selected() == CUSTOM_SHADOW_PRESET_INDEX {
+                return;
+            }
             let preset = shadow_preset_for_index(row.selected());
             // `with_preset` only touches distance/blur/opacity/color and
             // keeps whichever angle the shadow already had — a preset is a
@@ -1155,7 +1244,6 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             // direction it's cast (spec: choosing Subtle/Standard/Strong
             // must never reset a user-chosen angle back to 90°).
             let mut state_ref = state.borrow_mut();
-            let was_syncing = state_ref.syncing_controls;
             let current = state_ref.document.elements.first().map(|e| e.shadow).unwrap_or_default();
             let new = current.with_preset(preset);
 
@@ -1163,11 +1251,7 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             // guards its own batch: without it, each `set_value` below
             // reentrantly fires `apply_shadow_geometry`, which would push
             // its own spurious undo command built from a partially-updated
-            // mix of old and new values. Saved/restored rather than
-            // unconditionally cleared, since this handler itself can be
-            // reentered from inside that batch (`shadow_row.set_selected`
-            // in `sync_controls_from_document`) — clearing the flag there
-            // would drop the guard for that batch's *remaining* writes.
+            // mix of old and new values.
             state_ref.syncing_controls = true;
             drop(state_ref);
 
@@ -1180,8 +1264,8 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             window.shadow_blur_row().set_sensitive(new.enabled);
 
             let mut state_ref = state.borrow_mut();
-            state_ref.syncing_controls = was_syncing;
-            if was_syncing || state_ref.document.elements.iter().all(|e| e.shadow == new) {
+            state_ref.syncing_controls = false;
+            if state_ref.document.elements.iter().all(|e| e.shadow == new) {
                 return;
             }
             let old: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
@@ -1223,6 +1307,16 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             undo_stack.apply(Box::new(SetShadowForAllElements { old, new }), document);
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
+            // The geometry rows just changed the shadow out from under the
+            // "Schatten" dropdown — its own selection only updates on an
+            // actual dropdown pick, so without this it would keep showing
+            // whatever preset (or "Angepasst") was true a moment ago,
+            // silently going stale the instant someone hand-tunes the
+            // angle/distance/blur directly.
+            let was_syncing = state.borrow().syncing_controls;
+            state.borrow_mut().syncing_controls = true;
+            window.shadow_row().set_selected(shadow_preset_index_for(&new));
+            state.borrow_mut().syncing_controls = was_syncing;
             update_undo_redo_sensitivity(&window, &state);
         }
     );
@@ -1268,21 +1362,21 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
 
 }
 
-/// Wires the selected screenshot's own Label sidebar controls: enable/
-/// content, semantic or manual position, background (including the
-/// contrast-aware "Automatisch" action), corner radius, separate
-/// horizontal/vertical padding, typography (via a native
-/// `GtkFontDialogButton`), and an independently cached shadow — all
-/// funneled through one `apply_label` that rebuilds the whole
-/// `TextElement` and pushes a single `SetScreenshotLabel` undo step,
-/// except the shadow *preset* dropdown, which (like the screenshot
-/// shadow's) needs to preserve the current angle rather than reset it —
-/// see `ShadowParams::with_preset`. The whole section only targets a
-/// single-selected screenshot (see `single_selected_label_target`); it's
-/// re-synced whenever the canvas selection changes (`register_selection_sync`).
+/// Wires the selected screenshot's own Label sidebar controls: just
+/// `enabled`/`content` — the only two things ever set per-label (spec:
+/// "die Gestaltung soll für alle gleich sein, nur noch den Text möchte
+/// ich pro Label setzen können"). Both funnel through one `apply_label`
+/// that pushes a single `SetScreenshotLabel` undo step. The whole section
+/// only targets a single-selected screenshot (see
+/// `single_selected_label_target`); it's re-synced whenever the canvas
+/// selection changes (`register_selection_sync`).
 fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     sync_label_controls(window, canvas, state);
 
+    // Only `enabled`/`content` are ever set per-label now — everything
+    // else about how a label looks comes from the project's shared
+    // `Document::label_defaults`, edited in its own sidebar section (see
+    // `register_label_style_controls`), never here.
     let apply_label = glib::clone!(
         #[weak]
         window,
@@ -1296,59 +1390,9 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
             }
             let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
 
-            let position = if window.label_position_mode_row().selected() == 1 {
-                TextPosition::Absolute { x: window.label_x_row().value(), y: window.label_y_row().value() }
-            } else {
-                TextPosition::Semantic {
-                    horizontal: horizontal_anchor_for_index(window.label_horizontal_row().selected()),
-                    vertical: vertical_anchor_for_index(window.label_vertical_row().selected()),
-                    padding: window.label_padding_row().value(),
-                }
-            };
-            let background = match window.label_background_row().selected() {
-                1 => TextBackground::Solid(rgba_from_gdk(&window.label_background_color_button().rgba())),
-                2 => TextBackground::Gradient(GradientSpec {
-                    kind: GradientKind::Linear { angle_deg: 135.0 },
-                    stops: vec![
-                        (0.0, rgba_from_gdk(&window.label_background_color_button().rgba())),
-                        (1.0, rgba_from_gdk(&window.label_background_color2_button().rgba())),
-                    ],
-                }),
-                _ => TextBackground::None,
-            };
-            let font_desc = window.label_font_button().font_desc().unwrap_or_else(pango::FontDescription::new);
-            let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
-
-            // The shadow has its own dedicated handlers below (mirroring
-            // the screenshot shadow's preset-vs-geometry split), so it's
-            // carried over unchanged here rather than rebuilt from
-            // controls this closure doesn't read.
-            let shadow = current.shadow;
-
             let buffer = window.label_content_view().buffer();
             let content = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
-            let new = TextElement {
-                enabled: window.label_enabled_row().is_active(),
-                content,
-                position,
-                typography: Typography {
-                    font_family,
-                    font_size,
-                    weight,
-                    italic,
-                    color: rgba_from_gdk(&window.label_color_button().rgba()),
-                    alignment: text_align_for_index(window.label_alignment_row().selected()),
-                    opacity: window.label_opacity_row().value() / 100.0,
-                    letter_spacing: 0.0,
-                    line_spacing: 1.2,
-                    wrap: window.label_wrap_row().is_active(),
-                },
-                background,
-                corner_radius: CornerRadius::uniform(window.label_corner_radius_row().value()),
-                padding_x: window.label_padding_x_row().value(),
-                padding_y: window.label_padding_y_row().value(),
-                shadow,
-            };
+            let new = Label { enabled: window.label_enabled_row().is_active(), content };
             if current == new {
                 return;
             }
@@ -1367,34 +1411,7 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         #[strong]
         apply_label,
         move |row| {
-            let enabled = row.is_active();
-            for widget in [
-                window.label_content_view().upcast::<gtk4::Widget>(),
-                window.label_wrap_row().upcast(),
-                window.label_position_mode_row().upcast(),
-                window.label_horizontal_row().upcast(),
-                window.label_vertical_row().upcast(),
-                window.label_padding_row().upcast(),
-                window.label_x_row().upcast(),
-                window.label_y_row().upcast(),
-                window.label_background_row().upcast(),
-                window.label_background_color_row().upcast(),
-                window.label_background_color2_row().upcast(),
-                window.label_corner_radius_row().upcast(),
-                window.label_padding_x_row().upcast(),
-                window.label_padding_y_row().upcast(),
-                window.label_font_row().upcast(),
-                window.label_alignment_row().upcast(),
-                window.label_color_row().upcast(),
-                window.label_opacity_row().upcast(),
-                window.label_shadow_row().upcast(),
-            ] {
-                widget.set_sensitive(enabled);
-            }
-            let shadow_geometry_enabled = enabled && window.label_shadow_row().selected() != 0;
-            window.label_shadow_angle_row().set_sensitive(shadow_geometry_enabled);
-            window.label_shadow_distance_row().set_sensitive(shadow_geometry_enabled);
-            window.label_shadow_blur_row().set_sensitive(shadow_geometry_enabled);
+            window.label_content_view().set_sensitive(row.is_active());
             apply_label();
         }
     ));
@@ -1403,210 +1420,562 @@ fn register_label_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
         apply_label,
         move |_| apply_label()
     ));
-    window.label_wrap_row().connect_active_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_position_mode_row().connect_selected_notify(glib::clone!(
-        #[weak]
-        window,
-        #[strong]
-        apply_label,
-        move |row| {
-            let is_absolute = row.selected() == 1;
-            window.label_horizontal_row().set_visible(!is_absolute);
-            window.label_vertical_row().set_visible(!is_absolute);
-            window.label_padding_row().set_visible(!is_absolute);
-            window.label_x_row().set_visible(is_absolute);
-            window.label_y_row().set_visible(is_absolute);
-            apply_label();
-        }
-    ));
-    window.label_horizontal_row().connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_vertical_row().connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_padding_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_x_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_y_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_background_row().connect_selected_notify(glib::clone!(
-        #[weak]
-        window,
-        #[strong]
-        apply_label,
-        move |row| {
-            let selected = row.selected();
-            window.label_background_color_row().set_visible(selected != 0);
-            window.label_background_color2_row().set_visible(selected == 2);
-            apply_label();
-        }
-    ));
-    window.label_background_color_button().connect_rgba_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_background_color2_button().connect_rgba_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_background_auto_button().connect_clicked(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |_| apply_automatic_label_colors(&window, &canvas, &state)
-    ));
-    window.label_corner_radius_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_padding_x_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_padding_y_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_font_button().connect_font_desc_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_alignment_row().connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_color_button().connect_rgba_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
-    window.label_opacity_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label,
-        move |_| apply_label()
-    ));
+}
 
-    // Shadow preset dropdown: mirrors the screenshot shadow preset handler
-    // exactly (`ShadowParams::with_preset` preserves the angle; the
-    // syncing_controls save/restore guards against a reentrant partial-
-    // state undo push while distance/blur are updated below) but commits
-    // directly via `SetScreenshotLabel` rather than routing through
-    // `apply_label`, since `apply_label` deliberately doesn't touch the
-    // shadow at all.
-    window.label_shadow_row().connect_selected_notify(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |row| {
-            let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
-            let preset = shadow_preset_for_index(row.selected());
-            let new_shadow = current.shadow.with_preset(preset);
+/// Builds the "Schrift &amp; Farbe"/"Position"/"Gestaltung" groups shared
+/// by both places a [`LabelStyle`] is edited — the current project's own
+/// `Document::label_defaults`, live in the sidebar
+/// (`register_label_style_controls`), and the app-wide default used only
+/// to seed a *new* project, in the Settings dialog's "Allgemein" tab
+/// (`build_global_label_defaults_groups`) — so the two don't duplicate
+/// ~250 lines of near-identical widget construction. `get`/`commit` are
+/// the only things that differ between the two: `get` reads whatever
+/// `LabelStyle` is being edited (called once up front to populate every
+/// row, and again fresh inside each row's own handler), and
+/// `commit(old, new)` decides what "saving a change" means — an
+/// undo-tracked `SetLabelDefaults` for the project-level case, a plain
+/// `GSettings` write for the global case (which has no undo history to
+/// speak of). `scope_description`, when set, becomes the first group's
+/// description — used only by the global editor, to make clear at a
+/// glance that it seeds *new* projects rather than affecting the one
+/// currently open.
+///
+/// Returns the three groups plus a `sync` closure that repopulates every
+/// row from a given [`LabelStyle`] — the sidebar's copy of these groups
+/// lives for the whole session (unlike the Settings dialog's, which is
+/// rebuilt fresh every time it's opened) and must reflect external
+/// changes too: undo/redo, loading a different project, applying a
+/// preset, or dragging a label's position on the canvas. `is_syncing`
+/// must report whether such a resync is currently in progress — every
+/// handler below checks it first and bails out, the same guard pattern
+/// `EditorState::syncing_controls` provides everywhere else in this file
+/// — otherwise `sync` calling e.g. `shadow_row.set_selected(..)` would
+/// re-trigger that row's own change handler mid-resync and push a
+/// spurious commit built from a half-updated state. The global editor has
+/// no ongoing resync need (its dialog page is thrown away on close), so
+/// it passes a closure that always returns `false`.
+fn build_label_style_groups(
+    get: Rc<dyn Fn() -> LabelStyle>,
+    commit: Rc<dyn Fn(LabelStyle, LabelStyle)>,
+    is_syncing: Rc<dyn Fn() -> bool>,
+    scope_description: Option<&str>,
+) -> (adw::PreferencesGroup, adw::PreferencesGroup, adw::PreferencesGroup, LabelStyleSync) {
+    let defaults = get();
 
-            let was_syncing = state.borrow().syncing_controls;
-            state.borrow_mut().syncing_controls = true;
-            window.label_shadow_distance_row().set_value(new_shadow.angle_and_distance().1);
-            window.label_shadow_blur_row().set_value(new_shadow.blur);
-            window.label_shadow_angle_row().set_sensitive(new_shadow.enabled);
-            window.label_shadow_distance_row().set_sensitive(new_shadow.enabled);
-            window.label_shadow_blur_row().set_sensitive(new_shadow.enabled);
-            state.borrow_mut().syncing_controls = was_syncing;
-            if was_syncing {
-                return;
+            let position_mode_row = adw::ComboRow::builder().title("Position").build();
+            position_mode_row.set_model(Some(&gtk4::StringList::new(&["Automatisch", "Manuell (X/Y)"])));
+            let horizontal_row = adw::ComboRow::builder().title("Horizontal").build();
+            horizontal_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
+            let vertical_row = adw::ComboRow::builder().title("Vertikal").build();
+            vertical_row.set_model(Some(&gtk4::StringList::new(&["Oben", "Mitte", "Unten"])));
+            // Negative allowed — lets the shared default itself push every
+            // label above/left of its screenshot's own edge.
+            let padding_row = adw::SpinRow::with_range(-500.0, 500.0, 4.0);
+            padding_row.set_title("Randabstand");
+            padding_row.set_subtitle("Zum Screenshot-Rand, in Pixeln");
+            let x_row = adw::SpinRow::with_range(-4000.0, 8000.0, 4.0);
+            x_row.set_title("X-Position");
+            let y_row = adw::SpinRow::with_range(-4000.0, 8000.0, 4.0);
+            y_row.set_title("Y-Position");
+
+            let background_row = adw::ComboRow::builder().title("Hintergrund").build();
+            background_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
+            let background_color_row = adw::ActionRow::builder().title("Hintergrundfarbe").build();
+            let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+            background_color_button.set_valign(gtk4::Align::Center);
+            background_color_row.add_suffix(&background_color_button);
+            let background_color2_row = adw::ActionRow::builder().title("Hintergrundfarbe 2").build();
+            let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+            background_color2_button.set_valign(gtk4::Align::Center);
+            background_color2_row.add_suffix(&background_color2_button);
+
+            let font_row = adw::ActionRow::builder().title("Schrift").build();
+            let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
+            font_button.set_valign(gtk4::Align::Center);
+            font_row.add_suffix(&font_button);
+            let alignment_row = adw::ComboRow::builder().title("Textausrichtung").subtitle("Bei mehrzeiligem Text").build();
+            alignment_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
+            let color_row = adw::ActionRow::builder().title("Textfarbe").build();
+            let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
+            color_button.set_valign(gtk4::Align::Center);
+            color_row.add_suffix(&color_button);
+            let opacity_row = adw::SpinRow::with_range(0.0, 100.0, 5.0);
+            opacity_row.set_title("Deckkraft");
+            opacity_row.set_subtitle("In Prozent");
+
+            let corner_radius_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
+            corner_radius_row.set_title("Eckenradius");
+            let padding_x_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
+            padding_x_row.set_title("Innenabstand horizontal");
+            let padding_y_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
+            padding_y_row.set_title("Innenabstand vertikal");
+            let wrap_row = adw::SwitchRow::builder().title("Automatisch umbrechen").build();
+            let line_spacing_row = adw::SpinRow::with_range(0.5, 3.0, 0.1);
+            line_spacing_row.set_title("Zeilenabstand");
+            line_spacing_row.set_subtitle("Faktor der Schriftgröße, 1.0 = normal");
+            line_spacing_row.set_digits(1);
+
+            let shadow_row = adw::ComboRow::builder().title("Schatten").build();
+            shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating", "Angepasst"])));
+            let shadow_angle_row = adw::SpinRow::with_range(0.0, 360.0, 5.0);
+            shadow_angle_row.set_title("Schatten-Winkel");
+            let shadow_distance_row = adw::SpinRow::with_range(0.0, 300.0, 2.0);
+            shadow_distance_row.set_title("Schatten-Distanz");
+            let shadow_blur_row = adw::SpinRow::with_range(0.0, 150.0, 2.0);
+            shadow_blur_row.set_title("Weichzeichner");
+
+            // Populates every row from a given style — called once below
+            // to seed the initial values (*before* any change handler is
+            // attached, so that first call can never itself trigger a
+            // spurious commit) and returned as `sync` for the sidebar's
+            // ongoing use afterward.
+            let populate: LabelStyleSync = {
+                let position_mode_row = position_mode_row.clone();
+                let horizontal_row = horizontal_row.clone();
+                let vertical_row = vertical_row.clone();
+                let padding_row = padding_row.clone();
+                let x_row = x_row.clone();
+                let y_row = y_row.clone();
+                let background_row = background_row.clone();
+                let background_color_row = background_color_row.clone();
+                let background_color2_row = background_color2_row.clone();
+                let background_color_button = background_color_button.clone();
+                let background_color2_button = background_color2_button.clone();
+                let font_button = font_button.clone();
+                let alignment_row = alignment_row.clone();
+                let color_button = color_button.clone();
+                let opacity_row = opacity_row.clone();
+                let corner_radius_row = corner_radius_row.clone();
+                let padding_x_row = padding_x_row.clone();
+                let padding_y_row = padding_y_row.clone();
+                let wrap_row = wrap_row.clone();
+                let line_spacing_row = line_spacing_row.clone();
+                let shadow_row = shadow_row.clone();
+                let shadow_angle_row = shadow_angle_row.clone();
+                let shadow_distance_row = shadow_distance_row.clone();
+                let shadow_blur_row = shadow_blur_row.clone();
+                Rc::new(move |defaults: &LabelStyle| {
+                    let is_absolute = matches!(defaults.position, TextPosition::Absolute { .. });
+                    position_mode_row.set_selected(if is_absolute { 1 } else { 0 });
+                    horizontal_row.set_visible(!is_absolute);
+                    vertical_row.set_visible(!is_absolute);
+                    padding_row.set_visible(!is_absolute);
+                    x_row.set_visible(is_absolute);
+                    y_row.set_visible(is_absolute);
+                    match defaults.position {
+                        TextPosition::Semantic { horizontal, vertical, padding } => {
+                            horizontal_row.set_selected(index_for_horizontal_anchor(horizontal));
+                            vertical_row.set_selected(index_for_vertical_anchor(vertical));
+                            padding_row.set_value(padding);
+                        }
+                        TextPosition::Absolute { x, y } => {
+                            x_row.set_value(x);
+                            y_row.set_value(y);
+                        }
+                    }
+                    let background_index = match &defaults.background {
+                        TextBackground::None => 0,
+                        TextBackground::Solid(_) => 1,
+                        TextBackground::Gradient(_) => 2,
+                    };
+                    background_row.set_selected(background_index);
+                    background_color_row.set_visible(background_index != 0);
+                    background_color2_row.set_visible(background_index == 2);
+                    match &defaults.background {
+                        TextBackground::Solid(c) => background_color_button.set_rgba(&gdk_rgba_from(c)),
+                        TextBackground::Gradient(spec) => {
+                            if let Some((_, c)) = spec.stops.first() {
+                                background_color_button.set_rgba(&gdk_rgba_from(c));
+                            }
+                            if let Some((_, c)) = spec.stops.get(1) {
+                                background_color2_button.set_rgba(&gdk_rgba_from(c));
+                            }
+                        }
+                        TextBackground::None => {}
+                    }
+                    font_button.set_font_desc(&font_desc_from_typography(&defaults.typography));
+                    alignment_row.set_selected(index_for_text_align(defaults.typography.alignment));
+                    color_button.set_rgba(&gdk_rgba_from(&defaults.typography.color));
+                    opacity_row.set_value(defaults.typography.opacity * 100.0);
+                    corner_radius_row.set_value(defaults.corner_radius.top_left);
+                    padding_x_row.set_value(defaults.padding_x);
+                    padding_y_row.set_value(defaults.padding_y);
+                    wrap_row.set_active(defaults.typography.wrap);
+                    line_spacing_row.set_value(defaults.typography.line_spacing);
+                    shadow_row.set_selected(shadow_preset_index_for(&defaults.shadow));
+                    let (angle, distance) = defaults.shadow.angle_and_distance();
+                    shadow_angle_row.set_value(angle);
+                    shadow_distance_row.set_value(distance);
+                    shadow_blur_row.set_value(defaults.shadow.blur);
+                    let shadow_geometry_enabled = defaults.shadow.enabled;
+                    shadow_angle_row.set_sensitive(shadow_geometry_enabled);
+                    shadow_distance_row.set_sensitive(shadow_geometry_enabled);
+                    shadow_blur_row.set_sensitive(shadow_geometry_enabled);
+                })
+            };
+            populate(&defaults);
+
+            let apply = glib::clone!(
+                #[strong]
+                get,
+                #[strong]
+                commit,
+                #[strong]
+                is_syncing,
+                #[weak]
+                position_mode_row,
+                #[weak]
+                horizontal_row,
+                #[weak]
+                vertical_row,
+                #[weak]
+                padding_row,
+                #[weak]
+                x_row,
+                #[weak]
+                y_row,
+                #[weak]
+                background_row,
+                #[weak]
+                background_color_button,
+                #[weak]
+                background_color2_button,
+                #[weak]
+                font_button,
+                #[weak]
+                alignment_row,
+                #[weak]
+                color_button,
+                #[weak]
+                opacity_row,
+                #[weak]
+                corner_radius_row,
+                #[weak]
+                padding_x_row,
+                #[weak]
+                padding_y_row,
+                #[weak]
+                wrap_row,
+                #[weak]
+                line_spacing_row,
+                move || {
+                    if is_syncing() {
+                        return;
+                    }
+                    let old = get();
+                    let position = if position_mode_row.selected() == 1 {
+                        TextPosition::Absolute { x: x_row.value(), y: y_row.value() }
+                    } else {
+                        TextPosition::Semantic {
+                            horizontal: horizontal_anchor_for_index(horizontal_row.selected()),
+                            vertical: vertical_anchor_for_index(vertical_row.selected()),
+                            padding: padding_row.value(),
+                        }
+                    };
+                    let background = match background_row.selected() {
+                        1 => TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba())),
+                        2 => TextBackground::Gradient(GradientSpec {
+                            kind: GradientKind::Linear { angle_deg: 135.0 },
+                            stops: vec![
+                                (0.0, rgba_from_gdk(&background_color_button.rgba())),
+                                (1.0, rgba_from_gdk(&background_color2_button.rgba())),
+                            ],
+                        }),
+                        _ => TextBackground::None,
+                    };
+                    let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
+                    let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
+                    // The shadow *preset*/geometry rows have their own
+                    // dedicated handlers below (mirroring the per-label
+                    // shadow split), so this closure carries the shadow
+                    // over from whatever's already current.
+                    let shadow = old.shadow;
+                    let new = LabelStyle {
+                        position,
+                        typography: Typography {
+                            font_family,
+                            font_size,
+                            weight,
+                            italic,
+                            color: rgba_from_gdk(&color_button.rgba()),
+                            alignment: text_align_for_index(alignment_row.selected()),
+                            opacity: opacity_row.value() / 100.0,
+                            letter_spacing: old.typography.letter_spacing,
+                            line_spacing: line_spacing_row.value(),
+                            wrap: wrap_row.is_active(),
+                        },
+                        background,
+                        corner_radius: CornerRadius::uniform(corner_radius_row.value()),
+                        padding_x: padding_x_row.value(),
+                        padding_y: padding_y_row.value(),
+                        shadow,
+                    };
+                    if old == new {
+                        return;
+                    }
+                    commit(old, new);
+                }
+            );
+
+            position_mode_row.connect_selected_notify(glib::clone!(
+                #[weak]
+                horizontal_row,
+                #[weak]
+                vertical_row,
+                #[weak]
+                padding_row,
+                #[weak]
+                x_row,
+                #[weak]
+                y_row,
+                #[strong]
+                apply,
+                move |row| {
+                    let is_absolute = row.selected() == 1;
+                    horizontal_row.set_visible(!is_absolute);
+                    vertical_row.set_visible(!is_absolute);
+                    padding_row.set_visible(!is_absolute);
+                    x_row.set_visible(is_absolute);
+                    y_row.set_visible(is_absolute);
+                    apply();
+                }
+            ));
+            horizontal_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            vertical_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            padding_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            x_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            y_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            background_row.connect_selected_notify(glib::clone!(
+                #[weak]
+                background_color_row,
+                #[weak]
+                background_color2_row,
+                #[strong]
+                apply,
+                move |row| {
+                    let selected = row.selected();
+                    background_color_row.set_visible(selected != 0);
+                    background_color2_row.set_visible(selected == 2);
+                    apply();
+                }
+            ));
+            background_color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            background_color2_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            font_button.connect_font_desc_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            alignment_row.connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            color_button.connect_rgba_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            opacity_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            corner_radius_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            padding_x_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            padding_y_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            wrap_row.connect_active_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            line_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+
+            // Shadow preset/geometry: same preset-preserves-angle split as
+            // every other shadow control in this app
+            // (`ShadowParams::with_preset`), committed directly since
+            // `apply` above deliberately doesn't touch the shadow.
+            shadow_row.connect_selected_notify(glib::clone!(
+                #[strong]
+                get,
+                #[strong]
+                commit,
+                #[strong]
+                is_syncing,
+                #[weak]
+                shadow_angle_row,
+                #[weak]
+                shadow_distance_row,
+                #[weak]
+                shadow_blur_row,
+                move |row| {
+                    if is_syncing() {
+                        return;
+                    }
+                    // "Angepasst" only ever reflects a shadow that doesn't
+                    // match any real preset — selecting it has nothing
+                    // coherent to apply.
+                    if row.selected() == CUSTOM_SHADOW_PRESET_INDEX {
+                        return;
+                    }
+                    let old = get();
+                    let preset = shadow_preset_for_index(row.selected());
+                    let new_shadow = old.shadow.with_preset(preset);
+                    shadow_distance_row.set_value(new_shadow.angle_and_distance().1);
+                    shadow_blur_row.set_value(new_shadow.blur);
+                    shadow_angle_row.set_sensitive(new_shadow.enabled);
+                    shadow_distance_row.set_sensitive(new_shadow.enabled);
+                    shadow_blur_row.set_sensitive(new_shadow.enabled);
+                    let mut new = old.clone();
+                    new.shadow = new_shadow;
+                    if old == new {
+                        return;
+                    }
+                    commit(old, new);
+                }
+            ));
+            let apply_shadow_geometry = glib::clone!(
+                #[strong]
+                get,
+                #[strong]
+                commit,
+                #[strong]
+                is_syncing,
+                #[weak]
+                shadow_row,
+                #[weak]
+                shadow_angle_row,
+                #[weak]
+                shadow_distance_row,
+                #[weak]
+                shadow_blur_row,
+                move || {
+                    if is_syncing() {
+                        return;
+                    }
+                    let old = get();
+                    let (offset_x, offset_y) =
+                        ShadowParams::offset_for_angle_and_distance(shadow_angle_row.value(), shadow_distance_row.value());
+                    let mut new = old.clone();
+                    new.shadow.offset_x = offset_x;
+                    new.shadow.offset_y = offset_y;
+                    new.shadow.blur = shadow_blur_row.value();
+                    if old == new {
+                        return;
+                    }
+                    commit(old, new.clone());
+                    // See the matching comment on the screenshot-level
+                    // `apply_shadow_geometry` (`register_effect_controls`)
+                    // for why the dropdown needs this explicit nudge —
+                    // its own selection only updates on an actual pick.
+                    shadow_row.set_selected(shadow_preset_index_for(&new.shadow));
+                }
+            );
+            shadow_angle_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+            shadow_distance_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+            shadow_blur_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+
+            let position_group = adw::PreferencesGroup::new();
+            position_group.set_title("Position");
+            position_group.add(&position_mode_row);
+            position_group.add(&horizontal_row);
+            position_group.add(&vertical_row);
+            position_group.add(&padding_row);
+            position_group.add(&x_row);
+            position_group.add(&y_row);
+
+            let look_group = adw::PreferencesGroup::new();
+            look_group.set_title("Schrift &amp; Farbe");
+            if let Some(description) = scope_description {
+                look_group.set_description(Some(description));
             }
+            look_group.add(&font_row);
+            look_group.add(&alignment_row);
+            look_group.add(&color_row);
+            look_group.add(&opacity_row);
+            look_group.add(&background_row);
+            look_group.add(&background_color_row);
+            look_group.add(&background_color2_row);
 
-            let mut new_label = current.clone();
-            new_label.shadow = new_shadow;
-            if current == new_label {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new_label }), document);
-            drop(state_ref);
-            refresh_canvas(&window, &canvas, &state);
-            update_undo_redo_sensitivity(&window, &state);
-        }
-    ));
+            let styling_group = adw::PreferencesGroup::new();
+            styling_group.set_title("Gestaltung");
+            styling_group.add(&corner_radius_row);
+            styling_group.add(&padding_x_row);
+            styling_group.add(&padding_y_row);
+            styling_group.add(&wrap_row);
+            styling_group.add(&line_spacing_row);
+            styling_group.add(&shadow_row);
+            styling_group.add(&shadow_angle_row);
+            styling_group.add(&shadow_distance_row);
+            styling_group.add(&shadow_blur_row);
 
-    let apply_label_shadow_geometry = glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move || {
-            if state.borrow().syncing_controls {
-                return;
-            }
-            let Some((element_id, current)) = single_selected_label_target(&canvas, &state) else { return };
-            let angle = window.label_shadow_angle_row().value();
-            let distance = window.label_shadow_distance_row().value();
-            let blur = window.label_shadow_blur_row().value();
-            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(angle, distance);
+            (look_group, position_group, styling_group, populate)
+}
 
-            let mut new_label = current.clone();
-            new_label.shadow.offset_x = offset_x;
-            new_label.shadow.offset_y = offset_y;
-            new_label.shadow.blur = blur;
-            if current == new_label {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new_label }), document);
-            drop(state_ref);
-            refresh_canvas(&window, &canvas, &state);
-            update_undo_redo_sensitivity(&window, &state);
-        }
+/// The app-wide "default label style" groups (spec: "globale
+/// Anwendungseinstellungen" — the top tier), appended onto the
+/// "Allgemein" page (`build_general_page`) rather than living in their
+/// own dialog page, since that's exactly the same category as the
+/// spacing/margin/export-quality rows already there: values that seed a
+/// *new* project and are otherwise inert. Writes straight to `GSettings`
+/// (`save_global_label_defaults`) with no undo history of its own — an
+/// app-wide setting isn't part of any document's undo stack. The dialog
+/// page these groups live on is thrown away and rebuilt fresh every time
+/// it's opened, so there's no ongoing resync need — `is_syncing` is a
+/// constant `false`.
+fn build_global_label_defaults_groups() -> (adw::PreferencesGroup, adw::PreferencesGroup, adw::PreferencesGroup) {
+    let get: Rc<dyn Fn() -> LabelStyle> = Rc::new(load_global_label_defaults);
+    let commit: Rc<dyn Fn(LabelStyle, LabelStyle)> = Rc::new(|_old, new| save_global_label_defaults(&new));
+    let is_syncing: Rc<dyn Fn() -> bool> = Rc::new(|| false);
+    let (look_group, position_group, styling_group, _sync) = build_label_style_groups(
+        get,
+        commit,
+        is_syncing,
+        Some("Ausgangswerte für neu erstellte Projekte — bereits bestehende Projekte bleiben davon unverändert"),
     );
-    window.label_shadow_angle_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label_shadow_geometry,
-        move |_| apply_label_shadow_geometry()
-    ));
-    window.label_shadow_distance_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label_shadow_geometry,
-        move |_| apply_label_shadow_geometry()
-    ));
-    window.label_shadow_blur_row().connect_value_notify(glib::clone!(
-        #[strong]
-        apply_label_shadow_geometry,
-        move |_| apply_label_shadow_geometry()
-    ));
+    (look_group, position_group, styling_group)
+}
+
+/// The project-wide label style, live in the sidebar (spec: "im Projekt
+/// sollen sich die Einstellungen anpassen lassen, für alle Screenshots
+/// gemeinsam, nicht getrennt einzeln") — the middle tier of the
+/// three-level configuration: seeded from the app-wide default when the
+/// project is created (`EditorState::new`), freely editable here
+/// afterward without ever reaching back into that global setting, and
+/// captured into a preset alongside the project's other settings
+/// (`Template::from_document`). Always visible regardless of selection,
+/// like Layout/Hintergrund/Effekte — unlike the per-screenshot "Label"
+/// section right above it (enabled/content only), since this is the one
+/// shared style every label in the project uses.
+///
+/// Inserts the three groups right after the sidebar's per-screenshot
+/// `label_group`, using `AdwPreferencesPage::remove`/`add` to reorder —
+/// the only way to place them precisely, since `add` alone only ever
+/// appends to the end of the page. Returns nothing; the `sync` closure
+/// `build_label_style_groups` hands back is stored on `EditorState` so
+/// `sync_controls_from_document` can keep these rows in step with
+/// undo/redo, project load, preset apply, and canvas label-drags.
+fn register_label_style_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let get: Rc<dyn Fn() -> LabelStyle> = {
+        let state = state.clone();
+        Rc::new(move || state.borrow().document.label_defaults.clone())
+    };
+    let commit: Rc<dyn Fn(LabelStyle, LabelStyle)> = {
+        let window = window.clone();
+        let canvas = canvas.clone();
+        let state = state.clone();
+        Rc::new(move |old, new| {
+            let mut state_ref = state.borrow_mut();
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetLabelDefaults { old, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        })
+    };
+    let is_syncing: Rc<dyn Fn() -> bool> = {
+        let state = state.clone();
+        Rc::new(move || state.borrow().syncing_controls)
+    };
+    let (look_group, position_group, styling_group, sync) = build_label_style_groups(
+        get,
+        commit,
+        is_syncing,
+        Some("Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"),
+    );
+
+    let page = window.sidebar_page();
+    let callouts_group = window.callouts_group();
+    let export_group = window.export_group();
+    page.remove(&callouts_group);
+    page.remove(&export_group);
+    page.add(&look_group);
+    page.add(&position_group);
+    page.add(&styling_group);
+    page.add(&callouts_group);
+    page.add(&export_group);
+
+    state.borrow_mut().label_style_sync = Some(sync);
 }
 
 /// Re-syncs the Label sidebar section whenever the canvas selection
@@ -1632,10 +2001,12 @@ fn register_selection_sync(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
 }
 
 /// Wires the canvas's own label-drag gesture to an undoable
-/// `SetScreenshotLabel` — works in every layout mode, since a label's
-/// position is always relative to its own screenshot regardless of how
-/// the screenshots themselves are arranged (spec: label positioning is
-/// independent of the composition's auto-layout).
+/// `SetLabelDefaults` — every label in the project shares one position, so
+/// dragging any one label's box moves them all identically. Works in every
+/// layout mode, since a label's position is always relative to its own
+/// screenshot regardless of how the screenshots themselves are arranged
+/// (spec: label positioning is independent of the composition's
+/// auto-layout).
 fn register_label_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     canvas.connect_label_move(glib::clone!(
         #[weak]
@@ -1644,22 +2015,26 @@ fn register_label_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
         canvas,
         #[strong]
         state,
-        move |element_id, new_position| {
+        move |new_position| {
             let mut state_ref = state.borrow_mut();
-            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
-            let old = element.label.clone();
-            let mut new = old.clone();
-            new.position = new_position;
+            let old = state_ref.document.label_defaults.clone();
+            let new = LabelStyle { position: new_position, ..old.clone() };
             let EditorState { document, undo_stack, .. } = &mut *state_ref;
-            undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old, new }), document);
+            undo_stack.apply(Box::new(SetLabelDefaults { old, new: new.clone() }), document);
+            let sync = state_ref.label_style_sync.clone();
             drop(state_ref);
             refresh_canvas(&window, &canvas, &state);
-            // The drag changed the label's position/mode from outside the
-            // sidebar entirely, so its Position/X/Y rows need an explicit
+            // The drag changed the sidebar's Position/X/Y rows from
+            // outside the sidebar entirely, so they need an explicit
             // resync — nothing else triggers one for a canvas-originated
-            // change (contrast `apply_label`, where the sidebar itself was
-            // already the source of truth for what it displays).
-            sync_label_controls(&window, &canvas, &state);
+            // change (contrast the rows' own handlers, which are already
+            // the source of truth for what they display).
+            if let Some(sync) = sync {
+                let was_syncing = state.borrow().syncing_controls;
+                state.borrow_mut().syncing_controls = true;
+                sync(&new);
+                state.borrow_mut().syncing_controls = was_syncing;
+            }
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
@@ -1692,49 +2067,6 @@ fn register_wallpaper_drag(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
             update_undo_redo_sensitivity(&window, &state);
         }
     ));
-}
-
-/// The "Automatisch" background-color action (spec: a contrast-aware
-/// suggestion, never by raising saturation): analyzes the selected
-/// screenshot's own decoded pixels via [`suggest_label_colors`] and
-/// applies the suggested background/text colors as one undo step —
-/// mirrors `generate_gradient_from_screenshots`'s decode-then-suggest
-/// shape, scoped to one screenshot instead of every visible one.
-fn apply_automatic_label_colors(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let Some((element_id, current)) = single_selected_label_target(canvas, state) else { return };
-
-    let mut state_ref = state.borrow_mut();
-    let Some(path) = state_ref.document.elements.iter().find(|e| e.id == element_id).and_then(|e| match &e.source {
-        ImageSource::Path(path) => Some(path.clone()),
-        ImageSource::Embedded { .. } => None,
-    }) else {
-        return;
-    };
-    let Some(image) = get_or_decode(&mut state_ref.image_cache, &path).cloned() else { return };
-
-    let sample = screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height };
-    let (background, text) = screenforge_core::palette::suggest_label_colors(&[sample]);
-
-    let mut new = current.clone();
-    new.background = TextBackground::Solid(background);
-    new.typography.color = text;
-    if current == new {
-        return;
-    }
-    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-    undo_stack.apply(Box::new(SetScreenshotLabel { element_id, old: current, new: new.clone() }), document);
-    drop(state_ref);
-
-    state.borrow_mut().syncing_controls = true;
-    window.label_background_row().set_selected(1);
-    window.label_background_color_row().set_visible(true);
-    window.label_background_color2_row().set_visible(false);
-    window.label_background_color_button().set_rgba(&gdk_rgba_from(&background));
-    window.label_color_button().set_rgba(&gdk_rgba_from(&text));
-    state.borrow_mut().syncing_controls = false;
-
-    refresh_canvas(window, canvas, state);
-    update_undo_redo_sensitivity(window, state);
 }
 
 /// The single currently-selected screenshot's own id, or `None` when 0 or
@@ -1831,17 +2163,63 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
     wrap_row.set_active(callout.text.typography.wrap);
     row.add_row(&wrap_row);
 
+    let line_spacing_row = spin_row("Zeilenabstand", 0.5, 3.0, callout.text.typography.line_spacing);
+    line_spacing_row.set_subtitle("Faktor der Schriftgröße, 1.0 = normal");
+    row.add_row(&line_spacing_row);
+
+    let font_row = adw::ActionRow::new();
+    font_row.set_title("Schrift");
+    let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
+    font_button.set_valign(gtk4::Align::Center);
+    font_button.set_font_desc(&font_desc_from_typography(&callout.text.typography));
+    font_row.add_suffix(&font_button);
+    row.add_row(&font_row);
+
+    let alignment_row = adw::ComboRow::builder().title("Textausrichtung").subtitle("Bei mehrzeiligem Text").build();
+    alignment_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
+    alignment_row.set_selected(index_for_text_align(callout.text.typography.alignment));
+    row.add_row(&alignment_row);
+
+    let opacity_row = spin_row("Deckkraft", 0.0, 100.0, callout.text.typography.opacity * 100.0);
+    opacity_row.set_subtitle("In Prozent");
+    row.add_row(&opacity_row);
+
+    let background_type_row = adw::ComboRow::builder().title("Hintergrund").build();
+    background_type_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
+    let initial_background_index = match callout.text.background {
+        TextBackground::None => 0,
+        TextBackground::Solid(_) => 1,
+        TextBackground::Gradient(_) => 2,
+    };
+    background_type_row.set_selected(initial_background_index);
+    row.add_row(&background_type_row);
+
     let background_color_row = adw::ActionRow::new();
     background_color_row.set_title("Hintergrundfarbe");
+    background_color_row.set_visible(initial_background_index != 0);
     let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
     background_color_button.set_valign(gtk4::Align::Center);
-    let initial_background = match callout.text.background {
-        TextBackground::Solid(color) => color,
-        _ => Rgba::WHITE,
+    let initial_background = match &callout.text.background {
+        TextBackground::Solid(color) => *color,
+        TextBackground::Gradient(spec) => spec.stops.first().map(|(_, c)| *c).unwrap_or(Rgba::WHITE),
+        TextBackground::None => Rgba::WHITE,
     };
     background_color_button.set_rgba(&gdk_rgba_from(&initial_background));
     background_color_row.add_suffix(&background_color_button);
     row.add_row(&background_color_row);
+
+    let background_color2_row = adw::ActionRow::new();
+    background_color2_row.set_title("Hintergrundfarbe 2");
+    background_color2_row.set_visible(initial_background_index == 2);
+    let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
+    background_color2_button.set_valign(gtk4::Align::Center);
+    if let TextBackground::Gradient(spec) = &callout.text.background {
+        if let Some((_, c)) = spec.stops.get(1) {
+            background_color2_button.set_rgba(&gdk_rgba_from(c));
+        }
+    }
+    background_color2_row.add_suffix(&background_color2_button);
+    row.add_row(&background_color2_row);
 
     let color_row = adw::ActionRow::new();
     color_row.set_title("Textfarbe");
@@ -1854,6 +2232,30 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
     let corner_radius_row = spin_row("Eckenradius", 0.0, 200.0, callout.text.corner_radius.top_left);
     row.add_row(&corner_radius_row);
 
+    let padding_x_row = spin_row("Innenabstand horizontal", 0.0, 200.0, callout.text.padding_x);
+    row.add_row(&padding_x_row);
+
+    let padding_y_row = spin_row("Innenabstand vertikal", 0.0, 200.0, callout.text.padding_y);
+    row.add_row(&padding_y_row);
+
+    let shadow_row = adw::ComboRow::builder().title("Schatten").build();
+    shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating", "Angepasst"])));
+    shadow_row.set_selected(shadow_preset_index_for(&callout.text.shadow));
+    row.add_row(&shadow_row);
+
+    let (initial_shadow_angle, initial_shadow_distance) = callout.text.shadow.angle_and_distance();
+    let shadow_angle_row = spin_row("Schatten-Winkel", 0.0, 360.0, initial_shadow_angle);
+    shadow_angle_row.set_sensitive(callout.text.shadow.enabled);
+    row.add_row(&shadow_angle_row);
+
+    let shadow_distance_row = spin_row("Schatten-Distanz", 0.0, 300.0, initial_shadow_distance);
+    shadow_distance_row.set_sensitive(callout.text.shadow.enabled);
+    row.add_row(&shadow_distance_row);
+
+    let shadow_blur_row = spin_row("Weichzeichner", 0.0, 150.0, callout.text.shadow.blur);
+    shadow_blur_row.set_sensitive(callout.text.shadow.enabled);
+    row.add_row(&shadow_blur_row);
+
     let arrow_color_row = adw::ActionRow::new();
     arrow_color_row.set_title("Pfeilfarbe");
     let arrow_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
@@ -1864,6 +2266,9 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
 
     let arrow_width_row = spin_row("Pfeilbreite", 0.5, 20.0, callout.arrow_width);
     row.add_row(&arrow_width_row);
+
+    let dot_radius_row = spin_row("Punktgröße", 0.0, 20.0, callout.dot_radius);
+    row.add_row(&dot_radius_row);
 
     let apply = glib::clone!(
         #[weak]
@@ -1879,15 +2284,33 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         #[weak]
         wrap_row,
         #[weak]
+        line_spacing_row,
+        #[weak]
+        font_button,
+        #[weak]
+        alignment_row,
+        #[weak]
+        opacity_row,
+        #[weak]
+        background_type_row,
+        #[weak]
         background_color_button,
+        #[weak]
+        background_color2_button,
         #[weak]
         color_button,
         #[weak]
         corner_radius_row,
         #[weak]
+        padding_x_row,
+        #[weak]
+        padding_y_row,
+        #[weak]
         arrow_color_button,
         #[weak]
         arrow_width_row,
+        #[weak]
+        dot_radius_row,
         move || {
             if state.borrow().syncing_controls {
                 return;
@@ -1901,11 +2324,33 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
             new.enabled = enabled_switch.is_active();
             new.text.content = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             new.text.typography.wrap = wrap_row.is_active();
-            new.text.background = TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba()));
+            new.text.typography.line_spacing = line_spacing_row.value();
+            let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
+            let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
+            new.text.typography.font_family = font_family;
+            new.text.typography.font_size = font_size;
+            new.text.typography.weight = weight;
+            new.text.typography.italic = italic;
+            new.text.typography.alignment = text_align_for_index(alignment_row.selected());
+            new.text.typography.opacity = opacity_row.value() / 100.0;
+            new.text.background = match background_type_row.selected() {
+                1 => TextBackground::Solid(rgba_from_gdk(&background_color_button.rgba())),
+                2 => TextBackground::Gradient(GradientSpec {
+                    kind: GradientKind::Linear { angle_deg: 135.0 },
+                    stops: vec![
+                        (0.0, rgba_from_gdk(&background_color_button.rgba())),
+                        (1.0, rgba_from_gdk(&background_color2_button.rgba())),
+                    ],
+                }),
+                _ => TextBackground::None,
+            };
             new.text.typography.color = rgba_from_gdk(&color_button.rgba());
             new.text.corner_radius = CornerRadius::uniform(corner_radius_row.value());
+            new.text.padding_x = padding_x_row.value();
+            new.text.padding_y = padding_y_row.value();
             new.arrow_color = rgba_from_gdk(&arrow_color_button.rgba());
             new.arrow_width = arrow_width_row.value();
+            new.dot_radius = dot_radius_row.value();
             if current == new {
                 return;
             }
@@ -1937,7 +2382,46 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         apply,
         move |_| apply()
     ));
+    line_spacing_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    font_button.connect_font_desc_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    alignment_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    opacity_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    background_type_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        background_color_row,
+        #[weak]
+        background_color2_row,
+        #[strong]
+        apply,
+        move |row| {
+            let selected = row.selected();
+            background_color_row.set_visible(selected != 0);
+            background_color2_row.set_visible(selected == 2);
+            apply();
+        }
+    ));
     background_color_button.connect_rgba_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    background_color2_button.connect_rgba_notify(glib::clone!(
         #[strong]
         apply,
         move |_| apply()
@@ -1952,6 +2436,16 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         apply,
         move |_| apply()
     ));
+    padding_x_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    padding_y_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
     arrow_color_button.connect_rgba_notify(glib::clone!(
         #[strong]
         apply,
@@ -1962,6 +2456,105 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         apply,
         move |_| apply()
     ));
+    dot_radius_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+
+    // Shadow preset/geometry: same preset-preserves-angle split as every
+    // other shadow control in this app (`ShadowParams::with_preset`).
+    // Rebuilt fresh whenever the callout list changes (never resynced
+    // externally within its own lifetime), so — unlike the project-wide
+    // label style's own shadow_row — this needs no `syncing_controls`
+    // guard against a reentrant resync.
+    shadow_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[weak]
+        shadow_angle_row,
+        #[weak]
+        shadow_distance_row,
+        #[weak]
+        shadow_blur_row,
+        move |row| {
+            // "Angepasst" only ever reflects a shadow that doesn't match
+            // any real preset — selecting it has nothing coherent to apply.
+            if row.selected() == CUSTOM_SHADOW_PRESET_INDEX {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
+            let preset = shadow_preset_for_index(row.selected());
+            let new_shadow = current.text.shadow.with_preset(preset);
+
+            shadow_distance_row.set_value(new_shadow.angle_and_distance().1);
+            shadow_blur_row.set_value(new_shadow.blur);
+            shadow_angle_row.set_sensitive(new_shadow.enabled);
+            shadow_distance_row.set_sensitive(new_shadow.enabled);
+            shadow_blur_row.set_sensitive(new_shadow.enabled);
+
+            let mut new = current.clone();
+            new.text.shadow = new_shadow;
+            if current == new {
+                return;
+            }
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetCallout { element_id, callout_id, old: current, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+
+    let apply_shadow_geometry = glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[weak]
+        shadow_row,
+        #[weak]
+        shadow_angle_row,
+        #[weak]
+        shadow_distance_row,
+        #[weak]
+        shadow_blur_row,
+        move || {
+            let mut state_ref = state.borrow_mut();
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
+            let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(shadow_angle_row.value(), shadow_distance_row.value());
+            let mut new = current.clone();
+            new.text.shadow.offset_x = offset_x;
+            new.text.shadow.offset_y = offset_y;
+            new.text.shadow.blur = shadow_blur_row.value();
+            if current == new {
+                return;
+            }
+            let new_shadow = new.text.shadow;
+            let EditorState { document, undo_stack, .. } = &mut *state_ref;
+            undo_stack.apply(Box::new(SetCallout { element_id, callout_id, old: current, new }), document);
+            drop(state_ref);
+            refresh_canvas(&window, &canvas, &state);
+            // See the matching comment on the screenshot-level
+            // `apply_shadow_geometry` (`register_effect_controls`) for why
+            // the dropdown needs this explicit nudge — its own selection
+            // only updates on an actual pick.
+            shadow_row.set_selected(shadow_preset_index_for(&new_shadow));
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    );
+    shadow_angle_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+    shadow_distance_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
+    shadow_blur_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
 
     delete_button.connect_clicked(glib::clone!(
         #[weak]
@@ -2343,9 +2936,39 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
         #[weak]
         window,
         #[strong]
+        state,
+        #[strong]
         apply,
         move |row| {
-            sync_generator_color_strategy_visibility(&window, true, color_strategy_for_index(row.selected()));
+            let new_strategy = color_strategy_for_index(row.selected());
+            // Entering Manual mode for the first time in this background
+            // (not just re-visiting it) starts from a curated, genuinely
+            // contrasting palette rather than whatever the *previous*
+            // strategy happened to leave in the 4 buttons — spec: "die
+            // vier Felder [enthielten] lediglich unterschiedliche
+            // Rotwerte", which is exactly what inheriting e.g. a
+            // `FromScreenshots` palette (same hue, only lightness varies)
+            // produced. Guarded by `syncing_controls` so setting all 4
+            // buttons doesn't fire `apply()` four times over.
+            if matches!(new_strategy, ColorStrategy::Manual) {
+                let was_already_manual =
+                    matches!(&state.borrow().document.background, Background::Generated(g) if matches!(g.color_strategy, ColorStrategy::Manual));
+                if !was_already_manual {
+                    let was_syncing = state.borrow().syncing_controls;
+                    state.borrow_mut().syncing_controls = true;
+                    let buttons = [
+                        window.generator_manual_color_button_1(),
+                        window.generator_manual_color_button_2(),
+                        window.generator_manual_color_button_3(),
+                        window.generator_manual_color_button_4(),
+                    ];
+                    for (button, color) in buttons.iter().zip(screenforge_core::palette::DEFAULT_MANUAL_PALETTE.iter()) {
+                        button.set_rgba(&gdk_rgba_from(color));
+                    }
+                    state.borrow_mut().syncing_controls = was_syncing;
+                }
+            }
+            sync_generator_color_strategy_visibility(&window, true, new_strategy);
             apply();
         }
     ));
@@ -2650,6 +3273,22 @@ fn register_export_action(app: &adw::Application, window: &Window, state: &Rc<Re
     app.set_accels_for_action("win.export", &["<Ctrl>e"]);
 }
 
+/// Where a zip-format project's embedded images get extracted to before
+/// `screenforge_core::project::load` hands back a `Document` — a single
+/// fixed directory (sibling of `import::save_pasted_image`'s own cache
+/// dir), cleared and recreated here at the start of every load rather than
+/// given a fresh unique name each time, so at most one project's worth of
+/// extracted assets ever sits on disk regardless of how many projects get
+/// opened over a session. Re-saving a zip-loaded project needs no special
+/// handling as a result: its elements are ordinary `Path`s into this
+/// directory by the time `save` sees them, read exactly like any other
+/// imported file.
+fn prepare_project_asset_extract_dir() -> PathBuf {
+    let dir = glib::user_cache_dir().join("screenforge").join("project-assets");
+    std::fs::remove_dir_all(&dir).ok();
+    dir
+}
+
 fn save_project_to(window: &Window, state: &Rc<RefCell<EditorState>>, path: &std::path::Path) {
     let doc = state.borrow().document.clone();
     let toast = match screenforge_core::project::save(&doc, path) {
@@ -2700,7 +3339,8 @@ fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefC
 
     window.layout_mode_row().set_selected(index_for_layout_mode(doc.layout.mode));
     window.spacing_row().set_value(doc.layout.spacing_px);
-    window.margin_row().set_value(doc.layout.margin_px);
+    window.margin_x_row().set_value(doc.layout.margin_x);
+    window.margin_y_row().set_value(doc.layout.margin_y);
     sync_alignment_group_visibility(window, doc.layout.mode);
 
     sync_background_controls(window, &doc.background);
@@ -2723,6 +3363,9 @@ fn sync_controls_from_document(window: &Window, canvas: &Canvas, state: &Rc<RefC
     window.export_quality_row().set_value(doc.canvas.export_quality as f64);
     window.export_quality_row().set_sensitive(format_supports_quality(doc.canvas.export_format));
 
+    if let Some(sync) = state.borrow().label_style_sync.clone() {
+        sync(&doc.label_defaults);
+    }
     sync_label_controls(window, canvas, state);
     sync_callouts_controls(window, canvas, state);
 
@@ -2807,7 +3450,7 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
                 };
                 let Some(path) = file.path() else { return };
 
-                match screenforge_core::project::load(&path) {
+                match screenforge_core::project::load(&path, &prepare_project_asset_extract_dir()) {
                     Ok(doc) => {
                         let mut image_cache = HashMap::new();
                         let mut missing = 0u32;
@@ -2849,159 +3492,416 @@ fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Ca
     window.add_action(&open_project_action);
 }
 
-/// `win.save-template`/`win.load-template`: a template captures everything
-/// that makes a composition *look* the way it does (layout mode/spacing/
-/// margin, background, shadow, corner radius) separately from the
-/// screenshots themselves, so it can be reapplied to a different set of
-/// images later. Saving never touches `Document.elements`; loading applies
-/// the saved style as one undoable [`ApplyTemplate`], mirroring how
-/// project-loading resyncs the sidebar afterward.
-fn register_template_actions(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let save_action = gio::SimpleAction::new("save-template", None);
-    save_action.connect_activate(glib::clone!(
-        #[weak]
-        window,
-        #[strong]
-        state,
-        move |_, _| {
-            let window = window.clone();
-            let state = state.clone();
-            glib::spawn_future_local(async move {
-                let filter = gtk4::FileFilter::new();
-                filter.add_pattern("*.screenforge-template");
-                filter.set_name(Some("ScreenForge-Vorlagen"));
+/// Applies `preset` as one undoable step (spec: "Beim Anwenden eines
+/// Presets müssen die darin gespeicherten Einstellungen vollständig
+/// übernommen werden... Falls das Preset globale Label-Einstellungen
+/// enthält, sollen diese anschließend als globale Standards verwendet
+/// werden"). Called from the preset list's own row-activation handler in
+/// `build_presets_page`.
+fn apply_preset(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, new: screenforge_core::template::Template) {
+    {
+        let mut state_ref = state.borrow_mut();
+        let old_layout = state_ref.document.layout;
+        let old_background = state_ref.document.background.clone();
+        let old_shadows: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
+        let old_corner_radii: Vec<CornerRadius> = state_ref.document.elements.iter().map(|e| e.corner_radius).collect();
+        let old_label_defaults = state_ref.document.label_defaults.clone();
+        let EditorState { document, undo_stack, .. } = &mut *state_ref;
+        undo_stack.apply(
+            Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, old_label_defaults, new }),
+            document,
+        );
+    }
+    refresh_canvas(window, canvas, state);
+    sync_controls_from_document(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+    window.toast_overlay().add_toast(adw::Toast::new("Preset angewendet"));
+}
 
-                let dialog = gtk4::FileDialog::builder()
-                    .title("Vorlage speichern unter")
-                    .accept_label("Speichern")
-                    .initial_name("vorlage.screenforge-template")
-                    .default_filter(&filter)
-                    .build();
-
-                let file = match dialog.save_future(Some(&window)).await {
-                    Ok(file) => file,
-                    Err(err) => {
-                        if !err.matches(gtk4::DialogError::Dismissed) {
-                            eprintln!("ScreenForge: save-template dialog failed: {err}");
-                        }
-                        return;
-                    }
-                };
-                let Some(path) = file.path() else { return };
-
-                let template = screenforge_core::template::Template::from_document(&state.borrow().document);
-                let toast = match screenforge_core::template::save(&template, &path) {
-                    Ok(()) => adw::Toast::new("Vorlage gespeichert"),
-                    Err(err) => adw::Toast::new(&format!("Vorlage konnte nicht gespeichert werden: {err}")),
-                };
-                window.toast_overlay().add_toast(toast);
-            });
+/// Reads every saved preset from `GSettings` (spec: "Verwende dafür den
+/// vorgesehenen persistenten Konfigurationsmechanismus des verwendeten
+/// Frameworks" — no external files, no user-managed template directory).
+/// An empty key (never saved anything yet) is treated as an empty list
+/// rather than an error; a *non-empty but unreadable* value (corrupted, or
+/// from an incompatible future version) is logged and also treated as
+/// empty rather than losing the rest of the app to a panic — the user
+/// loses their saved presets in that case, but keeps everything else.
+fn load_presets() -> Vec<screenforge_core::template::NamedPreset> {
+    let json = app_settings().string("presets");
+    if json.is_empty() {
+        return Vec::new();
+    }
+    match screenforge_core::template::deserialize_presets(&json) {
+        Ok(presets) => presets,
+        Err(err) => {
+            eprintln!("ScreenForge: could not read saved presets: {err}");
+            Vec::new()
         }
-    ));
-    window.add_action(&save_action);
+    }
+}
 
-    let load_action = gio::SimpleAction::new("load-template", None);
-    load_action.connect_activate(glib::clone!(
+fn save_presets(presets: &[screenforge_core::template::NamedPreset]) {
+    let json = screenforge_core::template::serialize_presets(presets);
+    if let Err(err) = app_settings().set_string("presets", &json) {
+        eprintln!("ScreenForge: could not persist presets: {err}");
+    }
+}
+
+/// Reads the app-wide default label style from `GSettings` — the top tier
+/// of the three-level label configuration (see `EditorState::new`, the
+/// only caller that matters for *new* documents; the "Allgemein" settings
+/// page also reads/writes this directly to edit it). An empty or
+/// unreadable value (never set yet, or from an incompatible future
+/// version) falls back to `LabelStyle::default()` rather than erroring —
+/// there's no "nothing configured yet" state worth distinguishing from
+/// "using the built-in default" here, unlike presets (an empty preset
+/// list and "no presets configured" are the same thing either way).
+fn load_global_label_defaults() -> screenforge_core::model::LabelStyle {
+    let json = app_settings().string("default-label-style");
+    if json.is_empty() {
+        return screenforge_core::model::LabelStyle::default();
+    }
+    match screenforge_core::template::deserialize_label_style(&json) {
+        Ok(style) => style,
+        Err(err) => {
+            eprintln!("ScreenForge: could not read the default label style, falling back to the built-in one: {err}");
+            screenforge_core::model::LabelStyle::default()
+        }
+    }
+}
+
+fn save_global_label_defaults(style: &screenforge_core::model::LabelStyle) {
+    let json = screenforge_core::template::serialize_label_style(style);
+    if let Err(err) = app_settings().set_string("default-label-style", &json) {
+        eprintln!("ScreenForge: could not persist the default label style: {err}");
+    }
+}
+
+/// A small named-text prompt (used for both "save as" and "rename") built
+/// from an `AdwAlertDialog` with a single `GtkEntry` as its extra child —
+/// `None` for Escape/Abbrechen or an empty name, `Some(name)` (trimmed)
+/// otherwise.
+async fn prompt_for_preset_name(window: &Window, heading: &str, initial: &str) -> Option<String> {
+    let entry = gtk4::Entry::new();
+    entry.set_text(initial);
+    entry.set_activates_default(true);
+
+    let dialog = adw::AlertDialog::builder().heading(heading).extra_child(&entry).build();
+    dialog.add_response("cancel", "Abbrechen");
+    dialog.add_response("save", "Speichern");
+    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("save"));
+    dialog.set_close_response("cancel");
+
+    let response = dialog.choose_future(Some(window)).await;
+    if response != "save" {
+        return None;
+    }
+    let name = entry.text().trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// (Re)builds `list_box`'s rows from persisted storage — called once
+/// whenever the presets popover is about to show, and again after every
+/// save/rename/delete, so it always reflects what's actually saved
+/// without needing to be closed and reopened. Each row's "Anwenden"/
+/// rename/delete handler captures its preset's *index* into the
+/// freshly-loaded list at click time (not the list this function built
+/// the row from) — safe because every mutation immediately calls this
+/// function again before the user can interact with anything else (the
+/// save/rename prompt is itself a modal dialog, and delete's own handler
+/// is synchronous), so no click can ever land against a stale index.
+/// `popover` is popped down after a row's "Anwenden" activates a preset —
+/// applying one reads as a complete action, the same way picking an entry
+/// from any other GNOME popover menu dismisses it — but never after a
+/// rename/delete, which are edits to the list the user stays in.
+fn rebuild_preset_list(list_box: &gtk4::ListBox, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, popover: &gtk4::Popover) {
+    while let Some(child) = list_box.first_child() {
+        list_box.remove(&child);
+    }
+    let presets = load_presets();
+    if presets.is_empty() {
+        let row = adw::ActionRow::builder().title("Noch keine Presets gespeichert").sensitive(false).build();
+        list_box.append(&row);
+        return;
+    }
+    for (index, named) in presets.iter().enumerate() {
+        let row = adw::ActionRow::builder().title(named.name.clone()).activatable(true).build();
+        row.set_subtitle("Anwenden antippen");
+
+        let rename_button = gtk4::Button::from_icon_name("document-edit-symbolic");
+        rename_button.set_valign(gtk4::Align::Center);
+        rename_button.set_tooltip_text(Some("Umbenennen"));
+        rename_button.add_css_class("flat");
+        row.add_suffix(&rename_button);
+
+        let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
+        delete_button.set_valign(gtk4::Align::Center);
+        delete_button.set_tooltip_text(Some("Löschen"));
+        delete_button.add_css_class("flat");
+        row.add_suffix(&delete_button);
+
+        row.connect_activated(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            #[weak]
+            popover,
+            move |_| {
+                let presets = load_presets();
+                if let Some(named) = presets.get(index) {
+                    apply_preset(&window, &canvas, &state, named.template.clone());
+                    popover.popdown();
+                }
+            }
+        ));
+
+        rename_button.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            #[weak]
+            list_box,
+            #[weak]
+            popover,
+            move |_| {
+                glib::spawn_future_local(glib::clone!(
+                    #[weak]
+                    window,
+                    #[weak]
+                    canvas,
+                    #[strong]
+                    state,
+                    #[weak]
+                    list_box,
+                    #[weak]
+                    popover,
+                    async move {
+                        let presets = load_presets();
+                        let Some(current) = presets.get(index).cloned() else { return };
+                        let Some(new_name) = prompt_for_preset_name(&window, "Preset umbenennen", &current.name).await else { return };
+                        let mut presets = load_presets();
+                        if let Some(named) = presets.get_mut(index) {
+                            named.name = new_name;
+                        }
+                        save_presets(&presets);
+                        rebuild_preset_list(&list_box, &window, &canvas, &state, &popover);
+                    }
+                ));
+            }
+        ));
+
+        delete_button.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            #[weak]
+            list_box,
+            #[weak]
+            popover,
+            move |_| {
+                let mut presets = load_presets();
+                if index < presets.len() {
+                    presets.remove(index);
+                    save_presets(&presets);
+                }
+                rebuild_preset_list(&list_box, &window, &canvas, &state, &popover);
+            }
+        ));
+
+        list_box.append(&row);
+    }
+}
+
+/// The header bar's "Presets" menu (`presets_menu_button`): an in-app,
+/// persisted replacement for the old external "Vorlage speichern/laden"
+/// file actions (spec: "Es soll stattdessen ein internes Preset-System...
+/// geben" — no export/import of settings files, no user-managed template
+/// directory) — and, since this round, deliberately its *own* header-bar
+/// entry point rather than a page inside the "Einstellungen" dialog, so
+/// saving/restoring a preset never gets mistaken for touching the app-wide
+/// settings on that dialog's other pages (see `register_settings_action`'s
+/// own doc comment for why that mattered). A preset bundles the *current
+/// project's* layout, background, shadow, corner radius, and label
+/// defaults (see `screenforge_core::template::Template::from_document`) —
+/// never any screenshot's own label content or callouts; applying one
+/// never removes or changes those (see
+/// `apply_preset`/`ApplyTemplate`'s own doc comment).
+///
+/// The popover is rebuilt fresh (`rebuild_preset_list`) every time it's
+/// about to show, via `GtkPopover`'s own `show` signal, so it always
+/// reflects whatever's actually saved without this needing to track
+/// changes itself.
+fn register_presets_menu(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    // Built before anything that references it (every row's "Anwenden"
+    // pops it down; the save button and the popover's own `show` handler
+    // both need to pass it to `rebuild_preset_list`), then given its real
+    // child content only once everything else exists.
+    let popover = gtk4::Popover::new();
+
+    let list_box = gtk4::ListBox::new();
+    list_box.set_selection_mode(gtk4::SelectionMode::None);
+    list_box.add_css_class("boxed-list");
+
+    let save_button = gtk4::Button::with_label("Aktuelles als Preset speichern…");
+    save_button.add_css_class("suggested-action");
+    save_button.connect_clicked(glib::clone!(
         #[weak]
         window,
         #[weak]
         canvas,
         #[strong]
         state,
-        move |_, _| {
-            let window = window.clone();
-            let canvas = canvas.clone();
-            let state = state.clone();
-            glib::spawn_future_local(async move {
-                let filter = gtk4::FileFilter::new();
-                filter.add_pattern("*.screenforge-template");
-                filter.set_name(Some("ScreenForge-Vorlagen"));
-
-                let dialog = gtk4::FileDialog::builder()
-                    .title("Vorlage laden")
-                    .accept_label("Laden")
-                    .default_filter(&filter)
-                    .build();
-
-                let file = match dialog.open_future(Some(&window)).await {
-                    Ok(file) => file,
-                    Err(err) => {
-                        if !err.matches(gtk4::DialogError::Dismissed) {
-                            eprintln!("ScreenForge: load-template dialog failed: {err}");
-                        }
-                        return;
-                    }
-                };
-                let Some(path) = file.path() else { return };
-
-                let new = match screenforge_core::template::load(&path) {
-                    Ok(template) => template,
-                    Err(err) => {
-                        window.toast_overlay().add_toast(adw::Toast::new(&format!("Vorlage konnte nicht geladen werden: {err}")));
-                        return;
-                    }
-                };
-
-                {
-                    let mut state_ref = state.borrow_mut();
-                    let old_layout = state_ref.document.layout;
-                    let old_background = state_ref.document.background.clone();
-                    let old_shadows: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
-                    let old_corner_radii: Vec<CornerRadius> = state_ref.document.elements.iter().map(|e| e.corner_radius).collect();
-                    let EditorState { document, undo_stack, .. } = &mut *state_ref;
-                    undo_stack.apply(Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, new }), document);
+        #[weak]
+        list_box,
+        #[weak]
+        popover,
+        move |_| {
+            glib::spawn_future_local(glib::clone!(
+                #[weak]
+                window,
+                #[weak]
+                canvas,
+                #[strong]
+                state,
+                #[weak]
+                list_box,
+                #[weak]
+                popover,
+                async move {
+                    let Some(name) = prompt_for_preset_name(&window, "Preset speichern", "").await else { return };
+                    let template = screenforge_core::template::Template::from_document(&state.borrow().document);
+                    let mut presets = load_presets();
+                    presets.push(screenforge_core::template::NamedPreset { name, template });
+                    save_presets(&presets);
+                    rebuild_preset_list(&list_box, &window, &canvas, &state, &popover);
                 }
-                refresh_canvas(&window, &canvas, &state);
-                sync_controls_from_document(&window, &canvas, &state);
-                update_undo_redo_sensitivity(&window, &state);
-                window.toast_overlay().add_toast(adw::Toast::new("Vorlage angewendet"));
-            });
+            ));
         }
     ));
-    window.add_action(&load_action);
+
+    let hint = gtk4::Label::new(Some("Layout, Hintergrund, Schatten, Eckenradius und Label-Einstellungen dieses Projekts"));
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint.add_css_class("caption");
+    hint.add_css_class("dim-label");
+
+    let scroller = gtk4::ScrolledWindow::builder().hscrollbar_policy(gtk4::PolicyType::Never).child(&list_box).build();
+    scroller.set_max_content_height(360);
+    scroller.set_propagate_natural_height(true);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_width_request(320);
+    content.append(&save_button);
+    content.append(&hint);
+    content.append(&scroller);
+    popover.set_child(Some(&content));
+
+    popover.connect_show(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[weak]
+        list_box,
+        move |popover| rebuild_preset_list(&list_box, &window, &canvas, &state, popover)
+    ));
+
+    window.presets_menu_button().set_popover(Some(&popover));
 }
 
-/// `app.preferences` (`Ctrl+,`): a `GSettings`-backed preferences dialog
-/// with defaults applied to every *newly created* document (see
-/// `EditorState::new`) — changing a preference never touches the document
-/// currently open, only what a fresh one starts with. Each row binds
-/// straight to its `GSettings` key via `Settings::bind`, so there's no
-/// manual load/save glue: GLib keeps the setting and the widget in sync
-/// both ways for as long as the dialog is open.
-fn register_preferences_action(app: &adw::Application) {
+/// The "Allgemein" page: `GSettings`-backed defaults applied to every
+/// *newly created* document (see `EditorState::new`) — changing one never
+/// touches the document currently open, only what a fresh one starts
+/// with. Each row binds straight to its `GSettings` key via
+/// `Settings::bind`, so there's no manual load/save glue: GLib keeps the
+/// setting and the widget in sync both ways for as long as the dialog is
+/// open.
+fn build_general_page() -> adw::PreferencesPage {
+    let settings = app_settings();
+
+    let spacing_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
+    spacing_row.set_title("Abstand");
+    spacing_row.set_subtitle("Zwischen den Screenshots, in Pixeln");
+    settings.bind("default-spacing", &spacing_row, "value").build();
+
+    let margin_x_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
+    margin_x_row.set_title("Außenabstand horizontal");
+    margin_x_row.set_subtitle("Links/rechts um die Komposition, in Pixeln");
+    settings.bind("default-margin-x", &margin_x_row, "value").build();
+
+    let margin_y_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
+    margin_y_row.set_title("Außenabstand vertikal");
+    margin_y_row.set_subtitle("Oben/unten um die Komposition, in Pixeln");
+    settings.bind("default-margin-y", &margin_y_row, "value").build();
+
+    let quality_row = adw::SpinRow::with_range(1.0, 100.0, 5.0);
+    quality_row.set_title("Export-Qualität");
+    quality_row.set_subtitle("Für JPEG/WebP/AVIF, in Prozent");
+    settings.bind("default-export-quality", &quality_row, "value").build();
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Standardwerte für neue Projekte");
+    group.add(&spacing_row);
+    group.add(&margin_x_row);
+    group.add(&margin_y_row);
+    group.add(&quality_row);
+
+    let page = adw::PreferencesPage::new();
+    page.set_title("Allgemein");
+    page.set_icon_name(Some("preferences-system-symbolic"));
+    page.add(&group);
+
+    let (look_group, position_group, styling_group) = build_global_label_defaults_groups();
+    page.add(&look_group);
+    page.add(&position_group);
+    page.add(&styling_group);
+
+    page
+}
+
+/// `app.preferences` (`Ctrl+,`): the app's settings dialog — just
+/// "Allgemein" (`build_general_page`), GSettings-backed defaults that seed
+/// *new* documents (spacing/margin/export quality, and the app-wide
+/// default label style). The current project's *own* label style is no
+/// longer edited here — it lives directly in the sidebar
+/// (`register_label_style_controls`), always reachable and always
+/// reflecting the open project, so there's no separate dialog page for it
+/// to fall out of sync with.
+///
+/// Presets deliberately live *outside* this dialog too, in their own
+/// header-bar menu (`register_presets_menu`/`presets_menu_button`) rather
+/// than as a page here: a preset captures the *current project's*
+/// settings (spec: "als Preset möchte ich die AKTUELLEN Einstellungen
+/// speichern, nicht die globalen"), and putting its save/restore/delete UI
+/// in the very same dialog as the app-wide "Allgemein" settings blurred
+/// that distinction — someone opening "Einstellungen" to save a preset
+/// could easily read it as "save my global settings", which is exactly
+/// backward. Rebuilt fresh every time it's opened.
+fn register_settings_action(app: &adw::Application) {
     let action = gio::SimpleAction::new("preferences", None);
     action.connect_activate(glib::clone!(
         #[weak]
         app,
         move |_, _| {
-            let settings = app_settings();
-
-            let spacing_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
-            spacing_row.set_title("Abstand");
-            spacing_row.set_subtitle("Zwischen den Screenshots, in Pixeln");
-            settings.bind("default-spacing", &spacing_row, "value").build();
-
-            let margin_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
-            margin_row.set_title("Außenrand");
-            margin_row.set_subtitle("Rand um die Komposition, in Pixeln");
-            settings.bind("default-margin", &margin_row, "value").build();
-
-            let quality_row = adw::SpinRow::with_range(1.0, 100.0, 5.0);
-            quality_row.set_title("Export-Qualität");
-            quality_row.set_subtitle("Für JPEG/WebP/AVIF, in Prozent");
-            settings.bind("default-export-quality", &quality_row, "value").build();
-
-            let group = adw::PreferencesGroup::new();
-            group.set_title("Standardwerte für neue Projekte");
-            group.add(&spacing_row);
-            group.add(&margin_row);
-            group.add(&quality_row);
-
-            let page = adw::PreferencesPage::new();
-            page.add(&group);
-
             let dialog = adw::PreferencesDialog::new();
-            dialog.add(&page);
+            dialog.set_title("Einstellungen");
+            dialog.add(&build_general_page());
             dialog.present(app.active_window().as_ref());
         }
     ));
@@ -3095,7 +3995,7 @@ fn register_about_action(app: &adw::Application) {
                     "gtk4-rs / libadwaita-rs (Rust-Bindings) https://gtk-rs.org",
                 ],
             );
-            dialog.add_credit_section(Some("Grafik & Rendering"), &["Cairo https://www.cairographics.org", "Pango https://pango.gnome.org"]);
+            dialog.add_credit_section(Some("Grafik &amp; Rendering"), &["Cairo https://www.cairographics.org", "Pango https://pango.gnome.org"]);
             dialog.add_credit_section(
                 Some("Weitere Bibliotheken"),
                 &[

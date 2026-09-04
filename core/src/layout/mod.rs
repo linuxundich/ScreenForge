@@ -27,18 +27,19 @@ pub fn compute_layout(
     mode: LayoutMode,
     elements: &[ScreenshotElement],
     spacing_px: f64,
-    margin_px: f64,
+    margin_x: f64,
+    margin_y: f64,
 ) -> Vec<Placement> {
     match mode {
-        LayoutMode::Horizontal => compute_horizontal_layout(elements, spacing_px, margin_px),
-        LayoutMode::Vertical => compute_vertical_layout(elements, spacing_px, margin_px),
-        LayoutMode::Grid => compute_grid_layout(elements, spacing_px, margin_px),
+        LayoutMode::Horizontal => compute_horizontal_layout(elements, spacing_px, margin_x, margin_y),
+        LayoutMode::Vertical => compute_vertical_layout(elements, spacing_px, margin_x, margin_y),
+        LayoutMode::Grid => compute_grid_layout(elements, spacing_px, margin_x, margin_y),
         LayoutMode::Free => compute_free_layout(elements),
     }
 }
 
 /// Places every element at its own stored position/size (`spacing_px` and
-/// `margin_px` don't apply — there's nothing automatic to space out).
+/// the margin don't apply — there's nothing automatic to space out).
 /// Elements newly switched into Free mode get their transform populated
 /// from their last computed placement first (see
 /// `command::EnterFreeLayout`), so this only ever sees meaningful
@@ -58,20 +59,21 @@ pub fn compute_free_layout(elements: &[ScreenshotElement]) -> Vec<Placement> {
 
 /// Scales every element to a common width (the smallest natural width in
 /// the set), stacks them top-to-bottom with `spacing_px` gaps starting at
-/// `margin_px` — the vertical mirror of [`compute_horizontal_layout`].
-pub fn compute_vertical_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_px: f64) -> Vec<Placement> {
+/// `margin_y`, each left-aligned at `margin_x` — the vertical mirror of
+/// [`compute_horizontal_layout`].
+pub fn compute_vertical_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_x: f64, margin_y: f64) -> Vec<Placement> {
     if elements.is_empty() {
         return Vec::new();
     }
 
     let target_width = elements.iter().map(|el| el.natural_width).fold(f64::INFINITY, f64::min);
 
-    let mut y = margin_px;
+    let mut y = margin_y;
     let mut placements = Vec::with_capacity(elements.len());
     for el in elements {
         let scale = if el.natural_width > 0.0 { target_width / el.natural_width } else { 1.0 };
         let height = el.natural_height * scale;
-        placements.push(Placement { element_id: el.id, x: margin_px, y, width: target_width, height });
+        placements.push(Placement { element_id: el.id, x: margin_x, y, width: target_width, height });
         y += height + spacing_px;
     }
     placements
@@ -82,7 +84,7 @@ pub fn compute_vertical_layout(elements: &[ScreenshotElement], spacing_px: f64, 
 /// [`compute_horizontal_layout`], just wrapped into rows — so columns don't
 /// necessarily align edge-to-edge when aspect ratios differ, but every row
 /// has uniform height.
-pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_px: f64) -> Vec<Placement> {
+pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, margin_x: f64, margin_y: f64) -> Vec<Placement> {
     if elements.is_empty() {
         return Vec::new();
     }
@@ -90,12 +92,12 @@ pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, marg
     let columns = (elements.len() as f64).sqrt().ceil() as usize;
     let target_height = elements.iter().map(|el| el.natural_height).fold(f64::INFINITY, f64::min);
 
-    let mut x = margin_px;
-    let mut y = margin_px;
+    let mut x = margin_x;
+    let mut y = margin_y;
     let mut placements = Vec::with_capacity(elements.len());
     for (i, el) in elements.iter().enumerate() {
         if i > 0 && i % columns == 0 {
-            x = margin_px;
+            x = margin_x;
             y += target_height + spacing_px;
         }
         let scale = if el.natural_height > 0.0 { target_height / el.natural_height } else { 1.0 };
@@ -108,13 +110,14 @@ pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, marg
 
 /// Scales every element to a common height (the smallest natural height in
 /// the set), lays them out left-to-right with `spacing_px` gaps starting at
-/// `margin_px`, and centers them vertically within `margin_px` top/bottom —
+/// `margin_x`, and centers them vertically within `margin_y` top/bottom —
 /// since every element shares the same height after scaling, that reduces
-/// to placing every element's top edge at `margin_px`.
+/// to placing every element's top edge at `margin_y`.
 pub fn compute_horizontal_layout(
     elements: &[ScreenshotElement],
     spacing_px: f64,
-    margin_px: f64,
+    margin_x: f64,
+    margin_y: f64,
 ) -> Vec<Placement> {
     if elements.is_empty() {
         return Vec::new();
@@ -125,12 +128,12 @@ pub fn compute_horizontal_layout(
         .map(|el| el.natural_height)
         .fold(f64::INFINITY, f64::min);
 
-    let mut x = margin_px;
+    let mut x = margin_x;
     let mut placements = Vec::with_capacity(elements.len());
     for el in elements {
         let scale = if el.natural_height > 0.0 { target_height / el.natural_height } else { 1.0 };
         let width = el.natural_width * scale;
-        placements.push(Placement { element_id: el.id, x, y: margin_px, width, height: target_height });
+        placements.push(Placement { element_id: el.id, x, y: margin_y, width, height: target_height });
         x += width + spacing_px;
     }
     placements
@@ -138,9 +141,9 @@ pub fn compute_horizontal_layout(
 
 /// Canvas extent implied by a set of placements plus the margin used to
 /// produce them (placements alone don't carry the trailing margin).
-pub fn extent_for(placements: &[Placement], margin_px: f64) -> CanvasExtent {
-    let width = placements.iter().map(|p| p.x + p.width).fold(0.0_f64, f64::max) + margin_px;
-    let height = placements.iter().map(|p| p.y + p.height).fold(0.0_f64, f64::max) + margin_px;
+pub fn extent_for(placements: &[Placement], margin_x: f64, margin_y: f64) -> CanvasExtent {
+    let width = placements.iter().map(|p| p.x + p.width).fold(0.0_f64, f64::max) + margin_x;
+    let height = placements.iter().map(|p| p.y + p.height).fold(0.0_f64, f64::max) + margin_y;
     CanvasExtent { width, height }
 }
 
@@ -167,7 +170,7 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
     if visible.is_empty() {
         return;
     }
-    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_px);
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
 
     let mut min_x = 0.0_f64;
     let mut min_y = 0.0_f64;
@@ -181,7 +184,8 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
         max_y = max_y.max(placement.y + placement.height);
 
         if el.label.enabled && !el.label.content.is_empty() {
-            if let Ok((bx, by, bw, bh)) = crate::render::measure_text_box(&el.label, placement.width, placement.height) {
+            let resolved_label = el.label.resolve(&doc.label_defaults);
+            if let Ok((bx, by, bw, bh)) = crate::render::measure_text_box(&resolved_label, placement.width, placement.height) {
                 min_x = min_x.min(placement.x + bx);
                 min_y = min_y.min(placement.y + by);
                 max_x = max_x.max(placement.x + bx + bw);
@@ -203,17 +207,18 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
         }
     }
 
-    let margin = doc.layout.margin_px;
+    let margin_x = doc.layout.margin_x;
+    let margin_y = doc.layout.margin_y;
     // Content that never goes negative reproduces the old behaviour
     // exactly: canvas left/top edge stays at the nominal origin, and the
     // layout's own leading margin (already baked into `placement.x/y`)
     // is the only gap on that side. Content that does spill past the
     // origin gets an extra margin-sized gap beyond its own extent too, so
     // it doesn't touch the canvas edge.
-    let final_min_x = if min_x < 0.0 { min_x - margin } else { 0.0 };
-    let final_min_y = if min_y < 0.0 { min_y - margin } else { 0.0 };
-    let final_max_x = max_x + margin;
-    let final_max_y = max_y + margin;
+    let final_min_x = if min_x < 0.0 { min_x - margin_x } else { 0.0 };
+    let final_min_y = if min_y < 0.0 { min_y - margin_y } else { 0.0 };
+    let final_max_x = max_x + margin_x;
+    let final_max_y = max_y + margin_y;
 
     doc.canvas.content_offset_x = -final_min_x;
     doc.canvas.content_offset_y = -final_min_y;
@@ -233,13 +238,13 @@ mod tests {
 
     #[test]
     fn empty_input_produces_no_placements() {
-        assert_eq!(compute_horizontal_layout(&[], 24.0, 48.0), Vec::new());
+        assert_eq!(compute_horizontal_layout(&[], 24.0, 48.0, 48.0), Vec::new());
     }
 
     #[test]
     fn single_element_is_offset_by_margin_only() {
         let elements = [fixture(400.0, 800.0)];
-        let placements = compute_horizontal_layout(&elements, 24.0, 48.0);
+        let placements = compute_horizontal_layout(&elements, 24.0, 48.0, 48.0);
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].x, 48.0);
         assert_eq!(placements[0].y, 48.0);
@@ -250,7 +255,7 @@ mod tests {
     #[test]
     fn equal_height_elements_are_spaced_evenly_with_no_rescale() {
         let elements = [fixture(400.0, 800.0), fixture(400.0, 800.0), fixture(400.0, 800.0)];
-        let placements = compute_horizontal_layout(&elements, 20.0, 0.0);
+        let placements = compute_horizontal_layout(&elements, 20.0, 0.0, 0.0);
         assert_eq!(placements[0].x, 0.0);
         assert_eq!(placements[1].x, 420.0);
         assert_eq!(placements[2].x, 840.0);
@@ -265,7 +270,7 @@ mod tests {
     fn differing_heights_are_scaled_to_the_smallest() {
         // 400x800 (aspect 0.5) and 300x900 (aspect 1/3) -> common height 800.
         let elements = [fixture(400.0, 800.0), fixture(300.0, 900.0)];
-        let placements = compute_horizontal_layout(&elements, 0.0, 0.0);
+        let placements = compute_horizontal_layout(&elements, 0.0, 0.0, 0.0);
         assert_eq!(placements[0].height, 800.0);
         assert_eq!(placements[0].width, 400.0);
         assert_eq!(placements[1].height, 800.0);
@@ -277,7 +282,7 @@ mod tests {
     #[test]
     fn zero_spacing_and_margin_are_respected() {
         let elements = [fixture(100.0, 100.0), fixture(100.0, 100.0)];
-        let placements = compute_horizontal_layout(&elements, 0.0, 0.0);
+        let placements = compute_horizontal_layout(&elements, 0.0, 0.0, 0.0);
         assert_eq!(placements[0].x, 0.0);
         assert_eq!(placements[1].x, 100.0);
     }
@@ -285,8 +290,8 @@ mod tests {
     #[test]
     fn extent_accounts_for_trailing_margin() {
         let elements = [fixture(400.0, 800.0), fixture(400.0, 800.0)];
-        let placements = compute_horizontal_layout(&elements, 20.0, 48.0);
-        let extent = extent_for(&placements, 48.0);
+        let placements = compute_horizontal_layout(&elements, 20.0, 48.0, 48.0);
+        let extent = extent_for(&placements, 48.0, 48.0);
         // margin + 400 + 20 + 400 + margin
         assert_eq!(extent.width, 48.0 + 400.0 + 20.0 + 400.0 + 48.0);
         assert_eq!(extent.height, 48.0 + 800.0 + 48.0);
@@ -298,7 +303,8 @@ mod tests {
 
         let mut doc = Document::new();
         doc.layout.spacing_px = 20.0;
-        doc.layout.margin_px = 48.0;
+        doc.layout.margin_x = 48.0;
+        doc.layout.margin_y = 48.0;
         // A tall portrait screenshot (spec scenario: 1080x2424) — the bug
         // this guards against is the canvas staying at a fixed 1920x1080
         // and cropping content like this off at the bottom.
@@ -323,23 +329,23 @@ mod tests {
 
     #[test]
     fn a_negative_label_padding_pushes_the_canvas_origin_and_grows_it() {
-        use crate::model::{Document, TextPosition, VerticalAnchor};
+        use crate::model::{Document, HorizontalAnchor, TextPosition, VerticalAnchor};
 
         let mut doc = Document::new();
-        doc.layout.margin_px = 10.0;
+        doc.layout.margin_x = 10.0;
+        doc.layout.margin_y = 10.0;
         let mut el = fixture(200.0, 100.0);
         el.label.enabled = true;
         el.label.content = "Hi".to_string();
-        // Push the label 50px above the screenshot's own top edge.
-        if let TextPosition::Semantic { vertical, padding, .. } = &mut el.label.position {
-            *vertical = VerticalAnchor::Top;
-            *padding = -50.0;
-        }
+        // Push every label 50px above its screenshot's own top edge, via
+        // the project's shared label style (see `crate::model::LabelStyle`).
+        doc.label_defaults.position =
+            TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Top, padding: -50.0 };
         doc.elements = vec![el];
 
         crate::layout::fit_canvas_to_content(&mut doc);
 
-        // The label box's top edge sits at placement.y (margin_px) plus its
+        // The label box's top edge sits at placement.y (margin_y) plus its
         // own resolved box_y, which is negative here — so content reaches
         // above the nominal origin and the canvas must grow upward too.
         assert!(doc.canvas.content_offset_y > 0.0);
@@ -352,7 +358,8 @@ mod tests {
         use crate::model::Document;
 
         let mut doc = Document::new();
-        doc.layout.margin_px = 48.0;
+        doc.layout.margin_x = 48.0;
+        doc.layout.margin_y = 48.0;
         doc.elements = vec![fixture(400.0, 800.0)];
 
         crate::layout::fit_canvas_to_content(&mut doc);
@@ -366,7 +373,8 @@ mod tests {
         use crate::model::Document;
 
         let mut doc = Document::new();
-        doc.layout.margin_px = 10.0;
+        doc.layout.margin_x = 10.0;
+        doc.layout.margin_y = 10.0;
         let mut hidden = fixture(2000.0, 2000.0);
         hidden.visible = false;
         let visible = fixture(100.0, 100.0);
@@ -392,7 +400,7 @@ mod tests {
         b.transform.height = 60.0;
 
         // Spacing/margin have no effect — Free mode ignores them entirely.
-        let placements = compute_layout(LayoutMode::Free, &[a, b], 999.0, 999.0);
+        let placements = compute_layout(LayoutMode::Free, &[a, b], 999.0, 999.0, 999.0);
 
         assert_eq!(placements[0].x, 10.0);
         assert_eq!(placements[0].y, 20.0);
@@ -413,7 +421,7 @@ mod tests {
     fn vertical_layout_stacks_top_to_bottom_scaled_to_common_width() {
         // 400x800 (aspect 2.0) and 200x300 (aspect 1.5) -> common width 200.
         let elements = [fixture(400.0, 800.0), fixture(200.0, 300.0)];
-        let placements = compute_vertical_layout(&elements, 10.0, 5.0);
+        let placements = compute_vertical_layout(&elements, 10.0, 5.0, 5.0);
 
         assert_eq!(placements[0].x, 5.0);
         assert_eq!(placements[0].y, 5.0);
@@ -430,7 +438,7 @@ mod tests {
 
     #[test]
     fn vertical_layout_of_empty_input_is_empty() {
-        assert_eq!(compute_vertical_layout(&[], 10.0, 5.0), Vec::new());
+        assert_eq!(compute_vertical_layout(&[], 10.0, 5.0, 5.0), Vec::new());
     }
 
     #[test]
@@ -438,7 +446,7 @@ mod tests {
         // 4 elements -> ceil(sqrt(4)) = 2 columns, 2 rows.
         let elements =
             [fixture(100.0, 100.0), fixture(100.0, 100.0), fixture(100.0, 100.0), fixture(100.0, 100.0)];
-        let placements = compute_grid_layout(&elements, 10.0, 0.0);
+        let placements = compute_grid_layout(&elements, 10.0, 0.0, 0.0);
 
         assert_eq!(placements[0].x, 0.0);
         assert_eq!(placements[0].y, 0.0);
@@ -455,7 +463,7 @@ mod tests {
     fn grid_layout_scales_each_row_to_a_common_height() {
         let elements = [fixture(100.0, 100.0), fixture(50.0, 50.0), fixture(100.0, 100.0)];
         // ceil(sqrt(3)) = 2 columns.
-        let placements = compute_grid_layout(&elements, 0.0, 0.0);
+        let placements = compute_grid_layout(&elements, 0.0, 0.0, 0.0);
         for p in &placements {
             assert_eq!(p.height, 50.0);
         }
@@ -463,6 +471,6 @@ mod tests {
 
     #[test]
     fn grid_layout_of_empty_input_is_empty() {
-        assert_eq!(compute_grid_layout(&[], 10.0, 5.0), Vec::new());
+        assert_eq!(compute_grid_layout(&[], 10.0, 5.0, 5.0), Vec::new());
     }
 }

@@ -23,9 +23,15 @@ impl Rgba {
     pub const BLACK: Rgba = Rgba::new(0.0, 0.0, 0.0, 1.0);
 }
 
-/// Where a screenshot's pixel data comes from. `Embedded` is a forward-looking
-/// stub for the later "save project with assets" option; the MVP only writes
-/// `Path` into project files.
+/// Where a screenshot's (or a `Background::Image`'s) pixel data comes
+/// from. The running app only ever holds `Path` — `crate::project::save`
+/// embeds each `Path`'s file bytes into the saved `.screenforge` zip
+/// archive as a separate entry, referencing it in the saved JSON as
+/// `Embedded`, and `crate::project::load` extracts any `Embedded` source
+/// back to a real file and rewrites it to `Path` before ever handing a
+/// `Document` back to a caller — so `Embedded` only ever exists transiently
+/// inside that module's own save/load internals, on-disk, never as live
+/// in-memory state elsewhere in the app.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "kebab-case")]
 pub enum ImageSource {
@@ -404,6 +410,98 @@ pub struct TextElement {
     pub shadow: ShadowParams,
 }
 
+/// A label's *content* — the one thing that's ever set per-screenshot.
+/// Every other aspect of how a label looks (position, font, colors,
+/// background, padding, corner radius, shadow — see [`LabelStyle`]) is
+/// shared by every label in the project; there is deliberately no
+/// per-label style override anymore (spec: "ich möchte die Label nicht
+/// mehr pro Screenshot gestalten können. Die Gestaltung soll für alle
+/// gleich sein. Nur noch den Text möchte ich pro Label setzen können").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Label {
+    pub enabled: bool,
+    pub content: String,
+}
+
+impl Label {
+    /// A brand-new, disabled label with no content yet — it renders
+    /// however `Document::label_defaults` currently says once enabled,
+    /// same as every other label in the project.
+    pub fn new() -> Self {
+        Self { enabled: false, content: String::new() }
+    }
+
+    /// Combines this label's own `enabled`/`content` with the shared
+    /// `defaults` into one concrete, ready-to-render [`TextElement`] —
+    /// the single place "shared style + this label's own text" resolves
+    /// into a value. `core::render`/`core::layout` call this once per
+    /// visible label and otherwise know nothing about `Label` at all, so
+    /// the rest of the rendering pipeline needs no changes if `LabelStyle`
+    /// itself ever grows a new field.
+    pub fn resolve(&self, defaults: &LabelStyle) -> TextElement {
+        TextElement {
+            enabled: self.enabled,
+            content: self.content.clone(),
+            position: defaults.position,
+            typography: defaults.typography.clone(),
+            background: defaults.background.clone(),
+            corner_radius: defaults.corner_radius,
+            padding_x: defaults.padding_x,
+            padding_y: defaults.padding_y,
+            shadow: defaults.shadow,
+        }
+    }
+}
+
+impl Default for Label {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The document-wide look every label in the project shares — everything
+/// [`TextElement`] has *except* `enabled`/`content`, which only ever make
+/// sense per-label (see [`Label`]). Lives on [`Document`]
+/// (`label_defaults`) rather than anywhere more global, so different
+/// projects/presets can each have their own label style, and so a
+/// `Preset` capturing "globale Label-Einstellungen" (spec) has exactly
+/// this one value to carry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LabelStyle {
+    pub position: TextPosition,
+    pub typography: Typography,
+    pub background: TextBackground,
+    pub corner_radius: CornerRadius,
+    pub padding_x: f64,
+    pub padding_y: f64,
+    pub shadow: ShadowParams,
+}
+
+impl LabelStyle {
+    /// The out-of-the-box global label look — deliberately built from the
+    /// same values `TextElement::label_default` always used, so a
+    /// brand-new document's labels look exactly as they did before this
+    /// global/override split existed.
+    pub fn label_default() -> Self {
+        let d = TextElement::label_default();
+        LabelStyle {
+            position: d.position,
+            typography: d.typography,
+            background: d.background,
+            corner_radius: d.corner_radius,
+            padding_x: d.padding_x,
+            padding_y: d.padding_y,
+            shadow: d.shadow,
+        }
+    }
+}
+
+impl Default for LabelStyle {
+    fn default() -> Self {
+        Self::label_default()
+    }
+}
+
 impl TextElement {
     fn default_padding() -> f64 {
         8.0
@@ -485,9 +583,21 @@ pub struct Callout {
     pub target_y: f64,
     pub arrow_color: Rgba,
     pub arrow_width: f64,
+    /// Radius, in pixels, of the filled marker drawn at the exact target
+    /// point (spec: "Größe des Dots soll einstellbar sein") — reuses
+    /// `arrow_color` rather than its own color, since the dot and arrow
+    /// read as one "pointer" unit. `#[serde(default = "..")]` so a project
+    /// saved before this field existed still loads, with a dot the same
+    /// general scale as `arrow_width`'s own default.
+    #[serde(default = "Callout::default_dot_radius")]
+    pub dot_radius: f64,
 }
 
 impl Callout {
+    fn default_dot_radius() -> f64 {
+        5.0
+    }
+
     /// A new callout pointing at its screenshot's own center, with a text
     /// bubble placed near the top-left corner — a sensible, always-visible
     /// starting point the user then drags into place, rather than
@@ -501,7 +611,16 @@ impl Callout {
             TextPosition::Absolute { .. } => 16.0,
         };
         text.position = TextPosition::Semantic { horizontal: HorizontalAnchor::Left, vertical: VerticalAnchor::Top, padding };
-        Self { id: Uuid::new_v4(), enabled: true, text, target_x: 0.5, target_y: 0.5, arrow_color: Rgba::BLACK, arrow_width: (width * 0.004).clamp(1.5, 6.0) }
+        Self {
+            id: Uuid::new_v4(),
+            enabled: true,
+            text,
+            target_x: 0.5,
+            target_y: 0.5,
+            arrow_color: Rgba::BLACK,
+            arrow_width: (width * 0.004).clamp(1.5, 6.0),
+            dot_radius: (width * 0.006).clamp(3.0, 8.0),
+        }
     }
 }
 
@@ -518,13 +637,15 @@ pub struct ScreenshotElement {
     pub transform: Transform,
     pub corner_radius: CornerRadius,
     pub shadow: ShadowParams,
-    /// This screenshot's own label (spec §11) — screenshot-relative, so it
-    /// moves/scales with the element rather than living on `Document`
-    /// alongside the canvas-relative title. `#[serde(default)]` so a
-    /// project saved before labels existed still loads, with every
-    /// existing screenshot getting a disabled default label.
-    #[serde(default = "TextElement::label_default")]
-    pub label: TextElement,
+    /// This screenshot's own label (spec §11) — just its *content*;
+    /// everything else about how it looks comes from
+    /// `Document::label_defaults` and is shared by every label in the
+    /// project (see `Label::resolve`). `#[serde(default)]` so a project
+    /// saved before `Label` existed still loads — `crate::project::load`
+    /// additionally migrates such a project's old, fully-independent
+    /// per-screenshot label down to just its content.
+    #[serde(default)]
+    pub label: Label,
     /// "Look, feature X" callouts (spec: "Callouts/Feature-Hinweise") —
     /// any number, unlike the singular `label`. `#[serde(default)]` so a
     /// project saved before callouts existed still loads, with none on
@@ -544,7 +665,12 @@ impl ScreenshotElement {
             transform: Transform::default(),
             corner_radius: CornerRadius::default(),
             shadow: ShadowParams::default(),
-            label: TextElement::label_default_for_width(natural_width),
+            // No longer sized off `natural_width` the way the old
+            // per-screenshot `TextElement` was — a label's look now comes
+            // from the document's shared `label_defaults` (spec: changing
+            // the global font size must move every label at once), which
+            // has no per-screenshot width to scale against.
+            label: Label::new(),
             callouts: Vec::new(),
             visible: true,
         }
@@ -678,11 +804,16 @@ fn default_generated_scale() -> f64 {
 impl GeneratedBackground {
     /// A fresh background with reasonable defaults — restrained enough
     /// that the very first "Generate" click already looks intentional,
-    /// not just technically valid.
+    /// not just technically valid. `color_strategy` defaults to `Random`
+    /// (spec: "Zufällig soll zum Default-Modus für generierte
+    /// Hintergründe werden") — the one strategy that needs nothing from
+    /// the document (no screenshots to derive from, no manual colors to
+    /// have picked yet) to already produce a good-looking result on the
+    /// very first "Generieren" click.
     pub fn new(seed: u64) -> Self {
         Self {
             seed,
-            color_strategy: ColorStrategy::FromScreenshots,
+            color_strategy: ColorStrategy::Random,
             palette: Vec::new(),
             adapt_to_screenshots: true,
             inverse_contrast: 0.5,
@@ -733,12 +864,29 @@ pub enum LayoutMode {
 pub struct LayoutSettings {
     pub mode: LayoutMode,
     pub spacing_px: f64,
-    pub margin_px: f64,
+    /// Horizontal outer margin (left+right), independent of `margin_y` —
+    /// mirrors `TextElement`/`LabelStyle`'s own `padding_x`/`padding_y`
+    /// split, for the same reason: a composition can want more breathing
+    /// room on one axis than the other. `#[serde(default = "..")]` so a
+    /// project saved before this split existed still loads — see
+    /// `crate::project::load`'s `migrate_legacy_layout_margin`, which
+    /// copies the old uniform value into both new fields.
+    #[serde(default = "LayoutSettings::default_margin")]
+    pub margin_x: f64,
+    /// Vertical outer margin (top+bottom) — see `margin_x`.
+    #[serde(default = "LayoutSettings::default_margin")]
+    pub margin_y: f64,
+}
+
+impl LayoutSettings {
+    fn default_margin() -> f64 {
+        48.0
+    }
 }
 
 impl Default for LayoutSettings {
     fn default() -> Self {
-        Self { mode: LayoutMode::Horizontal, spacing_px: 24.0, margin_px: 48.0 }
+        Self { mode: LayoutMode::Horizontal, spacing_px: 24.0, margin_x: 48.0, margin_y: 48.0 }
     }
 }
 
@@ -820,6 +968,15 @@ pub struct Document {
     pub layout: LayoutSettings,
     pub background: Background,
     pub canvas: CanvasSettings,
+    /// The look every label in the project shares — spec: "globale
+    /// Label-Einstellungen als Standard". Lives here (per-document) rather
+    /// than anywhere more global so different projects/presets can each
+    /// carry their own label style.
+    /// `#[serde(default)]` so a project saved before this existed still
+    /// loads — see `ScreenshotElement::label`'s own doc comment for how
+    /// each of that project's existing labels is migrated to match.
+    #[serde(default)]
+    pub label_defaults: LabelStyle,
 }
 
 impl Document {
@@ -830,6 +987,7 @@ impl Document {
             layout: LayoutSettings::default(),
             background: Background::default(),
             canvas: CanvasSettings::default(),
+            label_defaults: LabelStyle::default(),
         }
     }
 }
@@ -1051,19 +1209,36 @@ mod tests {
     }
 
     #[test]
-    fn a_wider_screenshot_gets_a_larger_default_label_font_and_padding() {
-        let narrow = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("a.png")), 360.0, 720.0);
-        let wide = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("b.png")), 2160.0, 3840.0);
-        assert!(wide.label.typography.font_size > narrow.label.typography.font_size);
-        assert!(wide.label.padding_x > narrow.label.padding_x);
-        assert!(wide.label.padding_y > narrow.label.padding_y);
+    fn resolve_combines_the_labels_own_text_with_the_shared_defaults() {
+        let defaults = LabelStyle { padding_x: 42.0, ..LabelStyle::label_default() };
+        let label = Label { enabled: true, content: "Hi".to_string() };
+        let resolved = label.resolve(&defaults);
+        assert!(resolved.enabled);
+        assert_eq!(resolved.content, "Hi");
+        assert_eq!(resolved.padding_x, 42.0);
+        assert_eq!(resolved.typography, defaults.typography);
+        assert_eq!(resolved.position, defaults.position);
+        assert_eq!(resolved.background, defaults.background);
+        assert_eq!(resolved.corner_radius, defaults.corner_radius);
+        assert_eq!(resolved.shadow, defaults.shadow);
     }
 
     #[test]
-    fn default_label_font_size_stays_within_sane_bounds_at_extreme_widths() {
-        let tiny = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("a.png")), 1.0, 1.0);
-        let huge = ScreenshotElement::new(ImageSource::Path(std::path::PathBuf::from("b.png")), 100_000.0, 100_000.0);
-        assert!(tiny.label.typography.font_size >= 12.0);
-        assert!(huge.label.typography.font_size <= 64.0);
+    fn changing_the_shared_default_moves_every_label() {
+        // There is no per-label override anymore — every label in a
+        // project renders identically except for its own text (spec:
+        // "die Gestaltung soll für alle gleich sein").
+        let mut defaults = LabelStyle::label_default();
+        let a = Label { enabled: true, content: "A".to_string() };
+        let b = Label { enabled: true, content: "B".to_string() };
+        assert_eq!(a.resolve(&defaults).typography.color, defaults.typography.color);
+        assert_eq!(b.resolve(&defaults).typography.color, defaults.typography.color);
+
+        defaults.typography.color = Rgba::new(1.0, 0.0, 0.0, 1.0);
+        assert_eq!(a.resolve(&defaults).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(b.resolve(&defaults).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
+        // Only the content differs between the two.
+        assert_eq!(a.resolve(&defaults).content, "A");
+        assert_eq!(b.resolve(&defaults).content, "B");
     }
 }

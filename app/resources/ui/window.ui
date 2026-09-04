@@ -11,10 +11,24 @@
         <child type="top">
           <object class="AdwHeaderBar">
             <child type="start">
+              <object class="GtkToggleButton" id="sidebar_toggle_button">
+                <property name="icon-name">sidebar-show-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Seitenleiste ein-/ausblenden</property>
+              </object>
+            </child>
+            <child type="start">
               <object class="GtkMenuButton" id="open_menu_button">
                 <property name="icon-name">document-open-symbolic</property>
                 <property name="tooltip-text" translatable="yes">Öffnen</property>
                 <property name="menu-model">open_menu</property>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="android_import_button">
+                <property name="icon-name">phone-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Von Android-Gerät importieren</property>
+                <property name="action-name">win.import-android</property>
+                <property name="sensitive">false</property>
               </object>
             </child>
             <child type="start">
@@ -31,10 +45,18 @@
                 <property name="action-name">win.redo</property>
               </object>
             </child>
+            <!-- AdwHeaderBar packs "end" children in the REVERSE of their
+                 declaration order here (the first one declared ends up
+                 rightmost, closest to the window controls) — confirmed
+                 live, not just inferred from the XML. So this list is
+                 written back-to-front relative to the desired on-screen
+                 left-to-right order: Presets, Zoom, "Screenshots
+                 ausblenden", Exportieren, Hauptmenü (rightmost). -->
             <child type="end">
-              <object class="GtkToggleButton" id="hide_screenshots_button">
-                <property name="icon-name">view-reveal-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Screenshots vorübergehend ausblenden</property>
+              <object class="GtkMenuButton" id="primary_menu_button">
+                <property name="icon-name">open-menu-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Hauptmenü</property>
+                <property name="menu-model">primary_menu</property>
               </object>
             </child>
             <child type="end">
@@ -47,6 +69,12 @@
               </object>
             </child>
             <child type="end">
+              <object class="GtkToggleButton" id="hide_screenshots_button">
+                <property name="icon-name">view-reveal-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Screenshots vorübergehend ausblenden</property>
+              </object>
+            </child>
+            <child type="end">
               <object class="GtkMenuButton" id="zoom_menu_button">
                 <property name="icon-name">zoom-fit-best-symbolic</property>
                 <property name="tooltip-text" translatable="yes">Zoom</property>
@@ -54,10 +82,16 @@
               </object>
             </child>
             <child type="end">
-              <object class="GtkMenuButton" id="primary_menu_button">
-                <property name="icon-name">open-menu-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Hauptmenü</property>
-                <property name="menu-model">primary_menu</property>
+              <!-- Popover content built and attached programmatically in
+                   main.rs's register_presets_menu (a dynamic, persisted
+                   list can't be declared statically as a menu-model here)
+                   — deliberately its own header-bar entry point rather
+                   than a page in the "Einstellungen" dialog, since a
+                   preset captures *this project's* current settings, not
+                   the app-wide ones that dialog otherwise holds. -->
+              <object class="GtkMenuButton" id="presets_menu_button">
+                <property name="icon-name">user-bookmarks-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Presets</property>
               </object>
             </child>
           </object>
@@ -73,7 +107,7 @@
               <object class="GtkScrolledWindow">
                 <property name="hscrollbar-policy">never</property>
                 <child>
-                  <object class="AdwPreferencesPage">
+                  <object class="AdwPreferencesPage" id="sidebar_page">
                     <child>
                       <object class="AdwPreferencesGroup">
                         <property name="title" translatable="yes">Layout</property>
@@ -109,9 +143,25 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="margin_row">
-                            <property name="title" translatable="yes">Außenrand</property>
-                            <property name="subtitle" translatable="yes">Rand um die Komposition, in Pixeln</property>
+                          <object class="AdwSpinRow" id="margin_x_row">
+                            <property name="title" translatable="yes">Außenabstand horizontal</property>
+                            <property name="subtitle" translatable="yes">Links/rechts um die Komposition, in Pixeln</property>
+                            <property name="digits">0</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">500</property>
+                                <property name="step-increment">4</property>
+                                <property name="page-increment">20</property>
+                                <property name="value">48</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="margin_y_row">
+                            <property name="title" translatable="yes">Außenabstand vertikal</property>
+                            <property name="subtitle" translatable="yes">Oben/unten um die Komposition, in Pixeln</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
@@ -341,6 +391,28 @@
                                 </items>
                               </object>
                             </property>
+                            <!-- Index 3 ("Zufällig") — the default
+                                 generation mode (spec: "Zufällig soll zum
+                                 Default-Modus für generierte Hintergründe
+                                 werden"). Must come *after* `model` above:
+                                 GtkBuilder applies properties in document
+                                 order, and `selected` against a still-empty
+                                 model silently clamps to 0 regardless of
+                                 what's set here — confirmed by hand after
+                                 the first attempt (property listed before
+                                 `model`) had no effect. `generate_background`
+                                 in main.rs reads this row's *current*
+                                 selection directly rather than deriving it
+                                 from GeneratedBackground::new()'s own
+                                 default, so that Rust-level default alone
+                                 was never enough either — this property is
+                                 what actually makes the very first switch
+                                 to "Generiert" land on Random. Any real
+                                 Generated background (loaded, undone, or
+                                 already generated) overrides this via
+                                 sync_generator_controls regardless, so it
+                                 only matters before that ever happens. -->
+                            <property name="selected">3</property>
                           </object>
                         </child>
                         <child>
@@ -550,6 +622,7 @@
                                   <item translatable="yes">Standard</item>
                                   <item translatable="yes">Stark</item>
                                   <item translatable="yes">Floating</item>
+                                  <item translatable="yes">Angepasst</item>
                                 </items>
                               </object>
                             </property>
@@ -670,342 +743,6 @@
                             </child>
                           </object>
                         </child>
-                        <child>
-                          <object class="AdwSwitchRow" id="label_wrap_row">
-                            <property name="title" translatable="yes">Automatisch umbrechen</property>
-                            <property name="subtitle" translatable="yes">Sonst nur an manuell eingefügten Zeilenumbrüchen</property>
-                            <property name="sensitive">false</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_position_mode_row">
-                            <property name="title" translatable="yes">Position</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Automatisch</item>
-                                  <item translatable="yes">Manuell (X/Y)</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_horizontal_row">
-                            <property name="title" translatable="yes">Horizontal</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Links</item>
-                                  <item translatable="yes">Mitte</item>
-                                  <item translatable="yes">Rechts</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_vertical_row">
-                            <property name="title" translatable="yes">Vertikal</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Oben</item>
-                                  <item translatable="yes">Mitte</item>
-                                  <item translatable="yes">Unten</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_padding_row">
-                            <property name="title" translatable="yes">Randabstand</property>
-                            <property name="subtitle" translatable="yes">Zum Screenshot-Rand, in Pixeln</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-500</property>
-                                <property name="upper">500</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">16</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_x_row">
-                            <property name="title" translatable="yes">X-Position</property>
-                            <property name="subtitle" translatable="yes">In Pixeln, relativ zum Screenshot</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-4000</property>
-                                <property name="upper">8000</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">40</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_y_row">
-                            <property name="title" translatable="yes">Y-Position</property>
-                            <property name="subtitle" translatable="yes">In Pixeln, relativ zum Screenshot</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-4000</property>
-                                <property name="upper">8000</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">40</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_background_row">
-                            <property name="title" translatable="yes">Hintergrund</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Kein Hintergrund</item>
-                                  <item translatable="yes">Einfarbig</item>
-                                  <item translatable="yes">Verlauf</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="label_background_color_row">
-                            <property name="title" translatable="yes">Hintergrundfarbe</property>
-                            <property name="subtitle" translatable="yes">Deckkraft über die Farbwahl einstellbar</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkButton" id="label_background_auto_button">
-                                <property name="valign">center</property>
-                                <property name="tooltip-text" translatable="yes">Automatisch: kontrastreiche Farbe aus dem Screenshot vorschlagen</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="label_background_color_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog">
-                                    <property name="with-alpha">true</property>
-                                  </object>
-                                </property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="label_background_color2_row">
-                            <property name="title" translatable="yes">Hintergrundfarbe 2</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="label_background_color2_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog">
-                                    <property name="with-alpha">true</property>
-                                  </object>
-                                </property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_corner_radius_row">
-                            <property name="title" translatable="yes">Eckenradius</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">200</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_padding_x_row">
-                            <property name="title" translatable="yes">Innenabstand horizontal</property>
-                            <property name="subtitle" translatable="yes">Zwischen Rand und Text, in Pixeln</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">200</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">8</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_padding_y_row">
-                            <property name="title" translatable="yes">Innenabstand vertikal</property>
-                            <property name="subtitle" translatable="yes">Zwischen Rand und Text, in Pixeln</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">200</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">8</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="label_font_row">
-                            <property name="title" translatable="yes">Schrift</property>
-                            <property name="sensitive">false</property>
-                            <child type="suffix">
-                              <object class="GtkFontDialogButton" id="label_font_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkFontDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_alignment_row">
-                            <property name="title" translatable="yes">Textausrichtung</property>
-                            <property name="subtitle" translatable="yes">Bei mehrzeiligem Text</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Links</item>
-                                  <item translatable="yes">Mitte</item>
-                                  <item translatable="yes">Rechts</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="label_color_row">
-                            <property name="title" translatable="yes">Textfarbe</property>
-                            <property name="sensitive">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="label_color_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_opacity_row">
-                            <property name="title" translatable="yes">Deckkraft</property>
-                            <property name="subtitle" translatable="yes">In Prozent</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">100</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="label_shadow_row">
-                            <property name="title" translatable="yes">Schatten</property>
-                            <property name="sensitive">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Kein Schatten</item>
-                                  <item translatable="yes">Subtil</item>
-                                  <item translatable="yes">Standard</item>
-                                  <item translatable="yes">Stark</item>
-                                  <item translatable="yes">Floating</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_shadow_angle_row">
-                            <property name="title" translatable="yes">Schatten-Winkel</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">360</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">45</property>
-                                <property name="value">90</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_shadow_distance_row">
-                            <property name="title" translatable="yes">Schatten-Distanz</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">300</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">6</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="label_shadow_blur_row">
-                            <property name="title" translatable="yes">Weichzeichner</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">150</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">16</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
                       </object>
                     </child>
                     <child>
@@ -1037,7 +774,7 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwPreferencesGroup">
+                      <object class="AdwPreferencesGroup" id="export_group">
                         <property name="title" translatable="yes">Export</property>
                         <child>
                           <object class="AdwSpinRow" id="export_width_row">
@@ -1135,22 +872,8 @@
         <attribute name="action">win.open</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">Von Android-Gerät importieren…</attribute>
-        <attribute name="action">win.import-android</attribute>
-      </item>
-      <item>
         <attribute name="label" translatable="yes">Projekt öffnen…</attribute>
         <attribute name="action">win.open-project</attribute>
-      </item>
-    </section>
-    <section>
-      <item>
-        <attribute name="label" translatable="yes">Vorlage laden…</attribute>
-        <attribute name="action">win.load-template</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Vorlage speichern unter…</attribute>
-        <attribute name="action">win.save-template</attribute>
       </item>
     </section>
   </menu>

@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use uuid::Uuid;
 
 use crate::model::{
-    Background, Callout, CornerRadius, Document, ImageSource, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams, TextElement,
+    Background, Callout, CornerRadius, Document, ImageSource, Label, LabelStyle, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams,
     Transform,
 };
 
@@ -310,18 +310,34 @@ impl Command for SetSpacing {
 }
 
 #[derive(Debug)]
-pub struct SetMargin {
+pub struct SetMarginX {
     pub old: f64,
     pub new: f64,
 }
 
-impl Command for SetMargin {
+impl Command for SetMarginX {
     fn apply(&self, doc: &mut Document) {
-        doc.layout.margin_px = self.new;
+        doc.layout.margin_x = self.new;
     }
 
     fn undo(&self, doc: &mut Document) {
-        doc.layout.margin_px = self.old;
+        doc.layout.margin_x = self.old;
+    }
+}
+
+#[derive(Debug)]
+pub struct SetMarginY {
+    pub old: f64,
+    pub new: f64,
+}
+
+impl Command for SetMarginY {
+    fn apply(&self, doc: &mut Document) {
+        doc.layout.margin_y = self.new;
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.layout.margin_y = self.old;
     }
 }
 
@@ -446,8 +462,8 @@ impl Command for SetCornerRadiusForAllElements {
 #[derive(Debug)]
 pub struct SetScreenshotLabel {
     pub element_id: Uuid,
-    pub old: TextElement,
-    pub new: TextElement,
+    pub old: Label,
+    pub new: Label,
 }
 
 impl Command for SetScreenshotLabel {
@@ -461,6 +477,27 @@ impl Command for SetScreenshotLabel {
         if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
             element.label = self.old.clone();
         }
+    }
+}
+
+/// Changes `Document::label_defaults` — the shared look every label in
+/// the project uses (spec: "globale Label-Einstellungen als Standard").
+/// Document-wide rather than per-element, so unlike every other `Set*`
+/// command here this one never looks anything up by id — there's exactly
+/// one.
+#[derive(Debug)]
+pub struct SetLabelDefaults {
+    pub old: LabelStyle,
+    pub new: LabelStyle,
+}
+
+impl Command for SetLabelDefaults {
+    fn apply(&self, doc: &mut Document) {
+        doc.label_defaults = self.new.clone();
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.label_defaults = self.old.clone();
     }
 }
 
@@ -543,10 +580,14 @@ impl Command for SetCallout {
     }
 }
 
-/// Applies a saved [`crate::template::Template`] — layout mode/spacing/
-/// margin, background, and shadow/corner radius for every element — as one
-/// undoable step. `old_*` are the caller's job to capture beforehand, same
-/// as `SetShadowForAllElements`/`SetCornerRadiusForAllElements`, since a
+/// Applies a saved preset ([`crate::template::Template`]) — layout mode/
+/// spacing/margin, background, shadow/corner radius for every element, and
+/// the document's shared label defaults — as one undoable step. Never
+/// touches a screenshot's `label`/`callouts` at all: only the *shared*
+/// look (`Document::label_defaults`) is part of a preset, so any label's
+/// own content survives an applied (or undone) preset completely
+/// untouched. `old_*` are the caller's job to capture beforehand, same as
+/// `SetShadowForAllElements`/`SetCornerRadiusForAllElements`, since a
 /// command shouldn't need to reach back into the stack that dispatched it
 /// to know what it's reverting to.
 #[derive(Debug)]
@@ -555,6 +596,7 @@ pub struct ApplyTemplate {
     pub old_background: Background,
     pub old_shadows: Vec<ShadowParams>,
     pub old_corner_radii: Vec<CornerRadius>,
+    pub old_label_defaults: LabelStyle,
     pub new: crate::template::Template,
 }
 
@@ -566,6 +608,7 @@ impl Command for ApplyTemplate {
             element.shadow = self.new.shadow;
             element.corner_radius = self.new.corner_radius;
         }
+        doc.label_defaults = self.new.label_defaults.clone();
     }
 
     fn undo(&self, doc: &mut Document) {
@@ -576,6 +619,7 @@ impl Command for ApplyTemplate {
             element.shadow = *shadow;
             element.corner_radius = *corner_radius;
         }
+        doc.label_defaults = self.old_label_defaults.clone();
     }
 }
 
@@ -660,13 +704,14 @@ mod tests {
         assert_eq!(doc.canvas.export_height, 1080); // the pre-fix default that used to crop
 
         let portrait = ScreenshotElement::new(ImageSource::Path(PathBuf::from("phone.png")), 1080.0, 2424.0);
-        let margin = doc.layout.margin_px;
+        let margin_x = doc.layout.margin_x;
+        let margin_y = doc.layout.margin_y;
 
         let mut stack = UndoStack::new();
         stack.apply(Box::new(AddScreenshots { elements: vec![portrait] }), &mut doc);
 
-        assert_eq!(doc.canvas.export_width, (1080.0 + margin * 2.0) as u32);
-        assert_eq!(doc.canvas.export_height, (2424.0 + margin * 2.0) as u32);
+        assert_eq!(doc.canvas.export_width, (1080.0 + margin_x * 2.0) as u32);
+        assert_eq!(doc.canvas.export_height, (2424.0 + margin_y * 2.0) as u32);
 
         // Undoing removes the last visible element, so `fit_canvas_to_content`
         // is a no-op (by design — see its own doc comment) and the canvas
@@ -897,8 +942,8 @@ mod tests {
     }
 
     #[test]
-    fn apply_template_updates_layout_background_and_every_elements_shadow_and_radius() {
-        use crate::model::{Background, LayoutMode, Rgba};
+    fn apply_template_updates_layout_background_shadow_radius_and_label_defaults() {
+        use crate::model::{Background, LabelStyle, LayoutMode, Rgba};
         use crate::template::Template;
 
         let mut doc = Document::new();
@@ -906,16 +951,24 @@ mod tests {
             ScreenshotElement::new(ImageSource::Path(PathBuf::from("a.png")), 100.0, 200.0),
             ScreenshotElement::new(ImageSource::Path(PathBuf::from("b.png")), 100.0, 200.0),
         ];
+        // A label's own text, to prove applying/undoing a preset never
+        // touches it — only `Document::label_defaults` (the shared style)
+        // is part of a preset, never any label's own content.
+        doc.elements[0].label.enabled = true;
+        doc.elements[0].label.content = "Keep me".to_string();
         let old_layout = doc.layout;
         let old_background = doc.background.clone();
         let old_shadows: Vec<ShadowParams> = doc.elements.iter().map(|e| e.shadow).collect();
         let old_corner_radii: Vec<CornerRadius> = doc.elements.iter().map(|e| e.corner_radius).collect();
+        let old_label_defaults = doc.label_defaults.clone();
+        let old_label_content = doc.elements[0].label.content.clone();
 
         let template = Template {
-            layout: LayoutSettings { mode: LayoutMode::Grid, spacing_px: 5.0, margin_px: 10.0 },
+            layout: LayoutSettings { mode: LayoutMode::Grid, spacing_px: 5.0, margin_x: 10.0, margin_y: 10.0 },
             background: Background::Solid(Rgba::new(1.0, 0.0, 0.0, 1.0)),
             shadow: ShadowParams::strong(),
             corner_radius: CornerRadius::uniform(8.0),
+            label_defaults: LabelStyle { padding_x: 55.0, ..LabelStyle::label_default() },
         };
 
         let mut stack = UndoStack::new();
@@ -925,6 +978,7 @@ mod tests {
                 old_background: old_background.clone(),
                 old_shadows,
                 old_corner_radii,
+                old_label_defaults: old_label_defaults.clone(),
                 new: template.clone(),
             }),
             &mut doc,
@@ -934,12 +988,16 @@ mod tests {
         assert_eq!(doc.background, template.background);
         assert!(doc.elements.iter().all(|e| e.shadow == ShadowParams::strong()));
         assert!(doc.elements.iter().all(|e| e.corner_radius == CornerRadius::uniform(8.0)));
+        assert_eq!(doc.label_defaults, template.label_defaults);
+        assert_eq!(doc.elements[0].label.content, old_label_content, "a preset must never touch a label's own text");
 
         stack.undo(&mut doc);
         assert_eq!(doc.layout, old_layout);
         assert_eq!(doc.background, old_background);
         assert!(doc.elements.iter().all(|e| e.shadow == ShadowParams::none()));
         assert!(doc.elements.iter().all(|e| e.corner_radius == CornerRadius::none()));
+        assert_eq!(doc.label_defaults, old_label_defaults);
+        assert_eq!(doc.elements[0].label.content, old_label_content);
     }
 
     #[test]

@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-04
+
+### Added
+
+- Import screenshots from a connected Android device: the toolbar's
+  import button now shows live whether a capture is actually possible —
+  disabled with an explanatory tooltip when no device is connected, when
+  a device is plugged in but "USB-Debugging zulassen?" hasn't been
+  confirmed on it yet, or when `adb` itself isn't available — instead of
+  only ever failing after the fact when clicked.
+- Presets: save the current layout, background, shadow, corner radius,
+  and label look under a name from the header bar's new "Presets" menu,
+  and reapply, rename, or delete a saved preset later. Replaces the old
+  file-based `.screenforge-template` export/import — presets now live in
+  the app's own settings instead of a file the user had to manage.
+- A collapsible sidebar: toggle the settings panel from the header bar
+  to give the canvas more room, e.g. on a narrower window.
+- Callouts get an adjustable "Punktgröße" (dot radius): a filled marker
+  at the exact point a callout points to, on top of the arrow, sized
+  independently so the target is unambiguous even with a thin arrow.
+- Independent horizontal/vertical outer margins ("Rand" split into two
+  values) for a composition's layout, instead of one uniform margin on
+  all four sides.
+
+### Changed
+
+- A screenshot's label can no longer be styled individually — position,
+  font, colors, background, padding, corner radius, and shadow are now
+  one shared look for every label in the project, editable once and
+  applied everywhere; only each label's own text stays per-screenshot.
+  A preset now captures this shared look too, and applying one never
+  touches any label's text. Existing projects with per-label styling
+  still load, with each label's saved style discarded in favor of the
+  project's own shared default.
+- The generator's `Zufällig` (random) color strategy is now the default
+  for a newly generated background, and both it and the manual palette's
+  starting colors produce four genuinely distinct hues instead of colors
+  that could read as near-identical shades of the same one.
+- Saved `.screenforge` project files are now self-contained zip archives
+  that embed each screenshot's and background image's own original file
+  bytes, so a saved project keeps working even if the source images are
+  later moved, renamed, or deleted. Projects saved by older versions
+  still load unchanged.
+
 ## [0.22.0] - 2026-09-03
 
 ### Added
