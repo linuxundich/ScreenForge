@@ -214,14 +214,25 @@ fn draw_callout(ctx: &Context, callout: &Callout, ref_w: f64, ref_h: f64, scale:
     // A small filled marker at the exact target point, on top of the line
     // (which runs to the same point, so it ends up hidden under the dot) —
     // makes the thing the callout is actually pointing at unambiguous, the
-    // way an on-screen annotation tool's marker dot does. Reuses the arrow's
-    // own color rather than adding a separate one, since the dot and arrow
-    // read as one "pointer" unit; only its size was ever meant to be its
-    // own setting.
+    // way an on-screen annotation tool's marker dot does. Reuses the
+    // arrow's own color for the fill rather than adding a separate one,
+    // since the dot and arrow read as one "pointer" unit; `dot_radius` is
+    // the fill's own radius only. Ringed with a white border whose width
+    // is the arrow's own line width rather than a separate setting (spec:
+    // "der Rand um den Punkt soll sich aus der Linienstärke des Pfeils
+    // ergeben") — keeps the dot legible against a same-colored background
+    // the way the arrow's white-free line alone wouldn't be.
     if callout.dot_radius > 0.0 {
         ctx.set_source_rgba(c.r, c.g, c.b, c.a);
         ctx.arc(target.0, target.1, callout.dot_radius, 0.0, 2.0 * PI);
         ctx.fill()?;
+
+        if callout.arrow_width > 0.0 {
+            ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+            ctx.set_line_width(callout.arrow_width);
+            ctx.arc(target.0, target.1, callout.dot_radius + callout.arrow_width / 2.0, 0.0, 2.0 * PI);
+            ctx.stroke()?;
+        }
     }
 
     draw_text_element(ctx, &callout.text, ref_w, ref_h, scale, cache)

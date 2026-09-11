@@ -11,15 +11,18 @@ PNG, JPEG or WebP image.
 
 ## Features
 
-- **Import** via file dialog (`Ctrl+O`), drag-and-drop, or pasting from the
-  clipboard (`Ctrl+V`); PNG, JPEG, WebP.
-- **Layout modes**: horizontal, vertical, or grid (each scaling screenshots
-  to a common size automatically, with adjustable spacing and outer
-  margin), or free — drag any screenshot anywhere on the canvas to
-  position it (snapping into alignment with other screenshots and the
-  canvas edges/center), and its corner handles to resize it
-  (aspect-locked by default). The canvas always resizes to fit its
-  content automatically — nothing is ever cropped off.
+- **Import** via file dialog (`Ctrl+O`), drag-and-drop, pasting from the
+  clipboard (`Ctrl+V`), or directly from a connected Android device over
+  `adb` (the toolbar button shows live whether a device is actually
+  reachable, with a tooltip explaining why not otherwise).
+- **Layout modes**: horizontal, vertical, or grid (each scaling
+  screenshots to a common size automatically, with adjustable spacing
+  and separate horizontal/vertical outer margins), or free — drag any
+  screenshot anywhere on the canvas to position it (snapping into
+  alignment with other screenshots and the canvas edges/center), and its
+  corner handles to resize it (aspect-locked by default). The canvas
+  always resizes to fit its content automatically — nothing is ever
+  cropped off.
 - **Reordering** by dragging screenshots directly on the canvas.
 - **Multi-select**: click, Shift-click, or marquee-drag across empty
   canvas space to select several screenshots at once (outlined on
@@ -27,26 +30,38 @@ PNG, JPEG or WebP image.
   any of them to move the whole selection together.
 - **Per-screenshot context menu**: duplicate, replace, delete, bring
   forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
+- **Labels**: an optional caption per screenshot, its text set
+  individually but its look (position, font, color, background, padding,
+  corner radius, shadow) shared by every label in the project and edited
+  once for all of them.
+- **Callouts**: any number of "look, feature X" text bubbles per
+  screenshot, each with an arrow (and a bordered target dot) pointing at
+  a spot on the screenshot — text, colors, arrow and dot all editable
+  inline, no dialog.
 - **Backgrounds**: solid color, linear gradient, radial gradient, an
-  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), or
-  a vector pattern — a dot grid, diagonal stripes, or freeform: add
+  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), a
+  generated wave-layer pattern with adjustable palette/contrast/softness,
+  or a vector pattern — a dot grid, diagonal stripes, or freeform: add
   individual circles/lines with their own position, size and color.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
-- **Text overlay**: an optional caption drawn over the whole composition,
-  with adjustable position, font size and color.
-- **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed in.
+- **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed
+  in; the sidebar can be collapsed to give the canvas more room.
 - **Undo/redo** for every edit.
 - **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target
   width (height always following proportionally), rendered off the UI
   thread so the app never blocks.
-- **Projects**: save/load as `.screenforge` files (versioned JSON,
-  image references kept as paths — originals are never modified).
-- **Templates**: save a composition's style (layout, spacing/margin,
-  background, shadow, corner radius) as a `.screenforge-template` file
-  and reapply it to a different set of screenshots later.
-- **Preferences** (`Ctrl+,`): default spacing, margin and export quality
-  for every newly created document.
+- **Projects**: save/load as self-contained `.screenforge` files (a zip
+  archive bundling a versioned JSON manifest with every screenshot's and
+  background's own original image bytes, so a saved project keeps
+  working even if the source files are later moved or deleted; older
+  plain-JSON project files still load).
+- **Presets**: save the current layout, background, shadow, corner
+  radius and label look under a name from the header bar's Presets menu,
+  then reapply, rename or delete it later — presets live in the app's
+  own settings, not a separate file to manage.
+- **Preferences** (`Ctrl+,`): default spacing, margins, label style and
+  export quality for every newly created document.
 
 ScreenForge works entirely offline. Nothing is ever uploaded anywhere.
 

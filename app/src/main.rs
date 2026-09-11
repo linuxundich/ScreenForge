@@ -2463,11 +2463,11 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
     ));
 
     // Shadow preset/geometry: same preset-preserves-angle split as every
-    // other shadow control in this app (`ShadowParams::with_preset`).
-    // Rebuilt fresh whenever the callout list changes (never resynced
-    // externally within its own lifetime), so — unlike the project-wide
-    // label style's own shadow_row — this needs no `syncing_controls`
-    // guard against a reentrant resync.
+    // other shadow control in this app (`ShadowParams::with_preset`), and
+    // the same `syncing_controls` guard as the screenshot-level version
+    // in `register_effect_controls` — needed here too, since setting
+    // `shadow_distance_row`/`shadow_blur_row` below reentrantly fires
+    // `apply_shadow_geometry`, which needs its own borrow of `state`.
     shadow_row.connect_selected_notify(glib::clone!(
         #[weak]
         window,
@@ -2482,6 +2482,14 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         #[weak]
         shadow_blur_row,
         move |row| {
+            // Bail out *before* touching any sibling widget — see the
+            // matching comment on the screenshot-level `shadow_row`
+            // handler (`register_effect_controls`) for why: this handler
+            // reenters whenever `syncing_controls` is already set, and
+            // the writes below must not run unconditionally in that case.
+            if state.borrow().syncing_controls {
+                return;
+            }
             // "Angepasst" only ever reflects a shadow that doesn't match
             // any real preset — selecting it has nothing coherent to apply.
             if row.selected() == CUSTOM_SHADOW_PRESET_INDEX {
@@ -2493,12 +2501,24 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
             let preset = shadow_preset_for_index(row.selected());
             let new_shadow = current.text.shadow.with_preset(preset);
 
+            // Guard these writes the same way the screenshot-level
+            // handler does: `set_value` below reentrantly fires
+            // `apply_shadow_geometry`, which needs its own borrow of
+            // `state` — held open across these calls, `state_ref` here
+            // would make that borrow panic instead of just no-op'ing.
+            state_ref.syncing_controls = true;
+            drop(state_ref);
+
             shadow_distance_row.set_value(new_shadow.angle_and_distance().1);
             shadow_blur_row.set_value(new_shadow.blur);
             shadow_angle_row.set_sensitive(new_shadow.enabled);
             shadow_distance_row.set_sensitive(new_shadow.enabled);
             shadow_blur_row.set_sensitive(new_shadow.enabled);
 
+            let mut state_ref = state.borrow_mut();
+            state_ref.syncing_controls = false;
+            let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
+            let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
             let mut new = current.clone();
             new.text.shadow = new_shadow;
             if current == new {
@@ -2529,6 +2549,9 @@ fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Editor
         shadow_blur_row,
         move || {
             let mut state_ref = state.borrow_mut();
+            if state_ref.syncing_controls {
+                return;
+            }
             let Some(element) = state_ref.document.elements.iter().find(|e| e.id == element_id) else { return };
             let Some(current) = element.callouts.iter().find(|c| c.id == callout_id).cloned() else { return };
             let (offset_x, offset_y) = ShadowParams::offset_for_angle_and_distance(shadow_angle_row.value(), shadow_distance_row.value());

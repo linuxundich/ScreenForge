@@ -691,7 +691,14 @@ mod imp {
                 // target — drawn in every layout mode (unlike the resize
                 // handles above), since a callout's target is always
                 // screenshot-relative regardless of how screenshots
-                // themselves are arranged.
+                // themselves are arranged. Stroke-only, deliberately never
+                // filled: this sits exactly on top of the actual rendered
+                // `Callout::dot_radius` marker (baked into the cached
+                // content bitmap underneath), and an opaque fill here used
+                // to completely hide that marker at every radius up to
+                // this handle's own — changing "Punktgröße" looked like it
+                // did nothing since the same white disc was always what
+                // covered the target point.
                 {
                     let scale = self.last_scale.get();
                     let placements = self.last_placements.borrow();
@@ -702,8 +709,6 @@ mod imp {
                             offset_y + (p.y + callout.target.1 + content_offset_y) * scale,
                         );
                         ctx.arc(cx, cy, CALLOUT_TARGET_DRAW_RADIUS_PX, 0.0, 2.0 * PI);
-                        ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-                        let _ = ctx.fill_preserve();
                         ctx.set_source_rgba(0.29, 0.56, 0.89, 1.0);
                         ctx.set_line_width(1.5);
                         let _ = ctx.stroke();

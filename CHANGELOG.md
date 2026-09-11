@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-11
+
+### Added
+
+- A callout's target dot now gets a white border whose width always
+  matches the arrow's own "Pfeilbreite" (line width), instead of being a
+  plain filled circle — keeps the dot legible against a same-colored
+  background, and needs no separate setting since it's derived from one
+  that already exists.
+
+### Fixed
+
+- Picking a shadow preset ("Kein Schatten"/"Subtil"/…) for a callout's
+  own shadow could crash the app with a "RefCell already borrowed"
+  panic: the handler held the document open while updating the
+  distance/blur sliders, which reentrantly tried to open it again. The
+  screenshot-level shadow controls already guarded against exactly this;
+  the callout version had the same gap.
+- Increasing a callout's "Punktgröße" (dot size) visibly did nothing:
+  the on-canvas handle for dragging the callout's target point painted
+  an opaque white circle of a fixed size directly over the actual
+  rendered dot on every redraw, hiding any size change underneath. The
+  handle is now an outline only, so the real dot — and its new border,
+  above — stays visible through it.
+
 ## [0.24.0] - 2026-09-04
 
 ### Added
