@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-06
+
+### Added
+
+- Translations via gettext. The source strings are now English, with a
+  complete German translation in `po/de.po`; the app follows the system
+  language. `po/update-pot.sh` refreshes the catalogs.
+- meson build: installs the binary, desktop file, AppStream metainfo,
+  GSettings schema, icons, MIME type for `.screenforge` projects and the
+  translations, and validates desktop file, metainfo and schema in
+  `meson test`.
+- Flatpak manifest for the GNOME 51 runtime with an offline build script
+  (`build-aux/flatpak/build.sh`). Inside the sandbox, Android import uses
+  the host's `adb` through `flatpak-spawn --host`.
+- README rewritten as a product page with new screenshots; build and
+  project notes moved to `docs/DEVELOPMENT.md`.
+
+### Changed
+
+- An installed build uses the system GSettings schema; only `cargo run`
+  still points GLib at the schema compiled into `OUT_DIR`.
+- The watermark casts a soft shadow instead of a hard outline.
+- Background-only variant previews no longer convert every screenshot,
+  which makes the variant grid noticeably faster.
+- The in-app release notes are in English.
+
 ## [0.28.0] - 2026-10-06
 
 ### Added

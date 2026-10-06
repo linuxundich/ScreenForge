@@ -102,13 +102,34 @@ fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64)
         WatermarkCorner::BottomLeft | WatermarkCorner::BottomRight => height - margin - text_h,
     };
     let alpha = watermark.opacity.clamp(0.0, 1.0);
-    ctx.save()?;
-    ctx.set_source_rgba(0.0, 0.0, 0.0, 0.25 * alpha);
-    for (dx, dy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-        let d = (font_px * 0.05).max(0.5);
-        ctx.move_to(x + dx * d, y + dy * d);
-        pangocairo::functions::show_layout(ctx, &layout);
+    // A soft drop shadow, so light text stays legible on light areas:
+    // the text rendered into a small padded surface, blurred, painted
+    // slightly below the text.
+    let blur = (font_px * 0.12).max(1.0);
+    let pad = (blur * 3.0).ceil();
+    let (sw, sh) = ((text_w + 2.0 * pad).ceil() as i32, (text_h + 2.0 * pad).ceil() as i32);
+    if sw > 0 && sh > 0 {
+        let mut shadow = cairo::ImageSurface::create(cairo::Format::ARgb32, sw, sh)?;
+        {
+            let sctx = Context::new(&shadow)?;
+            let slayout = pangocairo::functions::create_layout(&sctx);
+            slayout.set_font_description(Some(&font));
+            slayout.set_text(watermark.text.trim());
+            sctx.move_to(pad, pad);
+            sctx.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+            pangocairo::functions::show_layout(&sctx, &slayout);
+        }
+        let stride = shadow.stride();
+        {
+            let mut data = shadow.data()?;
+            crate::blur::box_blur(&mut data, sw, sh, stride, blur);
+        }
+        ctx.save()?;
+        ctx.set_source_surface(&shadow, x - pad, y - pad + font_px * 0.06)?;
+        ctx.paint_with_alpha(0.55 * alpha)?;
+        ctx.restore()?;
     }
+    ctx.save()?;
     let c = watermark.color;
     ctx.set_source_rgba(c.r, c.g, c.b, c.a * alpha);
     ctx.move_to(x, y);

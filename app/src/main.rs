@@ -6,6 +6,7 @@ mod window;
 
 mod dialogs;
 mod editor_model;
+mod i18n;
 mod editing;
 mod panels;
 mod presets;
@@ -15,6 +16,7 @@ mod state;
 
 use dialogs::*;
 use editor_model::*;
+use i18n::N_;
 use editing::*;
 use panels::*;
 use presets::*;
@@ -31,6 +33,7 @@ use std::time::Duration;
 use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
+use gettextrs::{gettext, ngettext};
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
@@ -54,11 +57,15 @@ use window::Window;
 const APP_ID: &str = "de.christophlangner.ScreenForge";
 
 fn main() -> glib::ExitCode {
-    // Safety: called before any thread that could race on the environment
-    // exists (the very first thing `main` does), and before any GSettings
-    // use — see `app_settings()` for why this is here at all.
-    unsafe {
-        std::env::set_var("GSETTINGS_SCHEMA_DIR", concat!(env!("OUT_DIR"), "/schemas"));
+    i18n::init();
+    // `cargo run` only: an installed build (configured by meson, which sets
+    // SCREENFORGE_LOCALEDIR at compile time) has its schema in the standard
+    // location. Safety: called before any other thread exists and before
+    // any GSettings use — see `app_settings()`.
+    if option_env!("SCREENFORGE_LOCALEDIR").is_none() {
+        unsafe {
+            std::env::set_var("GSETTINGS_SCHEMA_DIR", concat!(env!("OUT_DIR"), "/schemas"));
+        }
     }
 
     gio::resources_register_include!("screenforge.gresource").expect("failed to register GResource bundle");

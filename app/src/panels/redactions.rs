@@ -6,7 +6,7 @@
 use crate::*;
 
 const STYLES: [(RedactionStyle, &str); 3] =
-    [(RedactionStyle::Blackout, "Schwarzer Balken"), (RedactionStyle::Pixelate, "Verpixeln"), (RedactionStyle::Blur, "Weichzeichnen")];
+    [(RedactionStyle::Blackout, N_("Black Bar")), (RedactionStyle::Pixelate, N_("Pixelate")), (RedactionStyle::Blur, N_("Blur"))];
 
 /// The widgets this panel owns, kept so selection changes and undo can
 /// rebuild the list.
@@ -15,8 +15,8 @@ pub(crate) struct RedactionsPanel {
     list: gtk4::ListBox,
 }
 
-fn style_label(style: RedactionStyle) -> &'static str {
-    STYLES.iter().find(|s| s.0 == style).map(|s| s.1).unwrap_or("")
+fn style_label(style: RedactionStyle) -> String {
+    STYLES.iter().find(|s| s.0 == style).map(|s| gettext(s.1)).unwrap_or_default()
 }
 
 fn redactions_of(state: &Rc<RefCell<EditorState>>, element_id: Uuid) -> Vec<Redaction> {
@@ -51,16 +51,16 @@ fn percent_row(title: &str, value: f64) -> adw::SpinRow {
 /// One expander row per redaction. Edits replace just that redaction in
 /// the element's list (looked up by id at edit time).
 fn build_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, panel: &Rc<RedactionsPanel>, element_id: Uuid, index: usize, r: &Redaction) -> adw::ExpanderRow {
-    let row = adw::ExpanderRow::builder().title(format!("Bereich {}", index + 1)).subtitle(style_label(r.style)).build();
-    let delete = gtk4::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Bereich entfernen").valign(gtk4::Align::Center).css_classes(["flat"]).build();
+    let row = adw::ExpanderRow::builder().title(gettext("Area {number}").replace("{number}", &(index + 1).to_string())).subtitle(style_label(r.style)).build();
+    let delete = gtk4::Button::builder().icon_name("user-trash-symbolic").tooltip_text(gettext("Remove Area")).valign(gtk4::Align::Center).css_classes(["flat"]).build();
     row.add_suffix(&delete);
 
-    let style_row = adw::ComboRow::builder().title("Art").model(&gtk4::StringList::new(&STYLES.iter().map(|s| s.1).collect::<Vec<_>>())).build();
+    let style_row = adw::ComboRow::builder().title(gettext("Type")).model(&gtk4::StringList::new(&STYLES.iter().map(|s| gettext(s.1)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>())).build();
     style_row.set_selected(STYLES.iter().position(|s| s.0 == r.style).unwrap_or(0) as u32);
-    let x = percent_row("Links", r.x);
-    let y = percent_row("Oben", r.y);
-    let w = percent_row("Breite", r.width);
-    let h = percent_row("Höhe", r.height);
+    let x = percent_row(&gettext("Left"), r.x);
+    let y = percent_row(&gettext("Top"), r.y);
+    let w = percent_row(&gettext("Width"), r.width);
+    let h = percent_row(&gettext("Height"), r.height);
     row.add_row(&style_row);
     for spin in [&x, &y, &w, &h] {
         row.add_row(spin);
@@ -88,7 +88,7 @@ fn build_row(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>,
         h,
         move || {
             let style = STYLES.get(style_row.selected() as usize).map(|s| s.0).unwrap_or_default();
-            row.set_subtitle(style_label(style));
+            row.set_subtitle(&style_label(style));
             let mut list = redactions_of(&state, element_id);
             if let Some(entry) = list.iter_mut().find(|e| e.id == id) {
                 *entry = Redaction { id, x: x.value() / 100.0, y: y.value() / 100.0, width: w.value() / 100.0, height: h.value() / 100.0, style };
@@ -141,15 +141,15 @@ pub(crate) fn sync_redactions(window: &Window, canvas: &Canvas, state: &Rc<RefCe
 
 pub(crate) fn register_redaction_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).visible(false).build();
-    let add = adw::ButtonRow::builder().title("Bereich hinzufügen").start_icon_name("list-add-symbolic").build();
+    let add = adw::ButtonRow::builder().title(gettext("Add Area")).start_icon_name("list-add-symbolic").build();
     let add_list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).build();
     add_list.append(&add);
     let content = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(12).build();
     content.append(&list);
     content.append(&add_list);
     let group = adw::PreferencesGroup::builder()
-        .title("Schwärzen")
-        .description("Bereiche des ausgewählten Screenshots unkenntlich machen, z. B. E-Mail-Adressen")
+        .title(gettext("Redact"))
+        .description(gettext("Make areas of the selected screenshot unreadable, e.g. e-mail addresses"))
         .visible(false)
         .build();
     group.add(&content);

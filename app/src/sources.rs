@@ -45,11 +45,11 @@ pub(crate) fn register_open_action(app: &adw::Application, window: &Window, canv
                 filter.add_mime_type("image/png");
                 filter.add_mime_type("image/jpeg");
                 filter.add_mime_type("image/webp");
-                filter.set_name(Some("Screenshots"));
+                filter.set_name(Some(&gettext("Screenshots")));
 
                 let dialog = gtk4::FileDialog::builder()
-                    .title("Screenshots öffnen")
-                    .accept_label("Öffnen")
+                    .title(gettext("Open Screenshots"))
+                    .accept_label(gettext("Open"))
                     .default_filter(&filter)
                     .build();
 
@@ -97,7 +97,7 @@ pub(crate) fn register_import_android_action(app: &adw::Application, window: &Wi
                 match result {
                     Ok(Ok(path)) => import_paths(&window, &canvas, &state, vec![path]),
                     Ok(Err(err)) => toast_overlay.add_toast(adw::Toast::new(&err.to_string())),
-                    Err(_) => toast_overlay.add_toast(adw::Toast::new("Import fehlgeschlagen: Hintergrundaufgabe abgebrochen")),
+                    Err(_) => toast_overlay.add_toast(adw::Toast::new(&gettext("Import failed: background task was cancelled"))),
                 }
             });
         }
@@ -132,7 +132,7 @@ pub(crate) fn check_adb_state_once(window: &Window, last_state: &Rc<RefCell<Opti
         async move {
             let state = gio::spawn_blocking(adb::detect_state)
                 .await
-                .unwrap_or_else(|_| adb::AdbDeviceState::AdbUnavailable("Geräteprüfung abgebrochen".to_string()));
+                .unwrap_or_else(|_| adb::AdbDeviceState::AdbUnavailable(gettext("Device check was cancelled")));
             if last_state.borrow().as_ref() == Some(&state) {
                 return;
             }
@@ -291,7 +291,7 @@ pub(crate) fn register_take_screenshot_action(window: &Window, canvas: &Canvas, 
             let state = state.clone();
             glib::spawn_future_local(async move {
                 if let Err(err) = take_portal_screenshot(&window, &canvas, &state).await {
-                    window.toast_overlay().add_toast(adw::Toast::new(&format!("Bildschirmfoto fehlgeschlagen: {err}")));
+                    window.toast_overlay().add_toast(adw::Toast::new(&gettext("Screenshot failed: {err}").replace("{err}", &err.to_string())));
                 }
             });
         }
@@ -338,7 +338,7 @@ async fn take_portal_screenshot(window: &Window, canvas: &Canvas, state: &Rc<Ref
                 let path = results.lookup::<String>("uri").ok().flatten().and_then(|uri| gio::File::for_uri(&uri).path());
                 match path {
                     Some(path) => import_paths(&window, &canvas, &state, vec![path]),
-                    None => window.toast_overlay().add_toast(adw::Toast::new("Bildschirmfoto: keine Datei erhalten")),
+                    None => window.toast_overlay().add_toast(adw::Toast::new(&gettext("Screenshot: no file received"))),
                 }
             }
         ),
@@ -354,7 +354,7 @@ async fn take_portal_screenshot(window: &Window, canvas: &Canvas, state: &Rc<Ref
             Some("org.freedesktop.portal.Desktop"),
             "/org/freedesktop/portal/desktop",
             "org.freedesktop.portal.Screenshot",
-            "Screenshot",
+            &gettext("Screenshot"),
             Some(&parameters),
             None,
             gio::DBusCallFlags::NONE,

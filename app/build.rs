@@ -25,17 +25,37 @@ fn main() {
     );
 
     compile_gsettings_schema();
+    compile_translations();
+}
+
+/// Compiles `../po/*.po` into `$OUT_DIR/locale/<lang>/LC_MESSAGES/screenforge.mo`
+/// for `cargo run`; `i18n.rs` binds the text domain there unless an
+/// installed build (meson) set `SCREENFORGE_LOCALEDIR`. Skipped with a
+/// warning if `msgfmt` is missing — the app then simply shows English.
+fn compile_translations() {
+    println!("cargo:rerun-if-changed=../po");
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let Ok(entries) = std::fs::read_dir("../po") else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "po") {
+            continue;
+        }
+        let Some(lang) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let target = Path::new(&out_dir).join("locale").join(lang).join("LC_MESSAGES");
+        std::fs::create_dir_all(&target).expect("failed to create locale output directory");
+        match Command::new("msgfmt").arg("-o").arg(target.join("screenforge.mo")).arg(&path).status() {
+            Ok(status) if status.success() => {}
+            _ => println!("cargo:warning=msgfmt failed or missing; {lang} translation not built"),
+        }
+    }
 }
 
 /// Compiles `data/*.gschema.xml` into `$OUT_DIR/schemas/gschemas.compiled`.
-/// There's no meson/install step yet to put this where GLib normally looks
-/// for compiled schemas (`$XDG_DATA_DIRS/glib-2.0/schemas/`), so `main.rs`
-/// points `GSETTINGS_SCHEMA_DIR` at this directory instead — confirmed
-/// empirically that GLib treats that env var as an *additional* search
-/// path, not a replacement, so this needs no system-wide installation.
-/// Whenever a real packaged build exists, its install step should compile
-/// the schema into the standard system location and this becomes a no-op
-/// fallback for `cargo run`.
+/// For `cargo run` only: `main.rs` points `GSETTINGS_SCHEMA_DIR` at this
+/// directory unless the build was configured by meson, whose install step
+/// puts the schema where GLib normally looks
+/// (`$prefix/share/glib-2.0/schemas/`).
 fn compile_gsettings_schema() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let schema_dir = Path::new(&out_dir).join("schemas");

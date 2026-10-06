@@ -1,125 +1,67 @@
-# ScreenForge
+<p align="center">
+  <img src="app/data/icons/hicolor/scalable/apps/de.christophlangner.ScreenForge.svg" alt="ScreenForge icon" width="128" height="128">
+</p>
 
-A native GNOME app for arranging smartphone screenshots into a single wide
-presentation image — built for bloggers, documentation writers and social
-media creators who need to show several screenshots side by side.
+<h1 align="center">ScreenForge</h1>
 
-Drop in a handful of (typically vertical) screenshots, and ScreenForge scales
-them to a common height, lays them out horizontally, and lets you fine-tune
-spacing, background, shadows and rounded corners before exporting a single
-PNG, JPEG or WebP image.
+<p align="center"><strong>Your screenshots, ready to show.</strong></p>
 
-## Features
+<p align="center">
+  Put several smartphone screenshots side by side on one image, on a background that looks designed,
+  ready for a blog post, a store listing or social media. A native GTK&nbsp;4 and libadwaita app that works entirely offline.
+</p>
 
-- **Import** via file dialog (`Ctrl+O`), drag-and-drop, pasting from the
-  clipboard (`Ctrl+V`), "Open with" from the file manager, a desktop
-  screenshot through the screenshot portal, or directly from a connected
-  Android device over `adb` — with a clean status bar (12:00, full
-  battery and signal) thanks to Android's demo mode. The toolbar button
-  shows live whether a device is reachable.
-- **Layout modes**: horizontal, vertical, or grid (each scaling
-  screenshots to a common size automatically, with adjustable spacing
-  and separate horizontal/vertical outer margins), or free — drag any
-  screenshot anywhere on the canvas to position it (snapping into
-  alignment with other screenshots and the canvas edges/center), and its
-  corner handles to resize it (aspect-locked by default). The canvas
-  always resizes to fit its content automatically — nothing is ever
-  cropped off.
-- **Reordering** by dragging screenshots directly on the canvas.
-- **Multi-select**: click, Shift-click, or marquee-drag across empty
-  canvas space to select several screenshots at once (outlined on
-  screen), then delete them all in one step, or — in Free layout — drag
-  any of them to move the whole selection together.
-- **Per-screenshot context menu**: duplicate, replace, delete, bring
-  forward/backward/to front/to back, rotate 90°, flip horizontal/vertical.
-- **Labels**: an optional caption per screenshot, its text set
-  individually but its look (position, font, color, background, padding,
-  corner radius, shadow) shared by every label in the project and edited
-  once for all of them.
-- **Callouts**: any number of "look, feature X" text bubbles per
-  screenshot, each with an arrow (and a bordered target dot) pointing at
-  a spot on the screenshot — text, colors, arrow and dot all editable
-  inline, no dialog.
-- **Backgrounds**: solid color, linear gradient, radial gradient, an
-  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), or
-  a generated abstract background in one of six styles — layered paper,
-  concentric arcs, silk ribbons, folded planes, line bundles or soft mist
-  — with harmonious palettes (vivid, light or dark, random or derived
-  from the screenshots), soft shadows and film grain. The original wave
-  generator remains available as "Waves (classic)".
-- **Variants**: six alternative backgrounds one click away in the
-  sidebar, or nine large previews of the real composition in the
-  background studio — per style or mixed, in any mood.
-- **Formats**: fit to content or fixed presets (16:9, 1:1, 4:5, 9:16,
-  Open Graph 1200 × 630, Mastodon/Bluesky, Play Store feature graphic),
-  the content always centered and never cropped.
-- **Redactions**: hide parts of a screenshot as a dark bar, pixel blocks
-  or a blur.
-- **Watermark**: a text mark in any corner, with size, opacity and color.
-- **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
-  freely adjustable direction, length and blur, and rounded corners.
-- **Workspace**: a tabbed sidebar (Layout, Background, Style, Text,
-  Export) that turns into an overlay on narrow windows, a floating zoom
-  bar (fit, 100 %, step in/out), and a shortcuts overview (Ctrl+?).
-- **Undo/redo** for every edit.
-- **Export** to PNG, JPEG, WebP, AVIF or PDF, scaled to a freely chosen
-  target width (height always following proportionally), optionally with
-  a transparent background, rendered off the UI thread so the app never
-  blocks. Or copy the result straight to the clipboard (`Ctrl+Shift+C`),
-  or drag it out of the window into a browser or chat.
-- **Projects**: save/load as self-contained `.screenforge` files (a zip
-  archive bundling a versioned JSON manifest with every screenshot's and
-  background's own original image bytes, so a saved project keeps
-  working even if the source files are later moved or deleted; older
-  plain-JSON project files still load).
-- **Presets**: save the current layout, background, shadow, corner
-  radius and label look under a name from the header bar's Presets menu,
-  then reapply, rename or delete it later — presets live in the app's
-  own settings, not a separate file to manage.
-- **Preferences** (`Ctrl+,`): default spacing, margins, label style and
-  export quality for every newly created document.
+<p align="center">
+  <a href="docs/DEVELOPMENT.md#flatpak"><strong>Build the Flatpak</strong></a>
+  &nbsp;·&nbsp; Flathub: planned &nbsp;·&nbsp;
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-ScreenForge works entirely offline. Nothing is ever uploaded anywhere.
+<p align="center">
+  <img src="docs/screenshots/main-window.png" alt="ScreenForge with three phone screenshots on a generated background and the variant grid in the sidebar" width="100%">
+</p>
 
-## Building
+## What it does
 
-Requires a Rust toolchain, GTK 4 (≥ 4.16), libadwaita (≥ 1.5) development
-packages, and `glib-compile-schemas` (for the preferences `GSettings`
-schema — `build.rs` compiles it into `$OUT_DIR` and points
-`GSETTINGS_SCHEMA_DIR` there at startup, so no system-wide schema
-installation is needed for `cargo build`/`cargo run`; a real packaged
-build's install step should compile it into the standard system location
-instead).
+### Screenshots in, presentation image out
 
-```sh
-cargo build --release
-./target/release/screenforge
-```
+Drop in a few screenshots, paste them from the clipboard or take them straight from your Android phone. ScreenForge lines them up, scales them to a common size and adds shadows and rounded corners. Horizontal, vertical, grid, or free placement with snapping and alignment tools.
 
-For day-to-day development:
+<p align="center">
+  <img src="docs/screenshots/example-output.jpg" alt="An exported image: three phone screenshots on a purple background with concentric arcs and a watermark" width="100%">
+</p>
 
-```sh
-cargo run -p screenforge
-cargo test --workspace
-```
+### Backgrounds that look designed
 
-## Project layout
+The background generator draws abstract scenes in six styles: layered paper, concentric arcs, silk ribbons, folded planes, line bundles and soft mist. Colors come in harmonious palettes, vivid, light or dark, or taken from your screenshots. Don't like it? The sidebar always offers six variants, and the background studio shows nine large previews of your actual composition. Plain colors, gradients, your own image or a blurred copy of a screenshot work too.
 
-The workspace is split so the composition logic stays independent of the
-GUI toolkit and is unit-testable on its own:
+<p align="center">
+  <img src="docs/screenshots/background-studio.png" alt="The background studio with nine variants of the arcs style" width="100%">
+</p>
 
-- `core/` (`screenforge-core`) — the document model, the horizontal-layout
-  engine, the Cairo-based renderer shared by the live preview and the
-  full-resolution export, the undo/redo command stack, and `.screenforge`
-  project (de)serialization. No GTK dependency.
-- `app/` (`screenforge`) — the GTK4 + libadwaita application: the window,
-  the canvas widget, file import/export, and project save/load.
+### Point things out, hide what's private
 
-## Status
+Give each screenshot a label, add callouts with arrows that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share.
 
-ScreenForge is under active development. The features listed above are
-implemented and tested; see [CHANGELOG.md](CHANGELOG.md) for release
-history.
+### The right size for every place
+
+Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story, Open Graph, Mastodon and Bluesky, or the Play Store feature graphic. Your content stays centered and is never cropped. Add a watermark, export as PNG, JPEG, WebP, AVIF or PDF, with a transparent background if you like, or copy the result to the clipboard and drag it straight into a browser or chat.
+
+<p align="center">
+  <img src="docs/screenshots/export.png" alt="The export tab with format presets, transparent background and watermark settings" width="100%">
+</p>
+
+### At home on GNOME
+
+Adaptive layout, a tabbed sidebar, keyboard shortcuts and undo for every edit. Open images from the file manager, take a desktop screenshot through the system dialog, or import from an Android device over adb, with a clean status bar showing 12:00 and a full battery. Save projects as single `.screenforge` files and reuse your look as presets. English and German included.
+
+## Install
+
+ScreenForge isn't on Flathub yet. You can build and install the Flatpak from this repository with one script, or build it with meson; see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Translations
+
+The interface is translated with gettext. German is complete; [po/README.md](po/README.md) explains how to add another language.
 
 ## License
 

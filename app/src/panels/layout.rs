@@ -185,7 +185,7 @@ pub(crate) enum Alignment {
 pub(crate) fn align_selected(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, alignment: Alignment) {
     let selected = canvas.selected_ids();
     if selected.len() < 2 {
-        window.toast_overlay().add_toast(adw::Toast::new("Mindestens 2 Screenshots auswählen, um sie auszurichten"));
+        window.toast_overlay().add_toast(adw::Toast::new(&gettext("Select at least 2 screenshots to align them")));
         return;
     }
     let mut state_ref = state.borrow_mut();

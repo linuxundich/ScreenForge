@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2025-2026 Christoph Langner -->
+<component type="desktop-application">
+  <id>de.christophlangner.ScreenForge</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>ScreenForge</name>
+  <summary>Arrange screenshots into one presentation image</summary>
+  <description>
+    <p>ScreenForge puts several smartphone screenshots side by side on one image, ready for a blog post, a store listing or social media. Add the screenshots, pick a background and export.</p>
+    <p>Features:</p>
+    <ul>
+      <li>Horizontal, vertical, grid or free layouts, with shadows and rounded corners</li>
+      <li>Generated abstract backgrounds in six styles, with variants to choose from</li>
+      <li>Labels and callouts with arrows that point at details</li>
+      <li>Redact sensitive areas with a black bar, pixels or blur</li>
+      <li>Format presets for 16:9, square, Open Graph, Mastodon and app stores</li>
+      <li>Import from files, the clipboard, a desktop screenshot or an Android device over adb, with a clean status bar</li>
+      <li>Export to PNG, JPEG, WebP, AVIF or PDF, or copy the result to the clipboard</li>
+    </ul>
+    <p>ScreenForge works entirely offline. Nothing is uploaded anywhere.</p>
+  </description>
+  <launchable type="desktop-id">de.christophlangner.ScreenForge.desktop</launchable>
+  <developer id="de.christophlangner">
+    <name translate="no">Christoph Langner</name>
+  </developer>
+  <url type="homepage">https://github.com/linuxundich/ScreenForge</url>
+  <url type="bugtracker">https://github.com/linuxundich/ScreenForge/issues</url>
+  <url type="vcs-browser">https://github.com/linuxundich/ScreenForge</url>
+  <url type="translate">https://github.com/linuxundich/ScreenForge/tree/main/po</url>
+  <translation type="gettext">screenforge</translation>
+  <branding>
+    <color type="primary" scheme_preference="light">#f6d5b0</color>
+    <color type="primary" scheme_preference="dark">#5c3b22</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <provides>
+    <binary>screenforge</binary>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Screenshots on a generated background, with the variant grid</caption>
+      <image>https://raw.githubusercontent.com/linuxundich/ScreenForge/main/docs/screenshots/main-window.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The background studio with large previews</caption>
+      <image>https://raw.githubusercontent.com/linuxundich/ScreenForge/main/docs/screenshots/background-studio.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Format presets, watermark and export</caption>
+      <image>https://raw.githubusercontent.com/linuxundich/ScreenForge/main/docs/screenshots/export.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.29.0" date="2026-10-06">
+      <description translate="no">
+        <p>English user interface with a complete German translation, installable with meson and as a Flatpak.</p>
+      </description>
+    </release>
+    <release version="0.28.0" date="2026-10-06">
+      <description translate="no">
+        <p>Format presets, clipboard copy and drag-out, redactions, a blurred-screenshot background, watermark, transparent background, PDF export, a clean Android status bar, desktop screenshots and opening files from the file manager.</p>
+      </description>
+    </release>
+    <release version="0.27.0" date="2026-10-06">
+      <description translate="no">
+        <p>New interface with a tabbed sidebar, background variants and a background studio.</p>
+      </description>
+    </release>
+    <release version="0.26.0" date="2026-10-06">
+      <description translate="no">
+        <p>Six new styles for generated backgrounds, moods and film grain.</p>
+      </description>
+    </release>
+  </releases>
+</component>

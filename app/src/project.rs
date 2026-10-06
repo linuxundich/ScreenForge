@@ -19,8 +19,8 @@ pub(crate) fn prepare_project_asset_extract_dir() -> PathBuf {
 pub(crate) fn save_project_to(window: &Window, state: &Rc<RefCell<EditorState>>, path: &std::path::Path) {
     let doc = state.borrow().document.clone();
     let toast = match screenforge_core::project::save(&doc, path) {
-        Ok(()) => adw::Toast::new("Projekt gespeichert"),
-        Err(err) => adw::Toast::new(&format!("Speichern fehlgeschlagen: {err}")),
+        Ok(()) => adw::Toast::new(&gettext("Project saved")),
+        Err(err) => adw::Toast::new(&gettext("Saving failed: {err}").replace("{err}", &err.to_string())),
     };
     window.toast_overlay().add_toast(toast);
 }
@@ -28,11 +28,11 @@ pub(crate) fn save_project_to(window: &Window, state: &Rc<RefCell<EditorState>>,
 async fn save_project_as(window: &Window, state: &Rc<RefCell<EditorState>>) {
     let filter = gtk4::FileFilter::new();
     filter.add_pattern("*.screenforge");
-    filter.set_name(Some("ScreenForge-Projekte"));
+    filter.set_name(Some(&gettext("ScreenForge Projects")));
 
     let dialog = gtk4::FileDialog::builder()
-        .title("Projekt speichern unter")
-        .accept_label("Speichern")
+        .title(gettext("Save Project As"))
+        .accept_label(gettext("Save"))
         .initial_name("komposition.screenforge")
         .default_filter(&filter)
         .build();
@@ -161,11 +161,11 @@ pub(crate) fn register_project_actions(app: &adw::Application, window: &Window, 
             glib::spawn_future_local(async move {
                 let filter = gtk4::FileFilter::new();
                 filter.add_pattern("*.screenforge");
-                filter.set_name(Some("ScreenForge-Projekte"));
+                filter.set_name(Some(&gettext("ScreenForge Projects")));
 
                 let dialog = gtk4::FileDialog::builder()
-                    .title("Projekt öffnen")
-                    .accept_label("Öffnen")
+                    .title(gettext("Open Project"))
+                    .accept_label(gettext("Open"))
                     .default_filter(&filter)
                     .build();
 
@@ -216,14 +216,14 @@ pub(crate) fn open_project_file(window: &Window, canvas: &Canvas, state: &Rc<Ref
             update_undo_redo_sensitivity(window, state);
 
             let toast = if missing > 0 {
-                adw::Toast::new(&format!("Projekt geladen ({missing} Bild(er) fehlen)"))
+                adw::Toast::new(&ngettext("Project loaded ({missing} image missing)", "Project loaded ({missing} images missing)", missing).replace("{missing}", &missing.to_string()))
             } else {
-                adw::Toast::new("Projekt geladen")
+                adw::Toast::new(&gettext("Project loaded"))
             };
             window.toast_overlay().add_toast(toast);
         }
         Err(err) => {
-            window.toast_overlay().add_toast(adw::Toast::new(&format!("Projekt konnte nicht geladen werden: {err}")));
+            window.toast_overlay().add_toast(adw::Toast::new(&gettext("The project could not be loaded: {err}").replace("{err}", &err.to_string())));
         }
     }
 }

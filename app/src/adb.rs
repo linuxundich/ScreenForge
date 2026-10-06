@@ -7,23 +7,25 @@
 //! happens inside `adb` itself before this ever runs.
 
 use std::path::PathBuf;
+
+use gettextrs::gettext;
 use std::process::{Command, Output};
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AdbError {
-    #[error("adb wurde nicht gefunden — sind die Android Platform Tools installiert und im PATH?")]
+    #[error("{}", gettext("adb was not found — are the Android Platform Tools installed and in PATH?"))]
     NotFound,
-    #[error("adb konnte nicht gestartet werden: {0}")]
+    #[error("{}", gettext("adb could not be started: {0}").replace("{0}", &.0.to_string()))]
     Spawn(std::io::Error),
-    #[error("kein autorisiertes Android-Gerät gefunden — USB-Debugging aktivieren und den Zugriff auf dem Gerät bestätigen")]
+    #[error("{}", gettext("no authorized Android device found — enable USB debugging and confirm access on the device"))]
     NoDevice,
-    #[error("mehrere Android-Geräte gefunden ({0}) — bitte nur eines verbunden lassen")]
+    #[error("{}", gettext("several Android devices found ({0}) — please keep only one connected").replace("{0}", .0))]
     MultipleDevices(String),
-    #[error("screencap ist fehlgeschlagen: {0}")]
+    #[error("{}", gettext("screencap failed: {0}").replace("{0}", .0))]
     Screencap(String),
-    #[error("konnte den Screenshot nicht zwischenspeichern: {0}")]
+    #[error("{}", gettext("could not store the screenshot: {0}").replace("{0}", &.0.to_string()))]
     Io(#[from] std::io::Error),
 }
 
@@ -43,8 +45,20 @@ impl AdbDevice {
     }
 }
 
+/// Inside a Flatpak sandbox there's no `adb`; the host's is reached via
+/// `flatpak-spawn --host` (needs `--talk-name=org.freedesktop.Flatpak`).
+fn adb_command() -> Command {
+    if std::path::Path::new("/.flatpak-info").exists() {
+        let mut command = Command::new("flatpak-spawn");
+        command.args(["--host", "adb"]);
+        command
+    } else {
+        Command::new("adb")
+    }
+}
+
 fn run_adb(args: &[&str]) -> Result<Output, AdbError> {
-    Command::new("adb")
+    adb_command()
         .args(args)
         .output()
         .map_err(|err| if err.kind() == std::io::ErrorKind::NotFound { AdbError::NotFound } else { AdbError::Spawn(err) })
@@ -116,10 +130,10 @@ impl AdbDeviceState {
     /// requiring the user to already know what ADB is.
     pub fn tooltip(&self) -> String {
         match self {
-            AdbDeviceState::NoDevice => "Von Android-Gerät importieren — kein Gerät gefunden. Per USB verbinden und USB-Debugging aktivieren.".to_string(),
-            AdbDeviceState::Unauthorized => "Von Android-Gerät importieren — auf dem Gerät den Zugriff bestätigen (Meldung „USB-Debugging zulassen?“)".to_string(),
-            AdbDeviceState::Reachable => "Von Android-Gerät importieren".to_string(),
-            AdbDeviceState::AdbUnavailable(reason) => format!("Von Android-Gerät importieren — nicht möglich: {reason}"),
+            AdbDeviceState::NoDevice => gettext("Import from Android device — no device found. Connect via USB and enable USB debugging."),
+            AdbDeviceState::Unauthorized => gettext("Import from Android device — confirm access on the device (“Allow USB debugging?”)"),
+            AdbDeviceState::Reachable => gettext("Import from Android Device"),
+            AdbDeviceState::AdbUnavailable(reason) => gettext("Import from Android device — not possible: {reason}").replace("{reason}", reason),
         }
     }
 }
@@ -169,7 +183,7 @@ fn classify(devices: &[(String, String)]) -> AdbDeviceState {
 pub fn detect_state() -> AdbDeviceState {
     match list_devices_with_status() {
         Ok(devices) => classify(&devices),
-        Err(AdbError::NotFound) => AdbDeviceState::AdbUnavailable("adb nicht gefunden".to_string()),
+        Err(AdbError::NotFound) => AdbDeviceState::AdbUnavailable(gettext("adb not found")),
         Err(err) => AdbDeviceState::AdbUnavailable(err.to_string()),
     }
 }

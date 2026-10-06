@@ -1,0 +1,64 @@
+{
+    "id": "de.christophlangner.ScreenForge",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "51",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": [
+        "org.freedesktop.Sdk.Extension.rust-stable"
+    ],
+    "command": "screenforge",
+    "finish-args": [
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--share=ipc",
+        "--device=dri",
+        "--talk-name=org.freedesktop.Flatpak"
+    ],
+    "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin",
+        "env": {
+            "CARGO_HOME": "/run/build/screenforge/cargo-home",
+            "CARGO_NET_OFFLINE": "true"
+        }
+    },
+    "cleanup": [
+        "/include",
+        "/lib/pkgconfig"
+    ],
+    "modules": [
+        {
+            "name": "screenforge",
+            "buildsystem": "meson",
+            "config-opts": [
+                "--buildtype=release"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "../..",
+                    "skip": [
+                        "target",
+                        "_build",
+                        "_install",
+                        "build-aux/flatpak/.flatpak-builder",
+                        "build-aux/flatpak/build-dir",
+                        "build-aux/flatpak/repo",
+                        "build-aux/flatpak/.cache",
+                        ".claude"
+                    ]
+                },
+                {
+                    "type": "dir",
+                    "path": ".cache/vendor",
+                    "dest": "vendor"
+                },
+                {
+                    "type": "file",
+                    "path": ".cache/cargo-vendor-config.toml",
+                    "dest": "cargo-home",
+                    "dest-filename": "config.toml"
+                }
+            ]
+        }
+    ]
+}

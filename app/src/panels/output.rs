@@ -14,14 +14,14 @@ struct FormatPreset {
 }
 
 const FORMAT_PRESETS: [FormatPreset; 8] = [
-    FormatPreset { label: "An Inhalt angepasst", aspect: None, width: 0 },
+    FormatPreset { label: N_("Fit to Content"), aspect: None, width: 0 },
     FormatPreset { label: "16:9 · 1920 × 1080", aspect: Some((16, 9)), width: 1920 },
     FormatPreset { label: "1:1 · 1080 × 1080", aspect: Some((1, 1)), width: 1080 },
-    FormatPreset { label: "4:5 · 1080 × 1350 (Instagram)", aspect: Some((4, 5)), width: 1080 },
-    FormatPreset { label: "9:16 · 1080 × 1920 (Story)", aspect: Some((9, 16)), width: 1080 },
-    FormatPreset { label: "Open Graph · 1200 × 630", aspect: Some((1200, 630)), width: 1200 },
-    FormatPreset { label: "Mastodon/Bluesky · 1600 × 900", aspect: Some((16, 9)), width: 1600 },
-    FormatPreset { label: "Play-Store-Grafik · 1024 × 500", aspect: Some((1024, 500)), width: 1024 },
+    FormatPreset { label: N_("4:5 · 1080 × 1350 (Instagram)"), aspect: Some((4, 5)), width: 1080 },
+    FormatPreset { label: N_("9:16 · 1080 × 1920 (Story)"), aspect: Some((9, 16)), width: 1080 },
+    FormatPreset { label: N_("Open Graph · 1200 × 630"), aspect: Some((1200, 630)), width: 1200 },
+    FormatPreset { label: N_("Mastodon/Bluesky · 1600 × 900"), aspect: Some((16, 9)), width: 1600 },
+    FormatPreset { label: N_("Play Store Graphic · 1024 × 500"), aspect: Some((1024, 500)), width: 1024 },
 ];
 
 fn format_index_for(canvas: &screenforge_core::model::CanvasSettings) -> u32 {
@@ -36,10 +36,10 @@ fn format_index_for(canvas: &screenforge_core::model::CanvasSettings) -> u32 {
 }
 
 const CORNERS: [(WatermarkCorner, &str); 4] = [
-    (WatermarkCorner::BottomRight, "Unten rechts"),
-    (WatermarkCorner::BottomLeft, "Unten links"),
-    (WatermarkCorner::TopRight, "Oben rechts"),
-    (WatermarkCorner::TopLeft, "Oben links"),
+    (WatermarkCorner::BottomRight, N_("Bottom Right")),
+    (WatermarkCorner::BottomLeft, N_("Bottom Left")),
+    (WatermarkCorner::TopRight, N_("Top Right")),
+    (WatermarkCorner::TopLeft, N_("Top Left")),
 ];
 
 /// Pushes `command` onto the undo stack unless controls are being synced
@@ -60,11 +60,11 @@ fn commit(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, co
 pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     // Format
     let format_row = adw::ComboRow::builder()
-        .title("Format")
-        .subtitle("Feste Seitenverhältnisse vergrößern die Fläche um den Inhalt herum")
-        .model(&gtk4::StringList::new(&FORMAT_PRESETS.iter().map(|p| p.label).collect::<Vec<_>>()))
+        .title(gettext("Format"))
+        .subtitle(gettext("Fixed aspect ratios grow the canvas around the content"))
+        .model(&gtk4::StringList::new(&FORMAT_PRESETS.iter().map(|p| gettext(p.label)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>()))
         .build();
-    let format_group = adw::PreferencesGroup::builder().title("Format").build();
+    let format_group = adw::PreferencesGroup::builder().title(gettext("Format")).build();
     format_group.add(&format_row);
     format_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -92,8 +92,8 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
 
     // Transparent background, part of the template's export group.
     let transparent_row = adw::SwitchRow::builder()
-        .title("Transparenter Hintergrund")
-        .subtitle("Ohne Hintergrund exportieren (PNG, WebP, AVIF, PDF; JPEG wird weiß)")
+        .title(gettext("Transparent Background"))
+        .subtitle(gettext("Export without background (PNG, WebP, AVIF, PDF; JPEG becomes white)"))
         .build();
     window.export_group().add(&transparent_row);
     transparent_row.connect_active_notify(glib::clone!(
@@ -109,27 +109,27 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
             }
         }
     ));
-    let copy_row = adw::ButtonRow::builder().title("In Zwischenablage kopieren").start_icon_name("edit-copy-symbolic").action_name("win.copy-image").build();
+    let copy_row = adw::ButtonRow::builder().title(gettext("Copy to Clipboard")).start_icon_name("edit-copy-symbolic").action_name("win.copy-image").build();
     window.export_group().add(&copy_row);
 
     // Watermark
-    let wm_enabled = adw::SwitchRow::builder().title("Wasserzeichen anzeigen").build();
-    let wm_text = adw::EntryRow::builder().title("Text").show_apply_button(true).build();
+    let wm_enabled = adw::SwitchRow::builder().title(gettext("Show Watermark")).build();
+    let wm_text = adw::EntryRow::builder().title(gettext("Text")).show_apply_button(true).build();
     let wm_corner = adw::ComboRow::builder()
-        .title("Position")
-        .model(&gtk4::StringList::new(&CORNERS.iter().map(|c| c.1).collect::<Vec<_>>()))
+        .title(gettext("Position"))
+        .model(&gtk4::StringList::new(&CORNERS.iter().map(|c| gettext(c.1)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>()))
         .build();
     let wm_size = adw::SpinRow::with_range(1.0, 10.0, 0.5);
-    wm_size.set_title("Größe");
-    wm_size.set_subtitle("In Prozent der kürzeren Seite");
+    wm_size.set_title(&gettext("Size"));
+    wm_size.set_subtitle(&gettext("In percent of the shorter side"));
     wm_size.set_digits(1);
     let wm_opacity = adw::SpinRow::with_range(10.0, 100.0, 5.0);
-    wm_opacity.set_title("Deckkraft");
-    wm_opacity.set_subtitle("In Prozent");
+    wm_opacity.set_title(&gettext("Opacity"));
+    wm_opacity.set_subtitle(&gettext("In percent"));
     let wm_color = gtk4::ColorDialogButton::builder().dialog(&gtk4::ColorDialog::new()).valign(gtk4::Align::Center).build();
-    let wm_color_row = adw::ActionRow::builder().title("Farbe").build();
+    let wm_color_row = adw::ActionRow::builder().title(gettext("Color")).build();
     wm_color_row.add_suffix(&wm_color);
-    let watermark_group = adw::PreferencesGroup::builder().title("Wasserzeichen").description("Zum Beispiel die Domain des Blogs, in einer Ecke der Grafik").build();
+    let watermark_group = adw::PreferencesGroup::builder().title(gettext("Watermark")).description(gettext("For example your blog's domain, in a corner of the image")).build();
     for row in [wm_enabled.upcast_ref::<gtk4::Widget>(), wm_text.upcast_ref(), wm_corner.upcast_ref(), wm_size.upcast_ref(), wm_opacity.upcast_ref(), wm_color_row.upcast_ref()] {
         watermark_group.add(row);
     }

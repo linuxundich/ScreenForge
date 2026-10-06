@@ -72,7 +72,7 @@ glib::wrapper! {
 
 impl Default for EditorModel {
     fn default() -> Self {
-        glib::Object::builder().property("is-empty", true).property("title", "Neues Projekt").build()
+        glib::Object::builder().property("is-empty", true).property("title", gettext("New Project")).build()
     }
 }
 
@@ -85,7 +85,7 @@ impl EditorModel {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Neues Projekt".to_owned());
+            .unwrap_or_else(|| gettext("New Project"));
         let count = state.document.elements.len();
         let subtitle = if count == 0 {
             String::new()
@@ -93,8 +93,11 @@ impl EditorModel {
             let c = state.document.canvas;
             let scale = c.export_target_width as f64 / c.export_width.max(1) as f64;
             let height = (c.export_height as f64 * scale).round().max(1.0);
-            let noun = if count == 1 { "Screenshot" } else { "Screenshots" };
-            format!("{count} {noun} · {} × {height:.0} px", c.export_target_width)
+            // Translators: the header bar subtitle, e.g. "3 screenshots · 1920 × 1080 px".
+            ngettext("{count} screenshot · {width} × {height} px", "{count} screenshots · {width} × {height} px", count as u32)
+                .replace("{count}", &count.to_string())
+                .replace("{width}", &c.export_target_width.to_string())
+                .replace("{height}", &format!("{height:.0}"))
         };
         if self.title() != title {
             self.set_title(title);

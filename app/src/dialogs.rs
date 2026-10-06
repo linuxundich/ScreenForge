@@ -11,43 +11,43 @@ pub(crate) fn build_general_page() -> adw::PreferencesPage {
     let settings = app_settings();
 
     let spacing_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
-    spacing_row.set_title("Abstand");
-    spacing_row.set_subtitle("Zwischen den Screenshots, in Pixeln");
+    spacing_row.set_title(&gettext("Spacing"));
+    spacing_row.set_subtitle(&gettext("Between the screenshots, in pixels"));
     settings.bind("default-spacing", &spacing_row, "value").build();
 
     let margin_x_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
-    margin_x_row.set_title("Außenabstand horizontal");
-    margin_x_row.set_subtitle("Links/rechts um die Komposition, in Pixeln");
+    margin_x_row.set_title(&gettext("Horizontal Margin"));
+    margin_x_row.set_subtitle(&gettext("Left/right around the composition, in pixels"));
     settings.bind("default-margin-x", &margin_x_row, "value").build();
 
     let margin_y_row = adw::SpinRow::with_range(0.0, 500.0, 4.0);
-    margin_y_row.set_title("Außenabstand vertikal");
-    margin_y_row.set_subtitle("Oben/unten um die Komposition, in Pixeln");
+    margin_y_row.set_title(&gettext("Vertical Margin"));
+    margin_y_row.set_subtitle(&gettext("Above/below the composition, in pixels"));
     settings.bind("default-margin-y", &margin_y_row, "value").build();
 
     let quality_row = adw::SpinRow::with_range(1.0, 100.0, 5.0);
-    quality_row.set_title("Export-Qualität");
-    quality_row.set_subtitle("Für JPEG/WebP/AVIF, in Prozent");
+    quality_row.set_title(&gettext("Export Quality"));
+    quality_row.set_subtitle(&gettext("For JPEG/WebP/AVIF, in percent"));
     settings.bind("default-export-quality", &quality_row, "value").build();
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Standardwerte für neue Projekte");
+    group.set_title(&gettext("Defaults for New Projects"));
     group.add(&spacing_row);
     group.add(&margin_x_row);
     group.add(&margin_y_row);
     group.add(&quality_row);
 
     let demo_row = adw::SwitchRow::builder()
-        .title("Saubere Statusleiste")
-        .subtitle("Beim Android-Import 12:00 Uhr, voller Akku, volles Netz, keine Benachrichtigungen (Demo-Modus)")
+        .title(gettext("Clean Status Bar"))
+        .subtitle(gettext("Android imports show 12:00, full battery, full signal and no notifications (demo mode)"))
         .build();
     settings.bind("adb-demo-mode", &demo_row, "active").build();
     let android_group = adw::PreferencesGroup::new();
-    android_group.set_title("Android");
+    android_group.set_title(&gettext("Android"));
     android_group.add(&demo_row);
 
     let page = adw::PreferencesPage::new();
-    page.set_title("Allgemein");
+    page.set_title(&gettext("General"));
     page.set_icon_name(Some("preferences-system-symbolic"));
     page.add(&group);
     page.add(&android_group);
@@ -85,7 +85,7 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
         app,
         move |_, _| {
             let dialog = adw::PreferencesDialog::new();
-            dialog.set_title("Einstellungen");
+            dialog.set_title(&gettext("Preferences"));
             dialog.add(&build_general_page());
             dialog.present(app.active_window().as_ref());
         }
@@ -100,62 +100,31 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
-<p>Version 0.27.0</p>
+<p>Version 0.29.0</p>
 <ul>
-<li>Neue Oberfläche: Seitenleiste mit Reitern, aufgeräumte Kopfleiste, schwebende Zoom-Leiste</li>
-<li>Varianten für generierte Hintergründe, dazu das Hintergrund-Studio mit großen Vorschauen</li>
-<li>Startseite statt leerer Arbeitsfläche, Tastenkürzel-Übersicht (Strg+?)</li>
+<li>English user interface with a complete German translation, following the system language</li>
+<li>Installable with meson and as a Flatpak, with AppStream metadata</li>
 </ul>
 <p>Version 0.28.0</p>
 <ul>
-<li>Formatvorgaben (16:9, 1:1, Open Graph, Mastodon, Play Store …), transparenter Hintergrund, Wasserzeichen, PDF-Export</li>
-<li>Bild in die Zwischenablage kopieren (Strg+Umschalt+C) oder aus dem Fenster herausziehen</li>
-<li>Bereiche schwärzen, verpixeln oder weichzeichnen</li>
-<li>Unscharfer Screenshot als Hintergrund, „Gleichmäßig verteilen“ im freien Layout</li>
-<li>Saubere Android-Statusleiste beim Import, Bildschirmfoto über das Portal, „Öffnen mit“ aus dem Dateimanager</li>
+<li>Format presets (16:9, 1:1, Open Graph, Mastodon, Play Store …), transparent background, watermark, PDF export</li>
+<li>Copy the image to the clipboard (Ctrl+Shift+C) or drag it out of the window</li>
+<li>Redact, pixelate or blur areas of a screenshot</li>
+<li>Blurred screenshot as background, even distribution in the free layout</li>
+<li>Clean Android status bar on import, screenshots via the desktop portal, “Open with” from the file manager</li>
+</ul>
+<p>Version 0.27.0</p>
+<ul>
+<li>New interface: tabbed sidebar, tidier header bar, floating zoom bar</li>
+<li>Variants for generated backgrounds and a background studio with large previews</li>
+<li>Start page instead of an empty canvas, keyboard shortcuts overview (Ctrl+?)</li>
 </ul>
 <p>Version 0.26.0</p>
 <ul>
-<li>Sechs neue Stile für generierte Hintergründe: Schichten, Bögen, Bänder, Flächen, Linien und Nebel — mit weichen Kurven, Schatten und Farbverläufen</li>
-<li>Neue Einstellung „Stimmung“ (kräftig, hell, dunkel) für harmonischere Farben</li>
-<li>Neue Einstellung „Körnung“ gegen Farbstufen</li>
-<li>Der bisherige Generator bleibt als „Wellen (klassisch)“ erhalten, alte Projekte sehen unverändert aus</li>
+<li>Six new styles for generated backgrounds: layers, arcs, ribbons, planes, lines and mist</li>
+<li>New mood setting (vivid, light, dark) and film grain</li>
 </ul>
-<p>Version 0.23.0</p>
-<ul>
-<li>Neuer Info-Dialog („Info zu ScreenForge…“) mit Danksagung, Lizenzen und Changelog</li>
-<li>Neues App-Icon im Schmiede-Motiv, inklusive symbolischer Variante</li>
-<li>Hintergrund lässt sich jetzt direkt mit der Maus verschieben (Alt+Ziehen) — spürbar flüssiger, da nicht mehr bei jeder Mausbewegung neu berechnet</li>
-<li>Labels unterstützen jetzt mehrzeiligen Text mit eigenem Umbruch-Schalter</li>
-<li>Labels und Callouts dürfen jetzt über den Rand ihres Screenshots hinausragen — die Leinwand passt sich automatisch an, statt sie abzuschneiden</li>
-</ul>
-<p>Version 0.22.0</p>
-<ul>
-<li>Anwendungsweiten Titel durch Labels pro Screenshot ersetzt</li>
-<li>Callouts hinzugefügt: Sprechblasen mit Pfeil auf einen Punkt im Screenshot</li>
-</ul>
-<p>Version 0.21.0</p>
-<ul>
-<li>Rendering des Hintergrund-Generators überarbeitet: harte Kanten und geschichtete Kontaktschatten</li>
-</ul>
-<p>Version 0.20.0</p>
-<ul>
-<li>Screenshots lassen sich jetzt direkt von einem verbundenen Android-Gerät importieren</li>
-</ul>
-<p>Version 0.19.0</p>
-<ul>
-<li>Neues Ausrichtungswerkzeug für Screenshots</li>
-<li>Pipette zum Aufnehmen von Farben direkt von der Leinwand</li>
-</ul>
-<p>Version 0.18.0</p>
-<ul>
-<li>Vektor-Musterhintergründe durch einen einheitlichen Generator ersetzt</li>
-<li>Schatten-Caching für spürbar bessere Performance beim Bearbeiten</li>
-</ul>
-<p>Version 0.17.0</p>
-<ul>
-<li>Freiform-Vektorformen für das benutzerdefinierte Dekorationsmuster hinzugefügt</li>
-</ul>";
+";
 
 /// The "Info zu ScreenForge…" dialog (spec: application info, dedication/
 /// acknowledgements for the toolchain and libraries this is built on,
@@ -179,7 +148,7 @@ pub(crate) fn register_about_action(app: &adw::Application) {
                 .application_icon(APP_ID)
                 .developer_name("Christoph Langner")
                 .version(env!("CARGO_PKG_VERSION"))
-                .comments("Ordnet Smartphone-Screenshots zu einer einzigen Präsentationsgrafik an — eine native GNOME-App.")
+                .comments(gettext("Arranges smartphone screenshots into a single presentation image — a native GNOME app."))
                 .website("https://github.com/linuxundich/ScreenForge")
                 .issue_url("https://github.com/linuxundich/ScreenForge/issues")
                 .copyright("© 2025–2026 Christoph Langner")
@@ -192,18 +161,18 @@ pub(crate) fn register_about_action(app: &adw::Application) {
             // their own section below); `add_credit_section`'s row format
             // is "Name https://url", the same one GNOME's own about
             // dialogs use to make a name double as a link.
-            dialog.add_credit_section(Some("Sprache"), &["Rust https://www.rust-lang.org"]);
+            dialog.add_credit_section(Some(&gettext("Language")), &["Rust https://www.rust-lang.org"]);
             dialog.add_credit_section(
-                Some("GUI-Framework"),
+                Some(&gettext("GUI Framework")),
                 &[
                     "GTK https://www.gtk.org",
                     "libadwaita https://gnome.pages.gitlab.gnome.org/libadwaita/",
-                    "gtk4-rs / libadwaita-rs (Rust-Bindings) https://gtk-rs.org",
+                    &gettext("gtk4-rs / libadwaita-rs (Rust bindings) https://gtk-rs.org"),
                 ],
             );
-            dialog.add_credit_section(Some("Grafik &amp; Rendering"), &["Cairo https://www.cairographics.org", "Pango https://pango.gnome.org"]);
+            dialog.add_credit_section(Some(&gettext("Graphics &amp; Rendering")), &["Cairo https://www.cairographics.org", "Pango https://pango.gnome.org"]);
             dialog.add_credit_section(
-                Some("Weitere Bibliotheken"),
+                Some(&gettext("Other Libraries")),
                 &[
                     "image-rs https://github.com/image-rs/image",
                     "serde / serde_json https://serde.rs",
@@ -222,12 +191,12 @@ pub(crate) fn register_about_action(app: &adw::Application) {
             // uses `Custom` with the real, unabridged statement instead of
             // picking just one half of it.
             dialog.add_legal_section("GTK, libadwaita, GLib, Pango, Cairo", None, gtk4::License::Lgpl21, None);
-            dialog.add_legal_section("gtk4-rs, libadwaita-rs (Rust-Bindings)", None, gtk4::License::MitX11, None);
+            dialog.add_legal_section(&gettext("gtk4-rs, libadwaita-rs (Rust bindings)"), None, gtk4::License::MitX11, None);
             dialog.add_legal_section(
                 "serde, serde_json, thiserror, anyhow, uuid, image-rs, Rust",
                 None,
                 gtk4::License::Custom,
-                Some("Dual-lizenziert unter MIT oder Apache-2.0, nach Wahl der Rechteinhaberin oder des Rechteinhabers."),
+                Some(&gettext("Dual-licensed under MIT or Apache-2.0, at the copyright holder's option.")),
             );
 
             dialog.present(app.active_window().as_ref());
@@ -247,30 +216,30 @@ pub(crate) fn register_shortcuts_action(app: &adw::Application) {
             let dialog = adw::ShortcutsDialog::new();
             let sections: [(&str, &[(&str, &str)]); 3] = [
                 (
-                    "Allgemein",
+                    &gettext("General"),
                     &[
-                        ("Bilder öffnen", "<Ctrl>o"),
-                        ("Aus Zwischenablage einfügen", "<Ctrl>v"),
-                        ("Vom Android-Gerät importieren", "<Ctrl><Shift>a"),
-                        ("Projekt speichern", "<Ctrl>s"),
-                        ("Projekt speichern unter", "<Ctrl><Shift>s"),
-                        ("Exportieren", "<Ctrl>e"),
-                        ("Einstellungen", "<Ctrl>comma"),
-                        ("Tastenkürzel", "<Ctrl>question"),
+                        (&gettext("Open Images"), "<Ctrl>o"),
+                        (&gettext("Paste from Clipboard"), "<Ctrl>v"),
+                        (&gettext("Import from Android"), "<Ctrl><Shift>a"),
+                        (&gettext("Save Project"), "<Ctrl>s"),
+                        (&gettext("Save Project As"), "<Ctrl><Shift>s"),
+                        (&gettext("Export"), "<Ctrl>e"),
+                        (&gettext("Preferences"), "<Ctrl>comma"),
+                        (&gettext("Keyboard Shortcuts"), "<Ctrl>question"),
                     ],
                 ),
                 (
-                    "Bearbeiten",
-                    &[("Rückgängig", "<Ctrl>z"), ("Wiederholen", "<Ctrl><Shift>z"), ("Auswahl löschen", "Delete")],
+                    &gettext("Editing"),
+                    &[(&gettext("Undo"), "<Ctrl>z"), (&gettext("Redo"), "<Ctrl><Shift>z"), (&gettext("Delete Selection"), "Delete")],
                 ),
                 (
-                    "Ansicht",
+                    &gettext("View"),
                     &[
-                        ("An Fenster anpassen", "<Ctrl>0"),
-                        ("Originalgröße", "<Ctrl>1"),
-                        ("Vergrößern", "<Ctrl>plus"),
-                        ("Verkleinern", "<Ctrl>minus"),
-                        ("Seitenleiste ein-/ausblenden", "F9"),
+                        (&gettext("Fit to Window"), "<Ctrl>0"),
+                        (&gettext("Original Size"), "<Ctrl>1"),
+                        (&gettext("Zoom In"), "<Ctrl>plus"),
+                        (&gettext("Zoom Out"), "<Ctrl>minus"),
+                        (&gettext("Toggle Sidebar"), "F9"),
                     ],
                 ),
             ];

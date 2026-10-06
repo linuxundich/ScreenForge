@@ -215,67 +215,67 @@ pub(crate) fn build_label_style_groups(
 ) -> (adw::PreferencesGroup, adw::PreferencesGroup, adw::PreferencesGroup, LabelStyleSync) {
     let defaults = get();
 
-            let position_mode_row = adw::ComboRow::builder().title("Position").build();
-            position_mode_row.set_model(Some(&gtk4::StringList::new(&["Automatisch", "Manuell (X/Y)"])));
-            let horizontal_row = adw::ComboRow::builder().title("Horizontal").build();
-            horizontal_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
-            let vertical_row = adw::ComboRow::builder().title("Vertikal").build();
-            vertical_row.set_model(Some(&gtk4::StringList::new(&["Oben", "Mitte", "Unten"])));
+            let position_mode_row = adw::ComboRow::builder().title(gettext("Position")).build();
+            position_mode_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Automatic"), &gettext("Manual (X/Y)")])));
+            let horizontal_row = adw::ComboRow::builder().title(gettext("Horizontal")).build();
+            horizontal_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Left"), &gettext("Center"), &gettext("Right")])));
+            let vertical_row = adw::ComboRow::builder().title(gettext("Vertical")).build();
+            vertical_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Top"), &gettext("Center"), &gettext("Bottom")])));
             // Negative allowed — lets the shared default itself push every
             // label above/left of its screenshot's own edge.
             let padding_row = adw::SpinRow::with_range(-500.0, 500.0, 4.0);
-            padding_row.set_title("Randabstand");
-            padding_row.set_subtitle("Zum Screenshot-Rand, in Pixeln");
+            padding_row.set_title(&gettext("Edge Distance"));
+            padding_row.set_subtitle(&gettext("To the screenshot's edge, in pixels"));
             let x_row = adw::SpinRow::with_range(-4000.0, 8000.0, 4.0);
-            x_row.set_title("X-Position");
+            x_row.set_title(&gettext("X Position"));
             let y_row = adw::SpinRow::with_range(-4000.0, 8000.0, 4.0);
-            y_row.set_title("Y-Position");
+            y_row.set_title(&gettext("Y Position"));
 
-            let background_row = adw::ComboRow::builder().title("Hintergrund").build();
-            background_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
-            let background_color_row = adw::ActionRow::builder().title("Hintergrundfarbe").build();
+            let background_row = adw::ComboRow::builder().title(gettext("Background")).build();
+            background_row.set_model(Some(&gtk4::StringList::new(&[&gettext("No Background"), &gettext("Solid Color"), &gettext("Gradient")])));
+            let background_color_row = adw::ActionRow::builder().title(gettext("Background Color")).build();
             let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
             background_color_button.set_valign(gtk4::Align::Center);
             background_color_row.add_suffix(&background_color_button);
-            let background_color2_row = adw::ActionRow::builder().title("Hintergrundfarbe 2").build();
+            let background_color2_row = adw::ActionRow::builder().title(gettext("Background Color 2")).build();
             let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
             background_color2_button.set_valign(gtk4::Align::Center);
             background_color2_row.add_suffix(&background_color2_button);
 
-            let font_row = adw::ActionRow::builder().title("Schrift").build();
+            let font_row = adw::ActionRow::builder().title(gettext("Font")).build();
             let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
             font_button.set_valign(gtk4::Align::Center);
             font_row.add_suffix(&font_button);
-            let alignment_row = adw::ComboRow::builder().title("Textausrichtung").subtitle("Bei mehrzeiligem Text").build();
-            alignment_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
-            let color_row = adw::ActionRow::builder().title("Textfarbe").build();
+            let alignment_row = adw::ComboRow::builder().title(gettext("Text Alignment")).subtitle(gettext("For text with several lines")).build();
+            alignment_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Left"), &gettext("Center"), &gettext("Right")])));
+            let color_row = adw::ActionRow::builder().title(gettext("Text Color")).build();
             let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
             color_button.set_valign(gtk4::Align::Center);
             color_row.add_suffix(&color_button);
             let opacity_row = adw::SpinRow::with_range(0.0, 100.0, 5.0);
-            opacity_row.set_title("Deckkraft");
-            opacity_row.set_subtitle("In Prozent");
+            opacity_row.set_title(&gettext("Opacity"));
+            opacity_row.set_subtitle(&gettext("In percent"));
 
             let corner_radius_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
-            corner_radius_row.set_title("Eckenradius");
+            corner_radius_row.set_title(&gettext("Corner Radius"));
             let padding_x_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
-            padding_x_row.set_title("Innenabstand horizontal");
+            padding_x_row.set_title(&gettext("Horizontal Padding"));
             let padding_y_row = adw::SpinRow::with_range(0.0, 200.0, 2.0);
-            padding_y_row.set_title("Innenabstand vertikal");
-            let wrap_row = adw::SwitchRow::builder().title("Automatisch umbrechen").build();
+            padding_y_row.set_title(&gettext("Vertical Padding"));
+            let wrap_row = adw::SwitchRow::builder().title(gettext("Wrap Automatically")).build();
             let line_spacing_row = adw::SpinRow::with_range(0.5, 3.0, 0.1);
-            line_spacing_row.set_title("Zeilenabstand");
-            line_spacing_row.set_subtitle("Faktor der Schriftgröße, 1.0 = normal");
+            line_spacing_row.set_title(&gettext("Line Spacing"));
+            line_spacing_row.set_subtitle(&gettext("Factor of the font size, 1.0 = normal"));
             line_spacing_row.set_digits(1);
 
-            let shadow_row = adw::ComboRow::builder().title("Schatten").build();
-            shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating", "Angepasst"])));
+            let shadow_row = adw::ComboRow::builder().title(gettext("Shadow")).build();
+            shadow_row.set_model(Some(&gtk4::StringList::new(&[&gettext("No Shadow"), &gettext("Subtle"), &gettext("Standard"), &gettext("Strong"), &gettext("Floating"), &gettext("Custom")])));
             let shadow_angle_row = adw::SpinRow::with_range(0.0, 360.0, 5.0);
-            shadow_angle_row.set_title("Schatten-Winkel");
+            shadow_angle_row.set_title(&gettext("Shadow Angle"));
             let shadow_distance_row = adw::SpinRow::with_range(0.0, 300.0, 2.0);
-            shadow_distance_row.set_title("Schatten-Distanz");
+            shadow_distance_row.set_title(&gettext("Shadow Distance"));
             let shadow_blur_row = adw::SpinRow::with_range(0.0, 150.0, 2.0);
-            shadow_blur_row.set_title("Weichzeichner");
+            shadow_blur_row.set_title(&gettext("Softness"));
 
             // Populates every row from a given style — called once below
             // to seed the initial values (*before* any change handler is
@@ -609,7 +609,7 @@ pub(crate) fn build_label_style_groups(
             shadow_blur_row.connect_value_notify(glib::clone!(#[strong] apply_shadow_geometry, move |_| apply_shadow_geometry()));
 
             let position_group = adw::PreferencesGroup::new();
-            position_group.set_title("Position");
+            position_group.set_title(&gettext("Position"));
             position_group.add(&position_mode_row);
             position_group.add(&horizontal_row);
             position_group.add(&vertical_row);
@@ -618,7 +618,7 @@ pub(crate) fn build_label_style_groups(
             position_group.add(&y_row);
 
             let look_group = adw::PreferencesGroup::new();
-            look_group.set_title("Schrift &amp; Farbe");
+            look_group.set_title(&gettext("Font &amp; Color"));
             if let Some(description) = scope_description {
                 look_group.set_description(Some(description));
             }
@@ -631,7 +631,7 @@ pub(crate) fn build_label_style_groups(
             look_group.add(&background_color2_row);
 
             let styling_group = adw::PreferencesGroup::new();
-            styling_group.set_title("Gestaltung");
+            styling_group.set_title(&gettext("Appearance"));
             styling_group.add(&corner_radius_row);
             styling_group.add(&padding_x_row);
             styling_group.add(&padding_y_row);
@@ -664,7 +664,7 @@ pub(crate) fn build_global_label_defaults_groups() -> (adw::PreferencesGroup, ad
         get,
         commit,
         is_syncing,
-        Some("Ausgangswerte für neu erstellte Projekte — bereits bestehende Projekte bleiben davon unverändert"),
+        Some(&gettext("Starting values for newly created projects — existing projects are not changed")),
     );
     (look_group, position_group, styling_group)
 }
@@ -714,7 +714,7 @@ pub(crate) fn register_label_style_controls(window: &Window, canvas: &Canvas, st
         get,
         commit,
         is_syncing,
-        Some("Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"),
+        Some(&gettext("Shared by all labels of this project — not set per screenshot")),
     );
 
     let page = window.text_page();

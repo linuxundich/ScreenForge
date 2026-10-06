@@ -247,10 +247,10 @@ pub(crate) fn register_background_image_controls(window: &Window, canvas: &Canva
                 filter.add_mime_type("image/png");
                 filter.add_mime_type("image/jpeg");
                 filter.add_mime_type("image/webp");
-                filter.set_name(Some("Bilder"));
+                filter.set_name(Some(&gettext("Images")));
 
                 let dialog =
-                    gtk4::FileDialog::builder().title("Hintergrundbild wählen").accept_label("Wählen").default_filter(&filter).build();
+                    gtk4::FileDialog::builder().title(gettext("Choose Background Image")).accept_label(gettext("Choose")).default_filter(&filter).build();
 
                 let file = match dialog.open_future(Some(&window)).await {
                     Ok(file) => file,

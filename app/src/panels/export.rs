@@ -112,8 +112,8 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
             glib::spawn_future_local(async move {
                 let format = state.borrow().document.canvas.export_format;
                 let dialog = gtk4::FileDialog::builder()
-                    .title("Komposition exportieren")
-                    .accept_label("Exportieren")
+                    .title(gettext("Export Composition"))
+                    .accept_label(gettext("Export"))
                     .initial_name(format!("screenforge-export.{}", extension_for_format(format)))
                     .build();
 
@@ -139,11 +139,11 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
                         .await;
 
                 export_button.set_sensitive(true);
-                export_button.set_label("Exportieren");
+                export_button.set_label(&gettext("Export"));
                 let toast = match result {
-                    Ok(Ok(())) => adw::Toast::new("Export erfolgreich"),
-                    Ok(Err(err)) => adw::Toast::new(&format!("Export fehlgeschlagen: {err}")),
-                    Err(_) => adw::Toast::new("Export fehlgeschlagen: Hintergrundaufgabe abgebrochen"),
+                    Ok(Ok(())) => adw::Toast::new(&gettext("Export successful")),
+                    Ok(Err(err)) => adw::Toast::new(&gettext("Export failed: {err}").replace("{err}", &err.to_string())),
+                    Err(_) => adw::Toast::new(&gettext("Export failed: background task was cancelled")),
                 };
                 toast_overlay.add_toast(toast);
             });
@@ -194,10 +194,10 @@ pub(crate) fn register_copy_image_action(app: &adw::Application, window: &Window
                         let bytes = glib::Bytes::from_owned(data);
                         let texture = gdk::MemoryTexture::new(width, height, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, stride);
                         window.clipboard().set_texture(&texture);
-                        adw::Toast::new("Bild in die Zwischenablage kopiert")
+                        adw::Toast::new(&gettext("Image copied to clipboard"))
                     }
-                    Ok(Err(err)) => adw::Toast::new(&format!("Kopieren fehlgeschlagen: {err}")),
-                    Err(_) => adw::Toast::new("Kopieren fehlgeschlagen: Hintergrundaufgabe abgebrochen"),
+                    Ok(Err(err)) => adw::Toast::new(&gettext("Copying failed: {err}").replace("{err}", &err.to_string())),
+                    Err(_) => adw::Toast::new(&gettext("Copying failed: background task was cancelled")),
                 };
                 window.toast_overlay().add_toast(toast);
             });

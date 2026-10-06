@@ -49,7 +49,7 @@ pub(crate) fn start_color_picking(window: &Window, canvas: &Canvas, target: gtk4
             match canvas.sample_color_at(x, y) {
                 Some(color) => target.set_rgba(&gdk_rgba_from(&color)),
                 None => {
-                    window.toast_overlay().add_toast(adw::Toast::new("An dieser Stelle wurde keine Farbe gefunden"));
+                    window.toast_overlay().add_toast(adw::Toast::new(&gettext("No color found at this spot")));
                 }
             }
         }
@@ -403,22 +403,22 @@ pub(crate) fn build_context_menu() -> gio::Menu {
     let menu = gio::Menu::new();
 
     let edit_section = gio::Menu::new();
-    edit_section.append(Some("Duplizieren"), Some("win.duplicate-screenshot"));
-    edit_section.append(Some("Screenshot ersetzen…"), Some("win.replace-screenshot"));
-    edit_section.append(Some("Löschen"), Some("win.delete-screenshot"));
+    edit_section.append(Some(&gettext("Duplicate")), Some("win.duplicate-screenshot"));
+    edit_section.append(Some(&gettext("Replace Screenshot…")), Some("win.replace-screenshot"));
+    edit_section.append(Some(&gettext("Delete")), Some("win.delete-screenshot"));
     menu.append_section(None, &edit_section);
 
     let order_section = gio::Menu::new();
-    order_section.append(Some("Nach vorne"), Some("win.bring-forward"));
-    order_section.append(Some("Nach hinten"), Some("win.send-backward"));
-    order_section.append(Some("Ganz nach vorne"), Some("win.bring-to-front"));
-    order_section.append(Some("Ganz nach hinten"), Some("win.send-to-back"));
+    order_section.append(Some(&gettext("Bring Forward")), Some("win.bring-forward"));
+    order_section.append(Some(&gettext("Send Backward")), Some("win.send-backward"));
+    order_section.append(Some(&gettext("Bring to Front")), Some("win.bring-to-front"));
+    order_section.append(Some(&gettext("Send to Back")), Some("win.send-to-back"));
     menu.append_section(None, &order_section);
 
     let transform_section = gio::Menu::new();
-    transform_section.append(Some("Um 90° drehen"), Some("win.rotate-screenshot"));
-    transform_section.append(Some("Horizontal spiegeln"), Some("win.flip-horizontal"));
-    transform_section.append(Some("Vertikal spiegeln"), Some("win.flip-vertical"));
+    transform_section.append(Some(&gettext("Rotate 90°")), Some("win.rotate-screenshot"));
+    transform_section.append(Some(&gettext("Flip Horizontally")), Some("win.flip-horizontal"));
+    transform_section.append(Some(&gettext("Flip Vertically")), Some("win.flip-vertical"));
     menu.append_section(None, &transform_section);
 
     menu
@@ -490,11 +490,11 @@ pub(crate) fn register_replace_action(window: &Window, canvas: &Canvas, state: &
                 filter.add_mime_type("image/png");
                 filter.add_mime_type("image/jpeg");
                 filter.add_mime_type("image/webp");
-                filter.set_name(Some("Screenshots"));
+                filter.set_name(Some(&gettext("Screenshots")));
 
                 let dialog = gtk4::FileDialog::builder()
-                    .title("Screenshot ersetzen")
-                    .accept_label("Ersetzen")
+                    .title(gettext("Replace Screenshot"))
+                    .accept_label(gettext("Replace"))
                     .default_filter(&filter)
                     .build();
 
@@ -627,7 +627,7 @@ pub(crate) fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc
 /// fits the window and the percentage otherwise.
 pub(crate) fn update_zoom_label(window: &Window, canvas: &Canvas) {
     let label = match canvas.zoom() {
-        None => "Einpassen".to_owned(),
+        None => gettext("Fit"),
         Some(zoom) => format!("{:.0} %", zoom * 100.0),
     };
     window.zoom_menu_button().set_label(&label);

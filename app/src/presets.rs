@@ -23,7 +23,7 @@ pub(crate) fn apply_preset(window: &Window, canvas: &Canvas, state: &Rc<RefCell<
     refresh_canvas(window, canvas, state);
     sync_controls_from_document(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
-    window.toast_overlay().add_toast(adw::Toast::new("Preset angewendet"));
+    window.toast_overlay().add_toast(adw::Toast::new(&gettext("Preset applied")));
 }
 
 /// Reads every saved preset from `GSettings` (spec: "Verwende dafür den
@@ -90,7 +90,7 @@ pub(crate) fn save_global_label_defaults(style: &screenforge_core::model::LabelS
 /// `None` for Escape/Abbrechen or an empty name, `Some(name)` (trimmed)
 /// otherwise.
 async fn prompt_for_preset_name(window: &Window, heading: &str, initial: &str) -> Option<String> {
-    let entry = adw::EntryRow::builder().title("Name").text(initial).activates_default(true).build();
+    let entry = adw::EntryRow::builder().title(gettext("Name")).text(initial).activates_default(true).build();
     let list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).build();
     list.append(&entry);
 
@@ -102,8 +102,8 @@ async fn prompt_for_preset_name(window: &Window, heading: &str, initial: &str) -
             entry.grab_focus();
         }
     ));
-    dialog.add_response("cancel", "Abbrechen");
-    dialog.add_response("save", "Speichern");
+    dialog.add_response("cancel", &gettext("Cancel"));
+    dialog.add_response("save", &gettext("Save"));
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("save"));
     dialog.set_close_response("cancel");
@@ -136,23 +136,23 @@ pub(crate) fn rebuild_preset_list(list_box: &gtk4::ListBox, window: &Window, can
     }
     let presets = load_presets();
     if presets.is_empty() {
-        let row = adw::ActionRow::builder().title("Noch keine Presets gespeichert").sensitive(false).build();
+        let row = adw::ActionRow::builder().title(gettext("No presets saved yet")).sensitive(false).build();
         list_box.append(&row);
         return;
     }
     for (index, named) in presets.iter().enumerate() {
         let row = adw::ActionRow::builder().title(named.name.clone()).activatable(true).build();
-        row.set_subtitle("Anwenden antippen");
+        row.set_subtitle(&gettext("Click to apply"));
 
         let rename_button = gtk4::Button::from_icon_name("document-edit-symbolic");
         rename_button.set_valign(gtk4::Align::Center);
-        rename_button.set_tooltip_text(Some("Umbenennen"));
+        rename_button.set_tooltip_text(Some(&gettext("Rename")));
         rename_button.add_css_class("flat");
         row.add_suffix(&rename_button);
 
         let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
         delete_button.set_valign(gtk4::Align::Center);
-        delete_button.set_tooltip_text(Some("Löschen"));
+        delete_button.set_tooltip_text(Some(&gettext("Delete")));
         delete_button.add_css_class("flat");
         row.add_suffix(&delete_button);
 
@@ -200,7 +200,7 @@ pub(crate) fn rebuild_preset_list(list_box: &gtk4::ListBox, window: &Window, can
                     async move {
                         let presets = load_presets();
                         let Some(current) = presets.get(index).cloned() else { return };
-                        let Some(new_name) = prompt_for_preset_name(&window, "Preset umbenennen", &current.name).await else { return };
+                        let Some(new_name) = prompt_for_preset_name(&window, &gettext("Rename Preset"), &current.name).await else { return };
                         let mut presets = load_presets();
                         if let Some(named) = presets.get_mut(index) {
                             named.name = new_name;
@@ -267,7 +267,7 @@ pub(crate) fn register_presets_menu(window: &Window, canvas: &Canvas, state: &Rc
     list_box.set_selection_mode(gtk4::SelectionMode::None);
     list_box.add_css_class("boxed-list");
 
-    let save_button = gtk4::Button::with_label("Aktuelles als Preset speichern…");
+    let save_button = gtk4::Button::with_label(&gettext("Save Current Settings as Preset…"));
     save_button.add_css_class("suggested-action");
     save_button.connect_clicked(glib::clone!(
         #[weak]
@@ -293,7 +293,7 @@ pub(crate) fn register_presets_menu(window: &Window, canvas: &Canvas, state: &Rc
                 #[weak]
                 popover,
                 async move {
-                    let Some(name) = prompt_for_preset_name(&window, "Preset speichern", "").await else { return };
+                    let Some(name) = prompt_for_preset_name(&window, &gettext("Save Preset"), "").await else { return };
                     let template = screenforge_core::template::Template::from_document(&state.borrow().document);
                     let mut presets = load_presets();
                     presets.push(screenforge_core::template::NamedPreset { name, template });
@@ -304,7 +304,7 @@ pub(crate) fn register_presets_menu(window: &Window, canvas: &Canvas, state: &Rc
         }
     ));
 
-    let hint = gtk4::Label::new(Some("Layout, Hintergrund, Schatten, Eckenradius und Label-Einstellungen dieses Projekts"));
+    let hint = gtk4::Label::new(Some(&gettext("This project's layout, background, shadow, corner radius and label settings")));
     hint.set_wrap(true);
     hint.set_xalign(0.0);
     hint.add_css_class("caption");

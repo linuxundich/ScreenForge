@@ -1,0 +1,19 @@
+# Files with translatable strings, relative to the repository root.
+app/data/de.christophlangner.ScreenForge.desktop.in
+app/data/de.christophlangner.ScreenForge.metainfo.xml.in
+app/resources/ui/window.ui
+app/src/adb.rs
+app/src/dialogs.rs
+app/src/editing.rs
+app/src/editor_model.rs
+app/src/panels/background.rs
+app/src/panels/callouts.rs
+app/src/panels/export.rs
+app/src/panels/layout.rs
+app/src/panels/output.rs
+app/src/panels/redactions.rs
+app/src/panels/text.rs
+app/src/panels/variants.rs
+app/src/presets.rs
+app/src/project.rs
+app/src/sources.rs

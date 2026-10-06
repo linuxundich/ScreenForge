@@ -52,12 +52,17 @@ Follow-ups from phase 3:
       percent values in the sidebar
 - [ ] Watermark: optional logo image besides the text
 
-## Phase 4 — Translation and packaging
+## Phase 4 — Translation and packaging — done in v0.29.0
 
-- [ ] English as source language, gettext, German translation in `po/`
-- [ ] meson build, Flatpak manifest (GNOME 49), metainfo, proper GSettings
+- [x] English as source language, gettext, German translation in `po/`
+- [x] meson build, Flatpak manifest (GNOME 49), metainfo, proper GSettings
       schema installation instead of the `GSETTINGS_SCHEMA_DIR` workaround
-- [ ] README as product page with new screenshots
+- [x] README as product page with new screenshots
+
+Follow-ups from phase 4:
+
+- [ ] Publish a GitHub release with the Flatpak bundle, then submit to Flathub
+- [ ] Demo video for the README (see media/app-demo-video)
 
 ## Phase 5 — Larger features
 

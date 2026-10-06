@@ -46,7 +46,9 @@ fn candidates(state: &mut EditorState, base: &GeneratedBackground, roll: u64, mi
 /// only the background is drawn — the small sidebar thumbnails use that,
 /// since screenshots would cover most of a thumbnail that size.
 fn render_preview(state: &mut EditorState, background: &GeneratedBackground, width: i32, with_elements: bool) -> Option<gdk::Texture> {
-    let surfaces = element_surfaces(state);
+    // Converting every screenshot to a Cairo surface is the expensive part;
+    // background-only previews don't need it.
+    let surfaces = if with_elements { element_surfaces(state) } else { HashMap::new() };
     let mut doc = state.document.clone();
     doc.background = Background::Generated(background.clone());
     if !with_elements {
@@ -111,7 +113,7 @@ pub(crate) fn rebuild_sidebar_variants(window: &Window, canvas: &Canvas, state: 
     for candidate in list {
         let texture = render_preview(&mut state.borrow_mut(), &candidate, SIDEBAR_THUMB_WIDTH, false);
         let (button, _) = thumbnail_button(texture.as_ref(), 56);
-        button.set_tooltip_text(Some(style_name(candidate.style)));
+        button.set_tooltip_text(Some(&style_name(candidate.style)));
         button.connect_clicked(glib::clone!(
             #[weak]
             window,
@@ -125,15 +127,15 @@ pub(crate) fn rebuild_sidebar_variants(window: &Window, canvas: &Canvas, state: 
     }
 }
 
-pub(crate) fn style_name(style: GeneratorStyle) -> &'static str {
+pub(crate) fn style_name(style: GeneratorStyle) -> String {
     match style {
-        GeneratorStyle::Layers => "Schichten",
-        GeneratorStyle::Arcs => "Bögen",
-        GeneratorStyle::Ribbons => "Bänder",
-        GeneratorStyle::Planes => "Flächen",
-        GeneratorStyle::Lines => "Linien",
-        GeneratorStyle::Mist => "Nebel",
-        GeneratorStyle::Waves => "Wellen (klassisch)",
+        GeneratorStyle::Layers => gettext("Layers"),
+        GeneratorStyle::Arcs => gettext("Arcs"),
+        GeneratorStyle::Ribbons => gettext("Ribbons"),
+        GeneratorStyle::Planes => gettext("Planes"),
+        GeneratorStyle::Lines => gettext("Lines"),
+        GeneratorStyle::Mist => gettext("Mist"),
+        GeneratorStyle::Waves => gettext("Waves (Classic)"),
     }
 }
 
@@ -188,13 +190,13 @@ struct Studio {
 fn open_studio(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let Background::Generated(base) = state.borrow().document.background.clone() else { return };
 
-    let dialog = adw::Dialog::builder().title("Hintergrund wählen").content_width(1000).content_height(680).build();
+    let dialog = adw::Dialog::builder().title(gettext("Choose Background")).content_width(1000).content_height(680).build();
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
     header.set_show_end_title_buttons(false);
     header.set_show_start_title_buttons(false);
-    let cancel = gtk4::Button::with_label("Abbrechen");
-    let apply = gtk4::Button::builder().label("Übernehmen").css_classes(["suggested-action"]).sensitive(false).build();
+    let cancel = gtk4::Button::with_label(&gettext("Cancel"));
+    let apply = gtk4::Button::builder().label(gettext("Apply")).css_classes(["suggested-action"]).sensitive(false).build();
     header.pack_start(&cancel);
     header.pack_end(&apply);
     toolbar.add_top_bar(&header);
@@ -206,7 +208,7 @@ fn open_studio(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>
         .chain(std::iter::once(Some(GeneratorStyle::Waves)))
         .collect();
     for option in &style_options {
-        let label = gtk4::Label::builder().label(option.map(style_name).unwrap_or("Alle Stile")).xalign(0.0).build();
+        let label = gtk4::Label::builder().label(option.map(style_name).unwrap_or_else(|| gettext("All Styles"))).xalign(0.0).build();
         styles.append(&label);
     }
     let styles_scroller = gtk4::ScrolledWindow::builder().child(&styles).hscrollbar_policy(gtk4::PolicyType::Never).width_request(190).build();
@@ -234,15 +236,15 @@ fn open_studio(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>
     toolbar.set_content(Some(&body));
 
     let bottom = gtk4::Box::builder().spacing(12).margin_start(12).margin_end(12).margin_top(6).margin_bottom(6).build();
-    bottom.append(&gtk4::Label::new(Some("Stimmung")));
-    let mood = gtk4::DropDown::from_strings(&["Kräftig", "Hell", "Dunkel"]);
+    bottom.append(&gtk4::Label::new(Some(&gettext("Mood"))));
+    let mood = gtk4::DropDown::from_strings(&[&gettext("Vivid"), &gettext("Light"), &gettext("Dark")]);
     mood.set_selected(index_for_mood(base.mood));
     bottom.append(&mood);
     let spacer = gtk4::Box::builder().hexpand(true).build();
     bottom.append(&spacer);
-    let show_screenshots = gtk4::CheckButton::builder().label("Screenshots zeigen").active(true).build();
+    let show_screenshots = gtk4::CheckButton::builder().label(gettext("Show Screenshots")).active(true).build();
     bottom.append(&show_screenshots);
-    let reroll = gtk4::Button::builder().label("Neue Varianten").build();
+    let reroll = gtk4::Button::builder().label(gettext("New Variants")).build();
     bottom.append(&reroll);
     toolbar.add_bottom_bar(&bottom);
     dialog.set_child(Some(&toolbar));
@@ -284,7 +286,7 @@ fn open_studio(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>
                 picture.set_content_fit(gtk4::ContentFit::Contain);
                 picture.set_size_request(-1, 170);
                 picture.add_css_class("variant-picture");
-                picture.set_tooltip_text(Some(style_name(candidate.style)));
+                picture.set_tooltip_text(Some(&style_name(candidate.style)));
                 flow.insert(&picture, -1);
                 pictures.push(picture);
             }

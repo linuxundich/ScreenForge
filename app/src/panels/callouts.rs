@@ -50,7 +50,7 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     let callout_id = callout.id;
 
     let row = adw::ExpanderRow::new();
-    let title_for = |content: &str| if content.trim().is_empty() { "Callout".to_string() } else { content.to_string() };
+    let title_for = |content: &str| if content.trim().is_empty() { gettext("Callout") } else { content.to_string() };
     row.set_title(&title_for(&callout.text.content));
 
     let enabled_switch = gtk4::Switch::new();
@@ -61,7 +61,7 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     let delete_button = gtk4::Button::from_icon_name("user-trash-symbolic");
     delete_button.set_valign(gtk4::Align::Center);
     delete_button.add_css_class("flat");
-    delete_button.set_tooltip_text(Some("Callout löschen"));
+    delete_button.set_tooltip_text(Some(&gettext("Delete Callout")));
     row.add_suffix(&delete_button);
 
     let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
@@ -69,7 +69,7 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     content_box.set_margin_bottom(12);
     content_box.set_margin_start(12);
     content_box.set_margin_end(12);
-    let content_label = gtk4::Label::new(Some("Text"));
+    let content_label = gtk4::Label::new(Some(&gettext("Text")));
     content_label.set_halign(gtk4::Align::Start);
     content_label.add_css_class("caption-heading");
     content_box.append(&content_label);
@@ -90,33 +90,33 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     row.add_row(&content_box);
 
     let wrap_row = adw::SwitchRow::new();
-    wrap_row.set_title("Automatisch umbrechen");
+    wrap_row.set_title(&gettext("Wrap Automatically"));
     wrap_row.set_active(callout.text.typography.wrap);
     row.add_row(&wrap_row);
 
-    let line_spacing_row = spin_row("Zeilenabstand", 0.5, 3.0, callout.text.typography.line_spacing);
-    line_spacing_row.set_subtitle("Faktor der Schriftgröße, 1.0 = normal");
+    let line_spacing_row = spin_row(&gettext("Line Spacing"), 0.5, 3.0, callout.text.typography.line_spacing);
+    line_spacing_row.set_subtitle(&gettext("Factor of the font size, 1.0 = normal"));
     row.add_row(&line_spacing_row);
 
     let font_row = adw::ActionRow::new();
-    font_row.set_title("Schrift");
+    font_row.set_title(&gettext("Font"));
     let font_button = gtk4::FontDialogButton::new(Some(gtk4::FontDialog::new()));
     font_button.set_valign(gtk4::Align::Center);
     font_button.set_font_desc(&font_desc_from_typography(&callout.text.typography));
     font_row.add_suffix(&font_button);
     row.add_row(&font_row);
 
-    let alignment_row = adw::ComboRow::builder().title("Textausrichtung").subtitle("Bei mehrzeiligem Text").build();
-    alignment_row.set_model(Some(&gtk4::StringList::new(&["Links", "Mitte", "Rechts"])));
+    let alignment_row = adw::ComboRow::builder().title(gettext("Text Alignment")).subtitle(gettext("For text with several lines")).build();
+    alignment_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Left"), &gettext("Center"), &gettext("Right")])));
     alignment_row.set_selected(index_for_text_align(callout.text.typography.alignment));
     row.add_row(&alignment_row);
 
-    let opacity_row = spin_row("Deckkraft", 0.0, 100.0, callout.text.typography.opacity * 100.0);
-    opacity_row.set_subtitle("In Prozent");
+    let opacity_row = spin_row(&gettext("Opacity"), 0.0, 100.0, callout.text.typography.opacity * 100.0);
+    opacity_row.set_subtitle(&gettext("In percent"));
     row.add_row(&opacity_row);
 
-    let background_type_row = adw::ComboRow::builder().title("Hintergrund").build();
-    background_type_row.set_model(Some(&gtk4::StringList::new(&["Kein Hintergrund", "Einfarbig", "Verlauf"])));
+    let background_type_row = adw::ComboRow::builder().title(gettext("Background")).build();
+    background_type_row.set_model(Some(&gtk4::StringList::new(&[&gettext("No Background"), &gettext("Solid Color"), &gettext("Gradient")])));
     let initial_background_index = match callout.text.background {
         TextBackground::None => 0,
         TextBackground::Solid(_) => 1,
@@ -126,7 +126,7 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     row.add_row(&background_type_row);
 
     let background_color_row = adw::ActionRow::new();
-    background_color_row.set_title("Hintergrundfarbe");
+    background_color_row.set_title(&gettext("Background Color"));
     background_color_row.set_visible(initial_background_index != 0);
     let background_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
     background_color_button.set_valign(gtk4::Align::Center);
@@ -140,7 +140,7 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     row.add_row(&background_color_row);
 
     let background_color2_row = adw::ActionRow::new();
-    background_color2_row.set_title("Hintergrundfarbe 2");
+    background_color2_row.set_title(&gettext("Background Color 2"));
     background_color2_row.set_visible(initial_background_index == 2);
     let background_color2_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
     background_color2_button.set_valign(gtk4::Align::Center);
@@ -153,52 +153,52 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     row.add_row(&background_color2_row);
 
     let color_row = adw::ActionRow::new();
-    color_row.set_title("Textfarbe");
+    color_row.set_title(&gettext("Text Color"));
     let color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::new()));
     color_button.set_valign(gtk4::Align::Center);
     color_button.set_rgba(&gdk_rgba_from(&callout.text.typography.color));
     color_row.add_suffix(&color_button);
     row.add_row(&color_row);
 
-    let corner_radius_row = spin_row("Eckenradius", 0.0, 200.0, callout.text.corner_radius.top_left);
+    let corner_radius_row = spin_row(&gettext("Corner Radius"), 0.0, 200.0, callout.text.corner_radius.top_left);
     row.add_row(&corner_radius_row);
 
-    let padding_x_row = spin_row("Innenabstand horizontal", 0.0, 200.0, callout.text.padding_x);
+    let padding_x_row = spin_row(&gettext("Horizontal Padding"), 0.0, 200.0, callout.text.padding_x);
     row.add_row(&padding_x_row);
 
-    let padding_y_row = spin_row("Innenabstand vertikal", 0.0, 200.0, callout.text.padding_y);
+    let padding_y_row = spin_row(&gettext("Vertical Padding"), 0.0, 200.0, callout.text.padding_y);
     row.add_row(&padding_y_row);
 
-    let shadow_row = adw::ComboRow::builder().title("Schatten").build();
-    shadow_row.set_model(Some(&gtk4::StringList::new(&["Kein Schatten", "Subtil", "Standard", "Stark", "Floating", "Angepasst"])));
+    let shadow_row = adw::ComboRow::builder().title(gettext("Shadow")).build();
+    shadow_row.set_model(Some(&gtk4::StringList::new(&[&gettext("No Shadow"), &gettext("Subtle"), &gettext("Standard"), &gettext("Strong"), &gettext("Floating"), &gettext("Custom")])));
     shadow_row.set_selected(shadow_preset_index_for(&callout.text.shadow));
     row.add_row(&shadow_row);
 
     let (initial_shadow_angle, initial_shadow_distance) = callout.text.shadow.angle_and_distance();
-    let shadow_angle_row = spin_row("Schatten-Winkel", 0.0, 360.0, initial_shadow_angle);
+    let shadow_angle_row = spin_row(&gettext("Shadow Angle"), 0.0, 360.0, initial_shadow_angle);
     shadow_angle_row.set_sensitive(callout.text.shadow.enabled);
     row.add_row(&shadow_angle_row);
 
-    let shadow_distance_row = spin_row("Schatten-Distanz", 0.0, 300.0, initial_shadow_distance);
+    let shadow_distance_row = spin_row(&gettext("Shadow Distance"), 0.0, 300.0, initial_shadow_distance);
     shadow_distance_row.set_sensitive(callout.text.shadow.enabled);
     row.add_row(&shadow_distance_row);
 
-    let shadow_blur_row = spin_row("Weichzeichner", 0.0, 150.0, callout.text.shadow.blur);
+    let shadow_blur_row = spin_row(&gettext("Softness"), 0.0, 150.0, callout.text.shadow.blur);
     shadow_blur_row.set_sensitive(callout.text.shadow.enabled);
     row.add_row(&shadow_blur_row);
 
     let arrow_color_row = adw::ActionRow::new();
-    arrow_color_row.set_title("Pfeilfarbe");
+    arrow_color_row.set_title(&gettext("Arrow Color"));
     let arrow_color_button = gtk4::ColorDialogButton::new(Some(gtk4::ColorDialog::builder().with_alpha(true).build()));
     arrow_color_button.set_valign(gtk4::Align::Center);
     arrow_color_button.set_rgba(&gdk_rgba_from(&callout.arrow_color));
     arrow_color_row.add_suffix(&arrow_color_button);
     row.add_row(&arrow_color_row);
 
-    let arrow_width_row = spin_row("Pfeilbreite", 0.5, 20.0, callout.arrow_width);
+    let arrow_width_row = spin_row(&gettext("Arrow Width"), 0.5, 20.0, callout.arrow_width);
     row.add_row(&arrow_width_row);
 
-    let dot_radius_row = spin_row("Punktgröße", 0.0, 20.0, callout.dot_radius);
+    let dot_radius_row = spin_row(&gettext("Dot Size"), 0.0, 20.0, callout.dot_radius);
     row.add_row(&dot_radius_row);
 
     let apply = glib::clone!(

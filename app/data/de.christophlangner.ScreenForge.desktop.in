@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ScreenForge
+Comment=Arrange screenshots into one presentation image
+# Translators: search terms for the app, separated and ended by semicolons
+Keywords=screenshot;mockup;smartphone;android;collage;background;
+Exec=screenforge %F
+Icon=de.christophlangner.ScreenForge
+Terminal=false
+Categories=Graphics;GTK;GNOME;
+MimeType=image/png;image/jpeg;image/webp;image/avif;application/x-screenforge;
+StartupNotify=true

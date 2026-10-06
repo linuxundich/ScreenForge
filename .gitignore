@@ -1,2 +1,9 @@
 /target
 /.claude
+/_build
+/_install
+/build-aux/flatpak/.flatpak-builder
+/build-aux/flatpak/build-dir
+/build-aux/flatpak/repo
+/build-aux/flatpak/.cache
+/screenforge.flatpak
