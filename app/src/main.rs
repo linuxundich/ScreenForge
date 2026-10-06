@@ -22,7 +22,7 @@ use screenforge_core::command::{
     SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack,
 };
 use screenforge_core::model::{
-    Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GradientKind,
+    Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GeneratorStyle, GradientKind, Mood,
     GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, Label, LabelStyle, LayoutMode, Rgba, ScreenshotElement, ShadowParams,
     ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor,
 };
@@ -713,12 +713,51 @@ fn index_for_color_strategy(strategy: ColorStrategy) -> u32 {
     }
 }
 
+/// Order of the "Stil" dropdown: the modern styles first, the legacy
+/// wave generator last.
+const GENERATOR_STYLES: [GeneratorStyle; 7] = [
+    GeneratorStyle::Layers,
+    GeneratorStyle::Arcs,
+    GeneratorStyle::Ribbons,
+    GeneratorStyle::Planes,
+    GeneratorStyle::Lines,
+    GeneratorStyle::Mist,
+    GeneratorStyle::Waves,
+];
+
+fn generator_style_for_index(index: u32) -> GeneratorStyle {
+    GENERATOR_STYLES.get(index as usize).copied().unwrap_or(GeneratorStyle::Layers)
+}
+
+fn index_for_generator_style(style: GeneratorStyle) -> u32 {
+    GENERATOR_STYLES.iter().position(|&s| s == style).unwrap_or(0) as u32
+}
+
+fn mood_for_index(index: u32) -> Mood {
+    match index {
+        1 => Mood::Light,
+        2 => Mood::Dark,
+        _ => Mood::Vivid,
+    }
+}
+
+fn index_for_mood(mood: Mood) -> u32 {
+    match mood {
+        Mood::Vivid => 0,
+        Mood::Light => 1,
+        Mood::Dark => 2,
+    }
+}
+
 /// Reflects a `GeneratedBackground`'s parameters onto the generator
 /// controls — used both by `sync_background_controls`'s `Generated` arm
 /// and after a fresh "Generieren" click updates the seed, mirroring
 /// `sync_label_controls`'s role for the selected screenshot's label.
 fn sync_generator_controls(window: &Window, generated: &GeneratedBackground) {
     window.generator_color_strategy_row().set_selected(index_for_color_strategy(generated.color_strategy));
+    window.generator_style_row().set_selected(index_for_generator_style(generated.style));
+    window.generator_mood_row().set_selected(index_for_mood(generated.mood));
+    window.generator_grain_row().set_value(generated.grain * 100.0);
     let manual_buttons =
         [window.generator_manual_color_button_1(), window.generator_manual_color_button_2(), window.generator_manual_color_button_3(), window.generator_manual_color_button_4()];
     for (i, button) in manual_buttons.iter().enumerate() {
@@ -921,6 +960,9 @@ fn sync_background_controls(window: &Window, background: &Background) {
     window.background_image_fit_row().set_visible(matches!(background, Background::Image(_)));
     window.background_image_opacity_row().set_visible(matches!(background, Background::Image(_)));
     window.generator_color_strategy_row().set_visible(is_generated);
+    window.generator_style_row().set_visible(is_generated);
+    window.generator_mood_row().set_visible(is_generated);
+    window.generator_grain_row().set_visible(is_generated);
     window.generator_adapt_row().set_visible(is_generated);
     window.generator_corner_bias_row().set_visible(is_generated);
     window.generator_scale_row().set_visible(is_generated);
@@ -1156,6 +1198,12 @@ fn register_effect_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell
             window.background_image_opacity_row().set_visible(selected == 3);
             let is_generated = selected == 4;
             window.generator_color_strategy_row().set_visible(is_generated);
+            window.generator_style_row().set_visible(is_generated);
+            window.generator_mood_row().set_visible(is_generated);
+            window.generator_grain_row().set_visible(is_generated);
+    window.generator_style_row().set_visible(is_generated);
+    window.generator_mood_row().set_visible(is_generated);
+    window.generator_grain_row().set_visible(is_generated);
             window.generator_adapt_row().set_visible(is_generated);
             window.generator_corner_bias_row().set_visible(is_generated);
             window.generator_scale_row().set_visible(is_generated);
@@ -2906,7 +2954,7 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
             if state_ref.syncing_controls {
                 return;
             }
-            let Background::Generated(current) = &state_ref.document.background else { return };
+            let Background::Generated(current) = state_ref.document.background.clone() else { return };
             let color_strategy = color_strategy_for_index(window.generator_color_strategy_row().selected());
             let palette = if matches!(color_strategy, ColorStrategy::Manual) {
                 [
@@ -2921,8 +2969,25 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
             } else {
                 current.palette.clone()
             };
+            let style = generator_style_for_index(window.generator_style_row().selected());
+            let mood = mood_for_index(window.generator_mood_row().selected());
+            let seed = window.generator_seed_row().value() as u64;
+            // Style and mood decide how a derived palette is resolved (see
+            // `resolve_palette_for`), so switching either one re-resolves
+            // it for the current seed rather than waiting for the next
+            // "Generieren" click — otherwise the mood dropdown would look
+            // like it does nothing.
+            let palette = if !matches!(color_strategy, ColorStrategy::Manual) && (style != current.style || mood != current.mood) {
+                let inverse_contrast = window.generator_inverse_contrast_row().value() / 100.0;
+                resolve_generator_palette(&mut state_ref, color_strategy, inverse_contrast, seed, style, mood)
+            } else {
+                palette
+            };
             let new = GeneratedBackground {
-                seed: window.generator_seed_row().value() as u64,
+                seed,
+                style,
+                mood,
+                grain: window.generator_grain_row().value() / 100.0,
                 color_strategy,
                 palette,
                 adapt_to_screenshots: window.generator_adapt_row().is_active(),
@@ -2943,7 +3008,7 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
                 contrast: window.generator_contrast_row().value() / 100.0,
                 softness: current.softness,
             };
-            if *current == new {
+            if current == new {
                 return;
             }
             let old = state_ref.document.background.clone();
@@ -3005,6 +3070,9 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
     window.generator_scale_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_contrast_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_seed_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_style_row().connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_mood_row().connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
+    window.generator_grain_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
 
     window.generator_generate_button().connect_clicked(glib::clone!(
         #[weak]
@@ -3015,6 +3083,36 @@ fn register_generator_controls(window: &Window, canvas: &Canvas, state: &Rc<RefC
         state,
         move |_| generate_background(&window, &canvas, &state)
     ));
+}
+
+/// Resolves a generator palette from the currently visible screenshots'
+/// pixels (decoded through the shared image cache) for `strategy`, `style`
+/// and `mood`. Not for `ColorStrategy::Manual`, whose palette is the user's
+/// own colors.
+fn resolve_generator_palette(
+    state: &mut EditorState,
+    strategy: ColorStrategy,
+    inverse_contrast: f64,
+    seed: u64,
+    style: GeneratorStyle,
+    mood: Mood,
+) -> Vec<Rgba> {
+    let paths: Vec<PathBuf> = state
+        .document
+        .elements
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match &e.source {
+            ImageSource::Path(path) => Some(path.clone()),
+            ImageSource::Embedded { .. } => None,
+        })
+        .collect();
+    let images: Vec<DecodedImage> = paths.iter().filter_map(|path| get_or_decode(&mut state.image_cache, path).cloned()).collect();
+    let samples: Vec<screenforge_core::palette::PixelSample> = images
+        .iter()
+        .map(|image| screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height })
+        .collect();
+    screenforge_core::palette::resolve_palette_for(&samples, strategy, inverse_contrast, seed, style, mood)
 }
 
 /// Resolves a fresh palette (from the currently visible screenshots, per
@@ -3036,19 +3134,6 @@ fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
         // reproducibility guarantee this whole feature exists for.
         return;
     }
-
-    let paths: Vec<PathBuf> = state_ref
-        .document
-        .elements
-        .iter()
-        .filter(|e| e.visible)
-        .filter_map(|e| match &e.source {
-            ImageSource::Path(path) => Some(path.clone()),
-            ImageSource::Embedded { .. } => None,
-        })
-        .collect();
-    let images: Vec<DecodedImage> =
-        paths.iter().filter_map(|path| get_or_decode(&mut state_ref.image_cache, path).cloned()).collect();
 
     let previous_seed = match &state_ref.document.background {
         Background::Generated(g) => g.seed,
@@ -3081,6 +3166,8 @@ fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
 
     let color_strategy = color_strategy_for_index(window.generator_color_strategy_row().selected());
     let inverse_contrast = window.generator_inverse_contrast_row().value() / 100.0;
+    let style = generator_style_for_index(window.generator_style_row().selected());
+    let mood = mood_for_index(window.generator_mood_row().selected());
     let palette = if matches!(color_strategy, ColorStrategy::Manual) {
         [
             window.generator_manual_color_button_1().rgba(),
@@ -3092,15 +3179,14 @@ fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<RefCell<Edit
         .map(rgba_from_gdk)
         .collect()
     } else {
-        let samples: Vec<screenforge_core::palette::PixelSample> = images
-            .iter()
-            .map(|image| screenforge_core::palette::PixelSample { bytes: &image.bytes, width: image.width, height: image.height })
-            .collect();
-        screenforge_core::palette::resolve_palette(&samples, color_strategy, inverse_contrast, new_seed)
+        resolve_generator_palette(&mut state_ref, color_strategy, inverse_contrast, new_seed, style, mood)
     };
 
     let new = GeneratedBackground {
         seed: new_seed,
+        style,
+        mood,
+        grain: window.generator_grain_row().value() / 100.0,
         color_strategy,
         palette,
         adapt_to_screenshots: window.generator_adapt_row().is_active(),
@@ -3938,6 +4024,13 @@ fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 const RELEASE_NOTES: &str = "\
+<p>Version 0.26.0</p>
+<ul>
+<li>Sechs neue Stile für generierte Hintergründe: Schichten, Bögen, Bänder, Flächen, Linien und Nebel — mit weichen Kurven, Schatten und Farbverläufen</li>
+<li>Neue Einstellung „Stimmung“ (kräftig, hell, dunkel) für harmonischere Farben</li>
+<li>Neue Einstellung „Körnung“ gegen Farbstufen</li>
+<li>Der bisherige Generator bleibt als „Wellen (klassisch)“ erhalten, alte Projekte sehen unverändert aus</li>
+</ul>
 <p>Version 0.23.0</p>
 <ul>
 <li>Neuer Info-Dialog („Info zu ScreenForge…“) mit Danksagung, Lizenzen und Changelog</li>

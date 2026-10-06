@@ -22,7 +22,7 @@
 
 use cairo::{Context, Format, ImageSurface, LinearGradient};
 
-use crate::model::{GeneratedBackground, Rgba};
+use crate::model::{GeneratedBackground, GeneratorStyle, Rgba};
 use crate::palette::{oklab_to_rgb, rgb_to_oklab};
 use crate::render::RenderError;
 use crate::rng::Rng;
@@ -133,6 +133,47 @@ pub fn render(ctx: &Context, bg: &GeneratedBackground, width: f64, height: f64, 
     if width <= 0.0 || height <= 0.0 {
         return Ok(());
     }
+    if bg.style == GeneratorStyle::Waves {
+        render_waves(ctx, bg, width, height, regions)?;
+    } else {
+        crate::styles::render(ctx, bg, width, height, regions)?;
+    }
+    crate::styles::apply_grain(ctx, width, height, bg.grain, bg.seed)
+}
+
+/// Variant number `index` of `base`, for offering several alternatives at
+/// once: a new seed and fresh `density`/`flow`/`variation`/`softness`,
+/// all derived deterministically from `base.seed` and `index`, so the same
+/// base always yields the same set. Everything the user set deliberately
+/// (color strategy, mood, contrast, grain, scale, offset) is kept. With
+/// `mix_styles`, the variants walk through all modern styles from a seeded
+/// starting point; otherwise they keep `base.style`.
+///
+/// `palette` is copied unchanged — callers re-resolve it for the new seed
+/// (`crate::palette::resolve_palette_for`) when the strategy derives it.
+pub fn variant(base: &GeneratedBackground, index: u64, mix_styles: bool) -> GeneratedBackground {
+    let mut rng = Rng::new(base.seed ^ 0x7661_7269_616E_7400 ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let seed = rng.next_u64() % 1_000_000_000;
+    let style = if mix_styles {
+        let start = (base.seed % GeneratorStyle::MODERN.len() as u64) as usize;
+        GeneratorStyle::MODERN[(start + index as usize) % GeneratorStyle::MODERN.len()]
+    } else {
+        base.style
+    };
+    GeneratedBackground {
+        seed,
+        style,
+        density: rng.range(0.0, 1.0),
+        flow: rng.range(0.2, 0.8),
+        variation: rng.range(0.0, 1.0),
+        softness: rng.range(0.2, 1.0),
+        ..base.clone()
+    }
+}
+
+/// The classic wave-layer scene (`GeneratorStyle::Waves`), unchanged since
+/// before styles existed so old projects render identically.
+fn render_waves(ctx: &Context, bg: &GeneratedBackground, width: f64, height: f64, regions: &[ScreenshotRegion]) -> Result<(), RenderError> {
     let mut rng = Rng::new(bg.seed);
     let palette = if bg.palette.is_empty() { &[Rgba::new(0.9, 0.9, 0.92, 1.0)][..] } else { &bg.palette[..] };
 
@@ -203,7 +244,7 @@ fn required_sweep(focus: (f64, f64), base_angle: f64, corners: &[(f64, f64)]) ->
 /// toward whichever is least covered by `regions` when `avoid` is set
 /// (ties broken by the RNG stream, keeping it deterministic), otherwise
 /// picked uniformly at random.
-fn choose_corner(rng: &mut Rng, width: f64, height: f64, regions: &[ScreenshotRegion], avoid: bool) -> (f64, f64) {
+pub(crate) fn choose_corner(rng: &mut Rng, width: f64, height: f64, regions: &[ScreenshotRegion], avoid: bool) -> (f64, f64) {
     let corners = [(0.0, 0.0), (width, 0.0), (0.0, height), (width, height)];
     if !avoid || regions.is_empty() {
         return corners[rng.index(corners.len())];
@@ -475,6 +516,7 @@ mod tests {
             palette: vec![Rgba::new(0.2, 0.3, 0.6, 1.0), Rgba::new(0.8, 0.5, 0.2, 1.0), Rgba::new(0.9, 0.9, 0.9, 1.0)],
             color_strategy: ColorStrategy::FromScreenshots,
             corner_bias,
+            style: GeneratorStyle::Waves,
             ..GeneratedBackground::new(seed)
         }
     }
@@ -582,6 +624,38 @@ mod tests {
     /// the pattern. `required_sweep` must widen enough to keep both sides
     /// clear of every canvas corner in every case, including when `focus`
     /// sits exactly on the canvas boundary (`corner_bias = 1.0`).
+    #[test]
+    fn variants_are_deterministic_distinct_and_keep_user_settings() {
+        let base = GeneratedBackground { grain: 0.7, contrast: 0.9, mood: crate::model::Mood::Light, ..GeneratedBackground::new(99) };
+        let a: Vec<_> = (0..6).map(|i| variant(&base, i, false)).collect();
+        let b: Vec<_> = (0..6).map(|i| variant(&base, i, false)).collect();
+        assert_eq!(a, b);
+        let seeds: std::collections::HashSet<u64> = a.iter().map(|v| v.seed).collect();
+        assert_eq!(seeds.len(), 6);
+        for v in &a {
+            assert_eq!((v.style, v.grain, v.contrast, v.mood), (base.style, base.grain, base.contrast, base.mood));
+        }
+    }
+
+    #[test]
+    fn mixed_variants_cover_every_modern_style() {
+        let base = GeneratedBackground::new(5);
+        let styles: std::collections::HashSet<GeneratorStyle> = (0..6).map(|i| variant(&base, i, true).style).collect();
+        assert_eq!(styles.len(), GeneratorStyle::MODERN.len());
+    }
+
+    #[test]
+    fn a_project_saved_before_styles_existed_loads_as_classic_waves_without_grain() {
+        let mut json = serde_json::to_value(GeneratedBackground::new(3)).unwrap();
+        let fields = json.as_object_mut().unwrap();
+        fields.remove("style");
+        fields.remove("mood");
+        fields.remove("grain");
+        let loaded: GeneratedBackground = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.style, GeneratorStyle::Waves);
+        assert_eq!(loaded.grain, 0.0);
+    }
+
     #[test]
     fn required_sweep_always_clears_every_canvas_corner() {
         let corners = [(0.0, 0.0), (400.0, 0.0), (0.0, 300.0), (400.0, 300.0)];

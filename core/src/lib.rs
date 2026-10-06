@@ -14,4 +14,5 @@ pub mod render;
 pub mod rng;
 pub mod shadow_cache;
 pub mod snap;
+mod styles;
 pub mod template;

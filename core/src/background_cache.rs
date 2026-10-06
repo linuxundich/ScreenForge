@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::generator::ScreenshotRegion;
-use crate::model::GeneratedBackground;
+use crate::model::{GeneratedBackground, GeneratorStyle};
 use crate::render::RenderError;
 
 /// Every input that changes the generated background's pixels, quantized
@@ -42,6 +42,8 @@ struct BackgroundCacheKey {
     offset_x_milli: i32,
     offset_y_milli: i32,
     scale_milli: i32,
+    style: GeneratorStyle,
+    grain_milli: i32,
     canvas_w_px: i32,
     canvas_h_px: i32,
     regions_px: Vec<(i32, i32, i32, i32)>,
@@ -65,6 +67,8 @@ impl BackgroundCacheKey {
             offset_x_milli: milli(bg.offset_x),
             offset_y_milli: milli(bg.offset_y),
             scale_milli: milli(bg.scale),
+            style: bg.style,
+            grain_milli: milli(bg.grain),
             canvas_w_px: px(canvas_w),
             canvas_h_px: px(canvas_h),
             regions_px: regions.iter().map(|r| (px(r.x), px(r.y), px(r.width), px(r.height))).collect(),

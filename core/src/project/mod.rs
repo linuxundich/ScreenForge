@@ -450,6 +450,9 @@ mod tests {
             offset_x: -0.2,
             offset_y: 0.15,
             scale: 1.3,
+            style: crate::model::GeneratorStyle::Ribbons,
+            mood: crate::model::Mood::Dark,
+            grain: 0.42,
         };
         doc.background = Background::Generated(generated.clone());
 

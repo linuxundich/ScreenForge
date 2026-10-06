@@ -28,7 +28,7 @@ pub const DEFAULT_MANUAL_PALETTE: [Rgba; 4] = [
     Rgba::new(0.9294, 0.3569, 0.0, 1.0),
 ];
 
-use crate::model::{ColorStrategy, GradientKind, GradientSpec, Rgba};
+use crate::model::{ColorStrategy, GeneratorStyle, GradientKind, GradientSpec, Mood, Rgba};
 
 /// One decoded image's premultiplied ARGB32 pixel bytes (native-endian
 /// 0xAARRGGBB, i.e. byte order B, G, R, A on a little-endian target — the
@@ -295,6 +295,113 @@ pub fn resolve_palette(images: &[PixelSample], strategy: ColorStrategy, inverse_
             lightness_variations(hue, shifted_lightness, (source_chroma * 0.8).clamp(0.03, 0.16), 0.15, 4)
         }
     }
+}
+
+/// Like [`resolve_palette`], but for the style it will be rendered with.
+/// `GeneratorStyle::Waves` keeps the original resolution exactly, so the
+/// classic look doesn't change; every other style gets a five-step
+/// dark-to-light ramp in `mood`'s lightness range (see [`mood_palette`]).
+/// `FromScreenshots` takes its hue from the screenshots' dominant color,
+/// rotated toward the complement by `inverse_contrast`; `Grayscale` is the
+/// same ramp without chroma.
+pub fn resolve_palette_for(
+    images: &[PixelSample],
+    strategy: ColorStrategy,
+    inverse_contrast: f64,
+    seed: u64,
+    style: GeneratorStyle,
+    mood: Mood,
+) -> Vec<Rgba> {
+    if style == GeneratorStyle::Waves {
+        return resolve_palette(images, strategy, inverse_contrast, seed);
+    }
+    match strategy {
+        ColorStrategy::Manual => Vec::new(),
+        ColorStrategy::Random => mood_palette(seed, mood, None, 1.0),
+        ColorStrategy::Grayscale => mood_palette(seed, mood, Some(0.0), 0.0),
+        ColorStrategy::FromScreenshots => {
+            let dominant = extract_palette(images, 3);
+            let base = dominant.first().copied().unwrap_or_else(|| average_color(images));
+            let (_, a, b) = rgb_to_oklab(base);
+            let hue = b.atan2(a) + PI * inverse_contrast.clamp(0.0, 1.0);
+            mood_palette(seed, mood, Some(hue), 1.0)
+        }
+    }
+}
+
+/// A harmonious five-step ramp, darkest first: lightness spans `mood`'s
+/// range, the hue drifts by up to ±45° across the ramp (analogous colors),
+/// and chroma peaks in the middle and falls off toward both ends, where
+/// sRGB has the least room for saturated colors. `hue` (radians) is random
+/// when `None`. `chroma_gain` scales chroma (`0.0` gives grays).
+///
+/// Dark yellows read as olive or mud, so dark and vivid ramps shift a hue
+/// in that band toward orange or green, and a vivid ramp in the yellow
+/// band starts lighter.
+pub fn mood_palette(seed: u64, mood: Mood, hue: Option<f64>, chroma_gain: f64) -> Vec<Rgba> {
+    let mut rng = crate::rng::Rng::new(seed ^ 0x6D6F_6F64_7061_6C65);
+    let mut hue = hue.unwrap_or_else(|| rng.range(0.0, PI * 2.0)).rem_euclid(PI * 2.0);
+    let drift = rng.range(-45.0, 45.0).to_radians();
+    let (mut l0, l1, c_max) = match mood {
+        Mood::Vivid => (0.32, 0.92, 0.13),
+        Mood::Light => (0.66, 0.97, 0.075),
+        Mood::Dark => (0.17, 0.56, 0.11),
+    };
+    let yellow = (70f64.to_radians())..(135f64.to_radians());
+    if yellow.contains(&hue) && chroma_gain > 0.0 {
+        match mood {
+            Mood::Dark => hue = if hue < 100f64.to_radians() { 55f64.to_radians() } else { 150f64.to_radians() },
+            Mood::Vivid => l0 = 0.48,
+            Mood::Light => {}
+        }
+    }
+    (0..5)
+        .map(|i| {
+            let t = i as f64 / 4.0;
+            let chroma = c_max * chroma_gain * (0.55 + 0.45 * (PI * t).sin());
+            rgba_from_oklch(l0 + (l1 - l0) * t, chroma, hue + drift * t)
+        })
+        .collect()
+}
+
+/// What the modern styles draw with: `palette` sorted by lightness and
+/// resampled in Oklab to exactly `steps` colors (darkest first), plus one
+/// accent opposite the palette's mean hue. Works for any input — a
+/// resolved ramp, four hand-picked manual colors, or a classic palette —
+/// and falls back to a neutral gray ramp when `palette` is empty.
+pub fn ramp_and_accent(palette: &[Rgba], steps: usize) -> (Vec<Rgba>, Rgba) {
+    let mut labs: Vec<(f64, f64, f64)> = palette.iter().map(|&c| rgb_to_oklab(c)).collect();
+    if labs.is_empty() {
+        labs = vec![(0.45, 0.0, 0.0), (0.92, 0.0, 0.0)];
+    }
+    labs.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let steps = steps.max(2);
+    let ramp = (0..steps)
+        .map(|i| {
+            if labs.len() == 1 {
+                let (l, a, b) = labs[0];
+                let t = i as f64 / (steps - 1) as f64 - 0.5;
+                return oklab_to_rgb((l + t * 0.3).clamp(0.05, 0.97), a, b);
+            }
+            let pos = i as f64 / (steps - 1) as f64 * (labs.len() - 1) as f64;
+            let i0 = (pos.floor() as usize).min(labs.len() - 2);
+            let f = pos - i0 as f64;
+            let (p, q) = (labs[i0], labs[i0 + 1]);
+            oklab_to_rgb(p.0 + (q.0 - p.0) * f, p.1 + (q.1 - p.1) * f, p.2 + (q.2 - p.2) * f)
+        })
+        .collect();
+    let n = labs.len() as f64;
+    let (a_sum, b_sum) = labs.iter().fold((0.0, 0.0), |acc, c| (acc.0 + c.1, acc.1 + c.2));
+    let (a_mean, b_mean) = (a_sum / n, b_sum / n);
+    let chroma = labs.iter().map(|c| c.1.hypot(c.2)).fold(0.0_f64, f64::max);
+    let mean_l = labs.iter().map(|c| c.0).sum::<f64>() / n;
+    let accent = if chroma < 0.01 {
+        oklab_to_rgb((mean_l + 0.15).min(0.9), 0.0, 0.0)
+    } else {
+        let hue = b_mean.atan2(a_mean) + PI;
+        rgba_from_oklch((mean_l + 0.08).clamp(0.45, 0.8), (chroma * 1.15).min(0.16), hue)
+    };
+    (ramp, accent)
 }
 
 /// `count` swatches at the same hue/chroma, spread across a `spread`-wide

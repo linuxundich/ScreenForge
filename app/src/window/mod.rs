@@ -136,6 +136,18 @@ impl Window {
         self.imp().generator_color_strategy_row.get().clone()
     }
 
+    pub fn generator_style_row(&self) -> adw::ComboRow {
+        self.imp().generator_style_row.get().clone()
+    }
+
+    pub fn generator_mood_row(&self) -> adw::ComboRow {
+        self.imp().generator_mood_row.get().clone()
+    }
+
+    pub fn generator_grain_row(&self) -> adw::SpinRow {
+        self.imp().generator_grain_row.get().clone()
+    }
+
     pub fn generator_manual_color_button_1(&self) -> gtk4::ColorDialogButton {
         self.imp().generator_manual_color_button_1.get().clone()
     }
@@ -380,6 +392,12 @@ mod imp {
         pub background_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
         pub generator_color_strategy_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub generator_style_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub generator_mood_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub generator_grain_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub generator_manual_color_row_1: TemplateChild<adw::ActionRow>,
         #[template_child]

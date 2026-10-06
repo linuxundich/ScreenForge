@@ -731,6 +731,43 @@ pub enum ColorStrategy {
     Random,
 }
 
+/// Which procedural scene a [`GeneratedBackground`] draws. Every style
+/// shares the same seed, palette and knobs; see `crate::styles` for how
+/// each one interprets them. `Waves` is the original wave-layer generator,
+/// kept so projects saved before styles existed render exactly as before
+/// (it is the serde default for a missing `style` field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GeneratorStyle {
+    #[default]
+    Waves,
+    Layers,
+    Arcs,
+    Ribbons,
+    Planes,
+    Lines,
+    Mist,
+}
+
+impl GeneratorStyle {
+    /// The styles offered for new backgrounds and mixed variants — every
+    /// style except the legacy `Waves`.
+    pub const MODERN: [GeneratorStyle; 6] =
+        [GeneratorStyle::Layers, GeneratorStyle::Arcs, GeneratorStyle::Ribbons, GeneratorStyle::Planes, GeneratorStyle::Lines, GeneratorStyle::Mist];
+}
+
+/// The lightness range a generated palette spans. Only affects how a palette
+/// is *resolved* (`crate::palette::resolve_palette_for`); rendering itself
+/// reads just the resolved `palette`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mood {
+    #[default]
+    Vivid,
+    Light,
+    Dark,
+}
+
 /// A background rendered procedurally from a seed and a handful of
 /// parameters, rather than a fixed image or a simple gradient (spec §4).
 /// Deliberately holds only *inputs* to generation — `palette`, `seed`, and
@@ -795,6 +832,16 @@ pub struct GeneratedBackground {
     /// size.
     #[serde(default = "default_generated_scale")]
     pub scale: f64,
+    /// Which scene to draw. Missing in projects saved before v0.26.0, which
+    /// therefore load as `Waves` and look exactly as they did.
+    #[serde(default)]
+    pub style: GeneratorStyle,
+    #[serde(default)]
+    pub mood: Mood,
+    /// `0.0..=1.0` film grain over the finished scene, against gradient
+    /// banding. `0.0` for old projects, which had none.
+    #[serde(default)]
+    pub grain: f64,
 }
 
 fn default_generated_scale() -> f64 {
@@ -826,6 +873,9 @@ impl GeneratedBackground {
             offset_x: 0.0,
             offset_y: 0.0,
             scale: 1.0,
+            style: GeneratorStyle::Layers,
+            mood: Mood::Vivid,
+            grain: 0.35,
         }
     }
 }

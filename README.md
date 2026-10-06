@@ -39,10 +39,12 @@ PNG, JPEG or WebP image.
   a spot on the screenshot — text, colors, arrow and dot all editable
   inline, no dialog.
 - **Backgrounds**: solid color, linear gradient, radial gradient, an
-  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), a
-  generated wave-layer pattern with adjustable palette/contrast/softness,
-  or a vector pattern — a dot grid, diagonal stripes, or freeform: add
-  individual circles/lines with their own position, size and color.
+  image (with Cover/Contain/Fill/Tile fitting and adjustable opacity), or
+  a generated abstract background in one of six styles — layered paper,
+  concentric arcs, silk ribbons, folded planes, line bundles or soft mist
+  — with harmonious palettes (vivid, light or dark, random or derived
+  from the screenshots), soft shadows and film grain. The original wave
+  generator remains available as "Waves (classic)".
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
 - **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-06
+
+### Added
+
+- Six new background generator styles: Layers (stacked paper waves),
+  Arcs (concentric rings from a corner), Ribbons (wide silk bands),
+  Planes (folded paper with diagonal edges), Lines (a bundle of fine
+  wave lines) and Mist (soft color fields). All of them draw smooth
+  Bézier curves, soft shadows from one light direction and gradients
+  inside every shape. Layers is the new default.
+- A "Stimmung" (mood) setting for generated palettes: vivid, light or
+  dark. Palettes are built in OKLCH as a dark-to-light ramp with a
+  complementary accent, so they stay harmonious instead of jumping to
+  fully saturated colors. Dark yellow hues, which read as olive, are
+  steered away from.
+- A "Körnung" (grain) setting: fine film grain over the generated
+  background against color banding.
+- Core API for deterministic background variants (`generator::variant`),
+  the basis for the upcoming variant picker.
+
+### Changed
+
+- The original wave generator is kept as the style "Wellen (klassisch)".
+  Projects saved with earlier versions load with that style and without
+  grain, so they look exactly as before.
+
 ## [0.25.0] - 2026-09-11
 
 ### Added
