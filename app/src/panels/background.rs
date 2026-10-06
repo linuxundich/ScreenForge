@@ -79,46 +79,7 @@ pub(crate) fn sync_generator_controls(window: &Window, generated: &GeneratedBack
 
 /// Reflects a `Background` value onto the type/color1/color2/angle controls
 /// (used for both the initial sync and after undo/redo/load).
-/// Shows/hides the generator's color-strategy-dependent rows: the 4 manual
-/// swatches only for `Manual`, the screenshot-contrast dial only for
-/// `FromScreenshots` — shared between the initial sync and the
-/// color-strategy combo's own live notify handler.
-pub(crate) fn sync_generator_color_strategy_visibility(window: &Window, is_generated: bool, strategy: ColorStrategy) {
-    let is_manual = is_generated && matches!(strategy, ColorStrategy::Manual);
-    let is_from_screenshots = is_generated && matches!(strategy, ColorStrategy::FromScreenshots);
-    window.generator_manual_color_row_1().set_visible(is_manual);
-    window.generator_manual_color_row_2().set_visible(is_manual);
-    window.generator_manual_color_row_3().set_visible(is_manual);
-    window.generator_manual_color_row_4().set_visible(is_manual);
-    window.generator_inverse_contrast_row().set_visible(is_from_screenshots);
-}
-
 pub(crate) fn sync_background_controls(window: &Window, background: &Background) {
-    let is_generated = matches!(background, Background::Generated(_));
-    window.background_color1_row().set_visible(!matches!(background, Background::Image(_)) && !is_generated);
-    window.gradient_color2_row().set_visible(matches!(background, Background::Gradient(_)));
-    window.gradient_angle_row().set_visible(matches!(background, Background::Gradient(spec) if matches!(spec.kind, GradientKind::Linear { .. })));
-    window.gradient_auto_colors_row().set_visible(matches!(background, Background::Gradient(_)));
-    window.background_image_row().set_visible(matches!(background, Background::Image(_)));
-    window.background_image_fit_row().set_visible(matches!(background, Background::Image(_)));
-    window.background_image_opacity_row().set_visible(matches!(background, Background::Image(_)));
-    window.generator_color_strategy_row().set_visible(is_generated);
-    window.generator_style_row().set_visible(is_generated);
-    window.generator_mood_row().set_visible(is_generated);
-    window.generator_grain_row().set_visible(is_generated);
-    window.generator_adapt_row().set_visible(is_generated);
-    window.generator_corner_bias_row().set_visible(is_generated);
-    window.generator_scale_row().set_visible(is_generated);
-    window.generator_contrast_row().set_visible(is_generated);
-    window.generator_seed_row().set_visible(is_generated);
-    window.generator_generate_row().set_visible(is_generated);
-    window.variants_group().set_visible(is_generated);
-    window.variants_actions_group().set_visible(is_generated);
-    sync_generator_color_strategy_visibility(
-        window,
-        is_generated,
-        if let Background::Generated(generated) = background { generated.color_strategy } else { ColorStrategy::Manual },
-    );
 
     match background {
         Background::Solid(color) => {
@@ -566,7 +527,6 @@ pub(crate) fn register_generator_controls(window: &Window, canvas: &Canvas, stat
                     state.borrow_mut().syncing_controls = was_syncing;
                 }
             }
-            sync_generator_color_strategy_visibility(&window, true, new_strategy);
             apply();
         }
     ));

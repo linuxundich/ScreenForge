@@ -302,13 +302,20 @@ pub(crate) fn register_delete_selected(app: &adw::Application, window: &Window, 
 /// `gtk4::Text` is the internal widget every `AdwEntryRow`/`GtkEntry`/
 /// `GtkSpinButton` entry focuses; `gtk4::TextView` covers the multi-line
 /// label/callout text fields.
-pub(crate) fn register_text_focus_guards(window: &Window) {
+pub(crate) fn register_text_focus_guards(window: &Window, model: &EditorModel) {
     let update = glib::clone!(
         #[weak]
         window,
+        #[weak]
+        model,
         move || {
             let text_focused = gtk4::prelude::RootExt::focus(&window).is_some_and(|w| w.is::<gtk4::Text>() || w.is::<gtk4::TextView>());
-            for name in ["delete-selected", "undo", "redo", "paste"] {
+            // Undo/redo also depend on the history, so they go through the
+            // model (`bind_editor_model`) instead of being set here.
+            if model.text_focused() != text_focused {
+                model.set_text_focused(text_focused);
+            }
+            for name in ["delete-selected", "paste"] {
                 if let Some(action) = window.lookup_action(name) {
                     if let Some(action) = action.downcast_ref::<gio::SimpleAction>() {
                         action.set_enabled(!text_focused);

@@ -68,7 +68,6 @@ pub(crate) fn sync_controls_from_document(window: &Window, canvas: &Canvas, stat
     window.spacing_row().set_value(doc.layout.spacing_px);
     window.margin_x_row().set_value(doc.layout.margin_x);
     window.margin_y_row().set_value(doc.layout.margin_y);
-    sync_alignment_group_visibility(window, doc.layout.mode);
 
     sync_background_controls(window, &doc.background);
 

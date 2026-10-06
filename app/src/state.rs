@@ -56,6 +56,8 @@ pub(crate) struct EditorState {
     /// Bumped by "Neue Varianten" so the variant grid shows a fresh,
     /// still deterministic set. Transient, not saved.
     pub(crate) variant_roll: u64,
+    /// The UI-facing state widgets bind to; see `editor_model`.
+    pub(crate) model: EditorModel,
 }
 
 impl EditorState {
@@ -87,6 +89,7 @@ impl EditorState {
             hide_screenshots: false,
             label_style_sync: None,
             variant_roll: 0,
+            model: EditorModel::default(),
         }
     }
 }
@@ -130,11 +133,7 @@ pub(crate) fn get_or_decode<'a>(cache: &'a mut HashMap<PathBuf, DecodedImage>, p
 pub(crate) fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let mut state_ref = state.borrow_mut();
     let surfaces = element_surfaces(&mut state_ref);
-    update_window_title(window, &state_ref);
-    let is_empty = state_ref.document.elements.is_empty();
-    window.empty_state().set_visible(is_empty);
-    window.canvas_toolbar().set_visible(!is_empty);
-    canvas.set_visible(!is_empty);
+    state_ref.model.update_from(&state_ref);
     let EditorState { document, image_cache, hide_screenshots, .. } = &mut *state_ref;
     let background_image = background_image_path(&document.background)
         .and_then(|path| get_or_decode(image_cache, &path))
@@ -167,30 +166,6 @@ pub(crate) fn element_surfaces(state: &mut EditorState) -> HashMap<Uuid, cairo::
         }
     }
     surfaces
-}
-
-/// Header bar title: the project's file name (or "Neues Projekt"), and as
-/// subtitle how many screenshots it holds and the export size.
-fn update_window_title(window: &Window, state: &EditorState) {
-    let title = state
-        .project_path
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Neues Projekt".to_owned());
-    let count = state.document.elements.len();
-    let subtitle = if count == 0 {
-        String::new()
-    } else {
-        let c = state.document.canvas;
-        let scale = c.export_target_width as f64 / c.export_width.max(1) as f64;
-        let height = (c.export_height as f64 * scale).round().max(1.0);
-        let noun = if count == 1 { "Screenshot" } else { "Screenshots" };
-        format!("{count} {noun} · {} × {height:.0} px", c.export_target_width)
-    };
-    let title_widget = window.window_title();
-    title_widget.set_title(&title);
-    title_widget.set_subtitle(&subtitle);
 }
 
 /// The output height that results from scaling `canvas_settings`'s
@@ -232,11 +207,9 @@ pub(crate) fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> adw::
 /// `action-name` in the `.ui` file, so disabling the action alone is enough
 /// to grey out the button — no separate widget bookkeeping needed.
 pub(crate) fn update_undo_redo_sensitivity(window: &Window, state: &Rc<RefCell<EditorState>>) {
+    // The undo/redo actions' `enabled` is bound to the model (see
+    // `editor_model::bind_editor_model`).
+    let _ = window;
     let state_ref = state.borrow();
-    if let Some(action) = window.lookup_action("undo").and_downcast::<gio::SimpleAction>() {
-        action.set_enabled(state_ref.undo_stack.can_undo());
-    }
-    if let Some(action) = window.lookup_action("redo").and_downcast::<gio::SimpleAction>() {
-        action.set_enabled(state_ref.undo_stack.can_redo());
-    }
+    state_ref.model.update_undo(&state_ref);
 }

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-06
+
+### Changed
+
+- The window's state is now a GObject (`EditorModel`) that the UI binds
+  to: undo/redo availability, title and subtitle, the empty state, and
+  which background, generator and alignment rows are visible all follow
+  its properties through property bindings and GTK expressions. This
+  replaces two duplicated blocks of hand-written visibility code.
+- The preset name prompt uses an `AdwEntryRow` and focuses it right away.
+
+### Fixed
+
+- Undo and redo showed as available in a fresh, unedited project (and
+  after any focus change), because the text-field guard re-enabled them
+  without checking the history. Their state now combines both.
+
 ## [0.27.0] - 2026-10-06
 
 ### Added

@@ -86,15 +86,22 @@ pub(crate) fn save_global_label_defaults(style: &screenforge_core::model::LabelS
 }
 
 /// A small named-text prompt (used for both "save as" and "rename") built
-/// from an `AdwAlertDialog` with a single `GtkEntry` as its extra child —
+/// from an `AdwAlertDialog` with a single `AdwEntryRow` as its extra child —
 /// `None` for Escape/Abbrechen or an empty name, `Some(name)` (trimmed)
 /// otherwise.
 async fn prompt_for_preset_name(window: &Window, heading: &str, initial: &str) -> Option<String> {
-    let entry = gtk4::Entry::new();
-    entry.set_text(initial);
-    entry.set_activates_default(true);
+    let entry = adw::EntryRow::builder().title("Name").text(initial).activates_default(true).build();
+    let list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).build();
+    list.append(&entry);
 
-    let dialog = adw::AlertDialog::builder().heading(heading).extra_child(&entry).build();
+    let dialog = adw::AlertDialog::builder().heading(heading).extra_child(&list).build();
+    dialog.connect_map(glib::clone!(
+        #[weak]
+        entry,
+        move |_| {
+            entry.grab_focus();
+        }
+    ));
     dialog.add_response("cancel", "Abbrechen");
     dialog.add_response("save", "Speichern");
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);

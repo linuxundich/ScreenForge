@@ -87,30 +87,7 @@ pub(crate) fn register_effect_controls(window: &Window, canvas: &Canvas, state: 
         state,
         move |row| {
             let selected = row.selected();
-            window.background_color1_row().set_visible(selected != 3 && selected != 4);
-            window.gradient_color2_row().set_visible(selected == 1 || selected == 2);
-            window.gradient_angle_row().set_visible(selected == 1);
-            window.gradient_auto_colors_row().set_visible(selected == 1 || selected == 2);
-            window.background_image_row().set_visible(selected == 3);
-            window.background_image_fit_row().set_visible(selected == 3);
-            window.background_image_opacity_row().set_visible(selected == 3);
             let is_generated = selected == 4;
-            window.generator_color_strategy_row().set_visible(is_generated);
-            window.generator_style_row().set_visible(is_generated);
-            window.generator_mood_row().set_visible(is_generated);
-            window.generator_grain_row().set_visible(is_generated);
-    window.generator_style_row().set_visible(is_generated);
-    window.generator_mood_row().set_visible(is_generated);
-    window.generator_grain_row().set_visible(is_generated);
-            window.generator_adapt_row().set_visible(is_generated);
-            window.generator_corner_bias_row().set_visible(is_generated);
-            window.generator_scale_row().set_visible(is_generated);
-            window.generator_contrast_row().set_visible(is_generated);
-            window.generator_seed_row().set_visible(is_generated);
-            window.generator_generate_row().set_visible(is_generated);
-            window.variants_group().set_visible(is_generated);
-            window.variants_actions_group().set_visible(is_generated);
-            sync_generator_color_strategy_visibility(&window, is_generated, color_strategy_for_index(window.generator_color_strategy_row().selected()));
             // Selecting "Bild" only reveals the file picker — there's
             // nothing to render until a file is actually chosen (below).
             // Selecting "Generiert" needs an actual palette/seed resolved

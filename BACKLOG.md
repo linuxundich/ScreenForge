@@ -14,12 +14,14 @@ mockups: generator prototype with six styles, UI variant "A + B").
 - [x] Deterministic variants from one seed (same style or mixed styles)
 - [x] Minimal controls in the current sidebar (style, mood, grain)
 
-## Phase 2 — GUI overhaul — mostly done in v0.27.0
+## Phase 2 — GUI overhaul — done in v0.27.0/v0.27.1
 
 - [x] Split `main.rs` into modules per topic and sidebar panel (v0.27.0)
-- [ ] Editor state as GObject with property bindings instead of
-      `syncing_controls`; panel templates of their own
-- [ ] `AdwEntryRow` for preset names (still a `GtkEntry` in an alert dialog)
+- [x] UI-facing editor state as GObject (`EditorModel`) with property
+      bindings and expressions (v0.27.1)
+- [x] `AdwEntryRow` for preset names (v0.27.1)
+- [ ] Later, if it pays off: move the per-control value sync
+      (`syncing_controls`) onto the model too, panel templates of their own
 - [x] Sidebar as tabs (`AdwViewStack` + `AdwInlineViewSwitcher`):
       Layout / Background / Style / Text / Export
 - [x] New header bar: sidebar toggle, "Add" menu (file, clipboard, Android),

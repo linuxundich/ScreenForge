@@ -24,10 +24,6 @@ pub(crate) fn index_for_layout_mode(mode: LayoutMode) -> u32 {
 /// effect at all. Selection count isn't part of this check (see
 /// `align_selected`'s own guard) since it can change without the layout
 /// mode row itself firing.
-pub(crate) fn sync_alignment_group_visibility(window: &Window, mode: LayoutMode) {
-    window.alignment_group().set_visible(mode == LayoutMode::Free);
-}
-
 /// Wires the sidebar's layout-mode/spacing/margin rows to `Document.layout`,
 /// mutating it directly through the undo stack (spec §17: layout changes are
 /// undoable).
@@ -43,7 +39,6 @@ pub(crate) fn register_layout_controls(window: &Window, canvas: &Canvas, state: 
         spacing_row.set_value(state_ref.document.layout.spacing_px);
         margin_x_row.set_value(state_ref.document.layout.margin_x);
         margin_y_row.set_value(state_ref.document.layout.margin_y);
-        sync_alignment_group_visibility(window, state_ref.document.layout.mode);
     }
 
     layout_mode_toggle.connect_active_notify(glib::clone!(
@@ -55,7 +50,6 @@ pub(crate) fn register_layout_controls(window: &Window, canvas: &Canvas, state: 
         state,
         move |row| {
             let new = layout_mode_for_index(row.active());
-            sync_alignment_group_visibility(&window, new);
             let mut state_ref = state.borrow_mut();
             let old = state_ref.document.layout.mode;
             if state_ref.syncing_controls || old == new {
@@ -182,7 +176,7 @@ pub(crate) enum Alignment {
 /// leftmost selected element's left edge, `Alignment::CenterHorizontal`
 /// centers each one within the selection's horizontal span. Only
 /// meaningful in `LayoutMode::Free` (the alignment buttons are hidden
-/// otherwise, see `sync_alignment_group_visibility`) and with at least two
+/// otherwise, see `editor_model::bind_editor_model`) and with at least two
 /// elements selected — selection lives entirely in the `Canvas` widget
 /// (`canvas.selected_ids()`), so unlike the layout mode this can go stale
 /// between clicks without any signal telling this function about it,

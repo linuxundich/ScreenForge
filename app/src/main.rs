@@ -5,6 +5,7 @@ mod import;
 mod window;
 
 mod dialogs;
+mod editor_model;
 mod editing;
 mod panels;
 mod presets;
@@ -13,6 +14,7 @@ mod sources;
 mod state;
 
 use dialogs::*;
+use editor_model::*;
 use editing::*;
 use panels::*;
 use presets::*;
@@ -126,9 +128,12 @@ fn build_ui(app: &adw::Application) {
     register_hide_screenshots_toggle(&window, &canvas, &state);
     register_sidebar_toggle(&window);
     register_eyedroppers(&window, &canvas);
-    register_text_focus_guards(&window);
     register_variant_controls(&window, &canvas, &state);
     register_shortcuts_action(app);
+    let model = state.borrow().model.clone();
+    bind_editor_model(&window, &canvas, &model);
+    register_text_focus_guards(&window, &model);
+    refresh_canvas(&window, &canvas, &state);
 
     window.present();
 }
