@@ -10,8 +10,8 @@ use std::fmt::Debug;
 use uuid::Uuid;
 
 use crate::model::{
-    Background, Callout, CornerRadius, Document, ImageSource, Label, LabelStyle, LayoutMode, LayoutSettings, ScreenshotElement, ShadowParams,
-    Transform,
+    Background, Callout, CornerRadius, Document, ImageSource, Label, LabelStyle, LayoutMode, LayoutSettings, ScreenshotElement, Redaction, ShadowParams,
+    Transform, Watermark,
 };
 
 /// A single reversible mutation of a [`Document`]. Implementations should
@@ -620,6 +620,78 @@ impl Command for ApplyTemplate {
             element.corner_radius = *corner_radius;
         }
         doc.label_defaults = self.old_label_defaults.clone();
+    }
+}
+
+/// Replaces one screenshot's list of redactions (add, change, remove all
+/// go through this, with the whole list before and after).
+#[derive(Debug)]
+pub struct SetRedactions {
+    pub element_id: Uuid,
+    pub old: Vec<Redaction>,
+    pub new: Vec<Redaction>,
+}
+
+impl Command for SetRedactions {
+    fn apply(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.redactions = self.new.clone();
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        if let Some(element) = doc.elements.iter_mut().find(|e| e.id == self.element_id) {
+            element.redactions = self.old.clone();
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SetWatermark {
+    pub old: Watermark,
+    pub new: Watermark,
+}
+
+impl Command for SetWatermark {
+    fn apply(&self, doc: &mut Document) {
+        doc.watermark = self.new.clone();
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.watermark = self.old.clone();
+    }
+}
+
+/// Picks a canvas format: the fixed aspect ratio (or `None` to fit the
+/// content) together with the export width that format implies.
+#[derive(Debug)]
+pub struct SetCanvasFormat {
+    pub old: (Option<(u32, u32)>, u32),
+    pub new: (Option<(u32, u32)>, u32),
+}
+
+impl Command for SetCanvasFormat {
+    fn apply(&self, doc: &mut Document) {
+        (doc.canvas.aspect, doc.canvas.export_target_width) = self.new;
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        (doc.canvas.aspect, doc.canvas.export_target_width) = self.old;
+    }
+}
+
+#[derive(Debug)]
+pub struct SetTransparentBackground {
+    pub new: bool,
+}
+
+impl Command for SetTransparentBackground {
+    fn apply(&self, doc: &mut Document) {
+        doc.canvas.transparent_background = self.new;
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.canvas.transparent_background = !self.new;
     }
 }
 

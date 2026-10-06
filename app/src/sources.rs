@@ -92,7 +92,8 @@ pub(crate) fn register_import_android_action(app: &adw::Application, window: &Wi
             let state = state.clone();
             glib::spawn_future_local(async move {
                 let toast_overlay = window.toast_overlay();
-                let result = gio::spawn_blocking(adb::capture_screenshot).await;
+                let demo_mode = app_settings().boolean("adb-demo-mode");
+                let result = gio::spawn_blocking(move || adb::capture_screenshot(demo_mode)).await;
                 match result {
                     Ok(Ok(path)) => import_paths(&window, &canvas, &state, vec![path]),
                     Ok(Err(err)) => toast_overlay.add_toast(adw::Toast::new(&err.to_string())),
@@ -270,4 +271,123 @@ pub(crate) fn register_paste_action(app: &adw::Application, window: &Window, can
     ));
     window.add_action(&action);
     app.set_accels_for_action("win.paste", &["<Ctrl>v"]);
+}
+
+/// `win.take-screenshot`: asks the desktop's screenshot portal for a
+/// screenshot (interactive, so the user picks screen, window or area in
+/// the system's own dialog) and imports the result.
+pub(crate) fn register_take_screenshot_action(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("take-screenshot", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, _| {
+            let window = window.clone();
+            let canvas = canvas.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                if let Err(err) = take_portal_screenshot(&window, &canvas, &state).await {
+                    window.toast_overlay().add_toast(adw::Toast::new(&format!("Bildschirmfoto fehlgeschlagen: {err}")));
+                }
+            });
+        }
+    ));
+    window.add_action(&action);
+}
+
+async fn take_portal_screenshot(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) -> Result<(), glib::Error> {
+    let connection = gio::bus_get_future(gio::BusType::Session).await?;
+    let token = format!("screenforge{}", glib::random_int());
+    let sender = connection.unique_name().map(|n| n.trim_start_matches(':').replace('.', "_")).unwrap_or_default();
+    let handle = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+
+    // Subscribe before calling, so the response can't arrive unseen.
+    // Dropping the subscription unsubscribes; the callback takes it out of
+    // this cell once the one expected response has arrived.
+    let subscription: Rc<RefCell<Option<gio::SignalSubscription>>> = Rc::new(RefCell::new(None));
+    let handle_subscription = connection.subscribe_to_signal(
+        Some("org.freedesktop.portal.Desktop"),
+        Some("org.freedesktop.portal.Request"),
+        Some("Response"),
+        Some(&handle),
+        None,
+        gio::DBusSignalFlags::NO_MATCH_RULE,
+        glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            #[strong]
+            subscription,
+            move |signal| {
+                let params = signal.parameters;
+                // Unsubscribe after this callback returns, not inside it.
+                let done = subscription.borrow_mut().take();
+                glib::idle_add_local_once(move || drop(done));
+                let response = params.child_value(0).get::<u32>().unwrap_or(2);
+                if response != 0 {
+                    return; // cancelled by the user
+                }
+                let results = glib::VariantDict::new(Some(&params.child_value(1)));
+                let path = results.lookup::<String>("uri").ok().flatten().and_then(|uri| gio::File::for_uri(&uri).path());
+                match path {
+                    Some(path) => import_paths(&window, &canvas, &state, vec![path]),
+                    None => window.toast_overlay().add_toast(adw::Toast::new("Bildschirmfoto: keine Datei erhalten")),
+                }
+            }
+        ),
+    );
+    *subscription.borrow_mut() = Some(handle_subscription);
+
+    let options = glib::VariantDict::new(None);
+    options.insert("handle_token", &token);
+    options.insert("interactive", true);
+    let parameters = glib::Variant::tuple_from_iter(["".to_variant(), options.end()]);
+    connection
+        .call_future(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Screenshot",
+            "Screenshot",
+            Some(&parameters),
+            None,
+            gio::DBusCallFlags::NONE,
+            -1,
+        )
+        .await?;
+    Ok(())
+}
+
+/// `app.import-files` (string array of paths): what "Öffnen mit" from the
+/// file manager ends up calling — images are imported, a `.screenforge`
+/// file is opened as the project.
+pub(crate) fn register_import_files_action(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("import-files", Some(glib::VariantTy::STRING_ARRAY));
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_, parameter| {
+            let Some(paths) = parameter.and_then(|p| p.get::<Vec<String>>()) else { return };
+            let (projects, images): (Vec<PathBuf>, Vec<PathBuf>) =
+                paths.into_iter().map(PathBuf::from).partition(|p| p.extension().is_some_and(|e| e == "screenforge"));
+            if let Some(project) = projects.into_iter().next() {
+                open_project_file(&window, &canvas, &state, project);
+            }
+            if !images.is_empty() {
+                import_paths(&window, &canvas, &state, images);
+            }
+            window.present();
+        }
+    ));
+    app.add_action(&action);
 }

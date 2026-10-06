@@ -375,6 +375,22 @@ impl Window {
         self.imp().variants_studio_row.get().clone()
     }
 
+    pub fn blurred_blur_row(&self) -> adw::SpinRow {
+        self.imp().blurred_blur_row.get().clone()
+    }
+
+    pub fn blurred_brightness_row(&self) -> adw::SpinRow {
+        self.imp().blurred_brightness_row.get().clone()
+    }
+
+    pub fn balance_row(&self) -> adw::ButtonRow {
+        self.imp().balance_row.get().clone()
+    }
+
+    pub fn drag_out_button(&self) -> gtk4::Button {
+        self.imp().drag_out_button.get().clone()
+    }
+
     pub fn toast_overlay(&self) -> adw::ToastOverlay {
         self.imp().toast_overlay.get().clone()
     }
@@ -571,6 +587,14 @@ mod imp {
         pub variants_reroll_row: TemplateChild<adw::ButtonRow>,
         #[template_child]
         pub variants_studio_row: TemplateChild<adw::ButtonRow>,
+        #[template_child]
+        pub blurred_blur_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub blurred_brightness_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub balance_row: TemplateChild<adw::ButtonRow>,
+        #[template_child]
+        pub drag_out_button: TemplateChild<gtk4::Button>,
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
     }

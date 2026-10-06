@@ -5,7 +5,8 @@ pub(crate) fn export_format_for_index(index: u32) -> ExportFormat {
         0 => ExportFormat::Png,
         1 => ExportFormat::Jpeg,
         2 => ExportFormat::WebP,
-        _ => ExportFormat::Avif,
+        3 => ExportFormat::Avif,
+        _ => ExportFormat::Pdf,
     }
 }
 
@@ -15,6 +16,7 @@ pub(crate) fn index_for_export_format(format: ExportFormat) -> u32 {
         ExportFormat::Jpeg => 1,
         ExportFormat::WebP => 2,
         ExportFormat::Avif => 3,
+        ExportFormat::Pdf => 4,
     }
 }
 
@@ -80,7 +82,7 @@ pub(crate) fn register_export_controls(window: &Window, state: &Rc<RefCell<Edito
 /// spin row must be disabled rather than implying a control that does
 /// nothing.
 pub(crate) fn format_supports_quality(format: ExportFormat) -> bool {
-    !matches!(format, ExportFormat::Png)
+    !matches!(format, ExportFormat::Png | ExportFormat::Pdf)
 }
 
 pub(crate) fn extension_for_format(format: ExportFormat) -> &'static str {
@@ -89,6 +91,7 @@ pub(crate) fn extension_for_format(format: ExportFormat) -> &'static str {
         ExportFormat::Jpeg => "jpg",
         ExportFormat::WebP => "webp",
         ExportFormat::Avif => "avif",
+        ExportFormat::Pdf => "pdf",
     }
 }
 
@@ -130,23 +133,7 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
                 export_button.set_sensitive(false);
                 export_button.set_child(Some(&adw::Spinner::new()));
 
-                let doc = state.borrow().document.clone();
-                let (decoded_images, background_image) = {
-                    let mut state_ref = state.borrow_mut();
-                    let EditorState { document, image_cache, .. } = &mut *state_ref;
-                    let decoded_images = document
-                        .elements
-                        .iter()
-                        .filter_map(|el| {
-                            let ImageSource::Path(path) = &el.source else { return None };
-                            get_or_decode(image_cache, path).map(|image| (el.id, image.clone()))
-                        })
-                        .collect::<HashMap<_, _>>();
-                    let background_image = background_image_path(&document.background)
-                        .and_then(|path| get_or_decode(image_cache, &path))
-                        .cloned();
-                    (decoded_images, background_image)
-                };
+                let (doc, decoded_images, background_image) = export_inputs(&state);
                 let result =
                     gio::spawn_blocking(move || export::render_and_write(&doc, &decoded_images, background_image.as_ref(), &path))
                         .await;
@@ -164,4 +151,97 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
     ));
     window.add_action(&export_action);
     app.set_accels_for_action("win.export", &["<Ctrl>e"]);
+}
+
+/// Everything a background-thread render needs, all `Send`: a copy of the
+/// document, its decoded screenshots and the decoded background image.
+pub(crate) fn export_inputs(
+    state: &Rc<RefCell<EditorState>>,
+) -> (Document, HashMap<Uuid, DecodedImage>, Option<DecodedImage>) {
+    let mut state_ref = state.borrow_mut();
+    let EditorState { document, image_cache, .. } = &mut *state_ref;
+    let decoded_images = document
+        .elements
+        .iter()
+        .filter_map(|el| {
+            let ImageSource::Path(path) = &el.source else { return None };
+            get_or_decode(image_cache, path).map(|image| (el.id, image.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    let background_image = background_image_path(&document.background).and_then(|path| get_or_decode(image_cache, &path)).cloned();
+    (document.clone(), decoded_images, background_image)
+}
+
+/// `win.copy-image` (Ctrl+Shift+C): renders the export in the background
+/// and puts it on the clipboard as an image.
+pub(crate) fn register_copy_image_action(app: &adw::Application, window: &Window, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("copy-image", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        state,
+        move |_, _| {
+            if state.borrow().document.elements.is_empty() {
+                return;
+            }
+            let (doc, decoded_images, background_image) = export_inputs(&state);
+            let window = window.clone();
+            glib::spawn_future_local(async move {
+                let result = gio::spawn_blocking(move || export::render_pixels(&doc, &decoded_images, background_image.as_ref())).await;
+                let toast = match result {
+                    Ok(Ok((data, width, height, stride))) => {
+                        let bytes = glib::Bytes::from_owned(data);
+                        let texture = gdk::MemoryTexture::new(width, height, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, stride);
+                        window.clipboard().set_texture(&texture);
+                        adw::Toast::new("Bild in die Zwischenablage kopiert")
+                    }
+                    Ok(Err(err)) => adw::Toast::new(&format!("Kopieren fehlgeschlagen: {err}")),
+                    Err(_) => adw::Toast::new("Kopieren fehlgeschlagen: Hintergrundaufgabe abgebrochen"),
+                };
+                window.toast_overlay().add_toast(toast);
+            });
+        }
+    ));
+    window.add_action(&action);
+    app.set_accels_for_action("win.copy-image", &["<Ctrl><Shift>c"]);
+}
+
+/// The floating toolbar's drag-out button: dragging it hands a freshly
+/// rendered PNG file to wherever it's dropped (browser upload field, file
+/// manager, chat). Rendering happens synchronously when the drag starts;
+/// at export size that takes a fraction of a second.
+pub(crate) fn register_drag_out(window: &Window, state: &Rc<RefCell<EditorState>>) {
+    let source = gtk4::DragSource::new();
+    source.set_actions(gdk::DragAction::COPY);
+    source.connect_prepare(glib::clone!(
+        #[strong]
+        state,
+        move |_, _, _| {
+            if state.borrow().document.elements.is_empty() {
+                return None;
+            }
+            let (doc, decoded_images, background_image) = export_inputs(&state);
+            let dir = glib::user_cache_dir().join("screenforge").join("drag");
+            std::fs::create_dir_all(&dir).ok()?;
+            let name = state
+                .borrow()
+                .project_path
+                .as_ref()
+                .and_then(|p| p.file_stem())
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "screenforge".to_owned());
+            let path = dir.join(format!("{name}.png"));
+            if let Err(err) = export::render_png(&doc, &decoded_images, background_image.as_ref(), &path) {
+                eprintln!("ScreenForge: drag-out render failed: {err}");
+                return None;
+            }
+            let files = gdk::FileList::from_array(&[gio::File::for_path(&path)]);
+            Some(gdk::ContentProvider::for_value(&files.to_value()))
+        }
+    ));
+    source.connect_drag_begin(|source, _| {
+        source.set_icon(Some(&gtk4::IconTheme::default().lookup_icon("image-x-generic-symbolic", &[], 32, 1, gtk4::TextDirection::None, gtk4::IconLookupFlags::empty())), 16, 16);
+    });
+    window.drag_out_button().add_controller(source);
 }

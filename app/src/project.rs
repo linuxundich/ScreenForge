@@ -94,6 +94,10 @@ pub(crate) fn sync_controls_from_document(window: &Window, canvas: &Canvas, stat
     }
     sync_label_controls(window, canvas, state);
     sync_callouts_controls(window, canvas, state);
+    let syncs = state.borrow().document_syncs.clone();
+    for sync in syncs {
+        sync(&doc);
+    }
 
     state.borrow_mut().syncing_controls = false;
 }
@@ -176,44 +180,50 @@ pub(crate) fn register_project_actions(app: &adw::Application, window: &Window, 
                 };
                 let Some(path) = file.path() else { return };
 
-                match screenforge_core::project::load(&path, &prepare_project_asset_extract_dir()) {
-                    Ok(doc) => {
-                        let mut image_cache = HashMap::new();
-                        let mut missing = 0u32;
-                        for element in &doc.elements {
-                            let ImageSource::Path(source_path) = &element.source else { continue };
-                            if get_or_decode(&mut image_cache, source_path).is_none() {
-                                missing += 1;
-                            }
-                        }
-
-                        {
-                            let mut state_ref = state.borrow_mut();
-                            state_ref.document = doc;
-                            state_ref.image_cache = image_cache;
-                            state_ref.project_path = Some(path);
-                            // A freshly loaded project starts with a clean
-                            // undo history — undoing past "load" into the
-                            // previous document would be surprising.
-                            state_ref.undo_stack = UndoStack::new();
-                        }
-                        refresh_canvas(&window, &canvas, &state);
-                        sync_controls_from_document(&window, &canvas, &state);
-                        update_undo_redo_sensitivity(&window, &state);
-
-                        let toast = if missing > 0 {
-                            adw::Toast::new(&format!("Projekt geladen ({missing} Bild(er) fehlen)"))
-                        } else {
-                            adw::Toast::new("Projekt geladen")
-                        };
-                        window.toast_overlay().add_toast(toast);
-                    }
-                    Err(err) => {
-                        window.toast_overlay().add_toast(adw::Toast::new(&format!("Projekt konnte nicht geladen werden: {err}")));
-                    }
-                }
+                open_project_file(&window, &canvas, &state, path);
             });
         }
     ));
     window.add_action(&open_project_action);
+}
+
+/// Loads the `.screenforge` project at `path` into the window, replacing
+/// the current document and its undo history.
+pub(crate) fn open_project_file(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, path: PathBuf) {
+    match screenforge_core::project::load(&path, &prepare_project_asset_extract_dir()) {
+        Ok(doc) => {
+            let mut image_cache = HashMap::new();
+            let mut missing = 0u32;
+            for element in &doc.elements {
+                let ImageSource::Path(source_path) = &element.source else { continue };
+                if get_or_decode(&mut image_cache, source_path).is_none() {
+                    missing += 1;
+                }
+            }
+
+            {
+                let mut state_ref = state.borrow_mut();
+                state_ref.document = doc;
+                state_ref.image_cache = image_cache;
+                state_ref.project_path = Some(path);
+                // A freshly loaded project starts with a clean
+                // undo history — undoing past "load" into the
+                // previous document would be surprising.
+                state_ref.undo_stack = UndoStack::new();
+            }
+            refresh_canvas(window, canvas, state);
+            sync_controls_from_document(window, canvas, state);
+            update_undo_redo_sensitivity(window, state);
+
+            let toast = if missing > 0 {
+                adw::Toast::new(&format!("Projekt geladen ({missing} Bild(er) fehlen)"))
+            } else {
+                adw::Toast::new("Projekt geladen")
+            };
+            window.toast_overlay().add_toast(toast);
+        }
+        Err(err) => {
+            window.toast_overlay().add_toast(adw::Toast::new(&format!("Projekt konnte nicht geladen werden: {err}")));
+        }
+    }
 }

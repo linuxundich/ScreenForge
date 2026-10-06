@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-06
+
+### Added
+
+- Format presets in the export tab: fit to content, 16:9, 1:1, 4:5,
+  9:16, Open Graph 1200 × 630, Mastodon/Bluesky 1600 × 900 and the Play
+  Store feature graphic 1024 × 500. A fixed format grows the canvas
+  around the content, which stays centered; nothing is cropped.
+- Copy the finished image to the clipboard (Ctrl+Shift+C, the export tab
+  or the floating toolbar), and drag it out of the window via the
+  floating toolbar's drag button into a browser, file manager or chat.
+- Redactions ("Schwärzen" in the style tab): hide areas of the selected
+  screenshot as a dark bar, pixel blocks or a blur, positioned in percent
+  of the screenshot and attached to its content.
+- Background "Screenshot (unscharf)": the first visible screenshot,
+  scaled to fill the canvas and blurred, with adjustable blur and
+  brightness.
+- "Gleichmäßig verteilen" in the free layout: one row with equal gaps and
+  the screenshots' centers on one line.
+- Transparent background on export (PNG, WebP, AVIF, PDF; JPEG is
+  flattened onto white).
+- Text watermark in a chosen corner, with size, opacity and color.
+- PDF export (one page, the composition embedded as an image).
+- Clean Android status bar: before each adb capture the device is put
+  into System UI demo mode (12:00, full battery and signal, no
+  notification icons) and back afterwards. On by default, switchable in
+  the preferences.
+- Desktop screenshots via the screenshot portal ("+" menu), imported
+  straight into the composition.
+- "Open with": the app accepts image files and `.screenforge` projects
+  as arguments; the desktop file declares the image MIME types.
+
+### Fixed
+
+- A panel's initial sync could hit a "RefCell already borrowed" panic if
+  it set widgets while holding the editor state; the new panels never do.
+
 ## [0.27.1] - 2026-10-06
 
 ### Changed

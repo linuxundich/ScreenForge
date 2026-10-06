@@ -130,6 +130,17 @@ pub(crate) fn register_effect_controls(window: &Window, canvas: &Canvas, state: 
         state,
         move |_| apply_background_from_controls(&window, &canvas, &state)
     ));
+    for row in [window.blurred_blur_row(), window.blurred_brightness_row()] {
+        row.connect_value_notify(glib::clone!(
+            #[weak]
+            window,
+            #[weak]
+            canvas,
+            #[strong]
+            state,
+            move |_| apply_background_from_controls(&window, &canvas, &state)
+        ));
+    }
     register_background_image_controls(window, canvas, state);
     register_gradient_auto_colors_control(window, canvas, state);
 

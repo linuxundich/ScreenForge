@@ -4,6 +4,9 @@ use crate::*;
 /// given style — see `build_label_style_groups`'s own doc comment.
 pub(crate) type LabelStyleSync = Rc<dyn Fn(&LabelStyle)>;
 
+/// Reflects a document onto a panel's widgets; see `EditorState::document_syncs`.
+pub(crate) type DocumentSync = Rc<dyn Fn(&Document)>;
+
 /// Everything import/inspector/export actions mutate. Kept as one `Rc<RefCell<_>>`
 /// shared between the window's actions and the canvas widget rather than
 /// threaded through every callback individually.
@@ -58,6 +61,13 @@ pub(crate) struct EditorState {
     pub(crate) variant_roll: u64,
     /// The UI-facing state widgets bind to; see `editor_model`.
     pub(crate) model: EditorModel,
+    /// Panels built in code reflect the document through these after
+    /// undo/redo/load (`sync_controls_from_document`), like
+    /// `label_style_sync` does for the label style rows.
+    pub(crate) document_syncs: Vec<DocumentSync>,
+    /// Called on every canvas selection change, after the label and
+    /// callout sections (the canvas itself keeps only one callback).
+    pub(crate) selection_syncs: Vec<Rc<dyn Fn()>>,
 }
 
 impl EditorState {
@@ -90,6 +100,8 @@ impl EditorState {
             label_style_sync: None,
             variant_roll: 0,
             model: EditorModel::default(),
+            document_syncs: Vec::new(),
+            selection_syncs: Vec::new(),
         }
     }
 }

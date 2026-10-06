@@ -46,29 +46,8 @@ pub fn render_and_write(
     background_image: Option<&DecodedImage>,
     path: &Path,
 ) -> Result<(), ExportError> {
-    let surfaces: HashMap<Uuid, cairo::ImageSurface> = decoded_images
-        .iter()
-        .map(|(id, image)| Ok((*id, import::surface_from_decoded(image)?)))
-        .collect::<Result<_, import::ImportError>>()?;
-    let background_surface = background_image.map(import::surface_from_decoded).transpose()?;
-
-    // The canvas's own width/height are the composition's native, content-
-    // fitted size (see `screenforge_core::layout::fit_canvas_to_content`);
-    // scaling to the user-chosen target width — instead of rendering
-    // straight at export_width/export_height — is what lets that target be
-    // freely edited without ever cropping or distorting the content.
-    let scale = doc.canvas.export_target_width as f64 / doc.canvas.export_width.max(1) as f64;
-    let out_width = doc.canvas.export_target_width.max(1);
-    let out_height = ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32;
-
-    let mut target = cairo::ImageSurface::create(cairo::Format::ARgb32, out_width as i32, out_height as i32)?;
-    // A fresh, one-shot cache: export renders this document exactly once,
-    // so there's nothing to gain from reusing shadow bitmaps across calls
-    // the way the interactive preview does (see `Canvas`'s long-lived
-    // one) — every shadow just misses once and renders at full quality.
-    let shadow_cache = screenforge_core::shadow_cache::ShadowCache::new();
-    let background_cache = screenforge_core::background_cache::BackgroundCache::new();
-    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache, &background_cache)?;
+    let mut target = render_surface(doc, decoded_images, background_image)?;
+    let (out_width, out_height) = (target.width() as f64, target.height() as f64);
 
     match doc.canvas.export_format {
         ExportFormat::Png => {
@@ -76,7 +55,8 @@ pub fn render_and_write(
             target.write_to_png(&mut file)?;
         }
         ExportFormat::Jpeg => {
-            let rgba = surface_to_rgba_image(&mut target)?;
+            // JPEG has no alpha: flatten a transparent export onto white.
+            let rgba = surface_to_rgba_image(&mut flattened_on_white(&target)?)?;
             let mut file = File::create(path)?;
             let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, doc.canvas.export_quality);
             encoder.encode_image(&rgba)?;
@@ -94,8 +74,92 @@ pub fn render_and_write(
             let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(file, 4, quality);
             encoder.write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)?;
         }
+        ExportFormat::Pdf => {
+            // One page the size of the export, in points (1 px = 1 pt), with
+            // the composition embedded as an image.
+            let pdf = cairo::PdfSurface::new(out_width, out_height, path)?;
+            let ctx = cairo::Context::new(&pdf)?;
+            ctx.set_source_surface(&target, 0.0, 0.0)?;
+            ctx.paint()?;
+            drop(ctx);
+            pdf.finish();
+        }
     }
     Ok(())
+}
+
+/// A copy of `surface` composited over opaque white.
+fn flattened_on_white(surface: &cairo::ImageSurface) -> Result<cairo::ImageSurface, ExportError> {
+    let out = cairo::ImageSurface::create(cairo::Format::ARgb32, surface.width(), surface.height())?;
+    let ctx = cairo::Context::new(&out)?;
+    ctx.set_source_rgb(1.0, 1.0, 1.0);
+    ctx.paint()?;
+    ctx.set_source_surface(surface, 0.0, 0.0)?;
+    ctx.paint()?;
+    drop(ctx);
+    Ok(out)
+}
+
+/// Renders the export at its target size and returns the raw premultiplied
+/// BGRA bytes (Cairo's ARGB32 on little-endian), width, height and stride —
+/// plain data, so it can cross from a background thread to the UI thread
+/// for the clipboard.
+pub fn render_pixels(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+) -> Result<(Vec<u8>, i32, i32, usize), ExportError> {
+    let mut surface = render_surface(doc, decoded_images, background_image)?;
+    surface.flush();
+    let (width, height, stride) = (surface.width(), surface.height(), surface.stride() as usize);
+    let data = surface.data()?.to_vec();
+    Ok((data, width, height, stride))
+}
+
+/// Writes the export as PNG to `path` regardless of the chosen format —
+/// what drag-and-drop out of the window hands over.
+pub fn render_png(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+    path: &Path,
+) -> Result<(), ExportError> {
+    let surface = render_surface(doc, decoded_images, background_image)?;
+    let mut file = File::create(path)?;
+    surface.write_to_png(&mut file)?;
+    Ok(())
+}
+
+fn render_surface(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+) -> Result<cairo::ImageSurface, ExportError> {
+    let surfaces: HashMap<Uuid, cairo::ImageSurface> = decoded_images
+        .iter()
+        .map(|(id, image)| Ok((*id, import::surface_from_decoded(image)?)))
+        .collect::<Result<_, import::ImportError>>()?;
+    let background_surface = background_image.map(import::surface_from_decoded).transpose()?;
+
+    // The canvas's own width/height are the composition's native, content-
+    // fitted size (see `screenforge_core::layout::fit_canvas_to_content`);
+    // scaling to the user-chosen target width — instead of rendering
+    // straight at export_width/export_height — is what lets that target be
+    // freely edited without ever cropping or distorting the content.
+    let scale = doc.canvas.export_target_width as f64 / doc.canvas.export_width.max(1) as f64;
+    let out_width = doc.canvas.export_target_width.max(1);
+    let out_height = ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32;
+
+    let target = cairo::ImageSurface::create(cairo::Format::ARgb32, out_width as i32, out_height as i32)?;
+    // A fresh, one-shot cache: export renders this document exactly once,
+    // so there's nothing to gain from reusing shadow bitmaps across calls
+    // the way the interactive preview does (see `Canvas`'s long-lived
+    // one) — every shadow just misses once and renders at full quality.
+    let shadow_cache = screenforge_core::shadow_cache::ShadowCache::new();
+    let background_cache = screenforge_core::background_cache::BackgroundCache::new();
+    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache, &background_cache)?;
+
+    Ok(target)
 }
 
 /// Unpremultiplies and channel-swaps a rendered ARGB32 surface into an
@@ -138,7 +202,7 @@ mod tests {
     /// screenshots decoded.
     #[test]
     fn every_export_format_writes_a_non_empty_file() {
-        for format in [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::WebP, ExportFormat::Avif] {
+        for format in [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::WebP, ExportFormat::Avif, ExportFormat::Pdf] {
             let mut doc = Document::new();
             doc.canvas.export_width = 32;
             doc.canvas.export_height = 24;

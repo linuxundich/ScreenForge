@@ -15,6 +15,8 @@ use crate::*;
 
 /// Index of `background_type_row`'s "Generiert" entry.
 pub(crate) const BACKGROUND_KIND_GENERATED: u32 = 4;
+/// Index of `background_type_row`'s "Screenshot (unscharf)" entry.
+pub(crate) const BACKGROUND_KIND_BLURRED: u32 = 5;
 /// Index of `background_type_row`'s "Bild" entry.
 pub(crate) const BACKGROUND_KIND_IMAGE: u32 = 3;
 
@@ -147,6 +149,8 @@ pub(crate) fn bind_editor_model(window: &Window, canvas: &Canvas, model: &Editor
     window.layout_mode_toggle().bind_property("active", model, "layout-mode").flags(both).build();
 
     show_when(model, "background-kind", &window.background_color1_row(), |k: u32| k < BACKGROUND_KIND_IMAGE);
+    show_when(model, "background-kind", &window.blurred_blur_row(), |k: u32| k == BACKGROUND_KIND_BLURRED);
+    show_when(model, "background-kind", &window.blurred_brightness_row(), |k: u32| k == BACKGROUND_KIND_BLURRED);
     show_when(model, "background-kind", &window.gradient_color2_row(), |k: u32| k == 1 || k == 2);
     show_when(model, "background-kind", &window.gradient_angle_row(), |k: u32| k == 1);
     show_when(model, "background-kind", &window.gradient_auto_colors_row(), |k: u32| k == 1 || k == 2);

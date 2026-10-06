@@ -191,9 +191,16 @@ fn pick_device() -> Result<AdbDevice, AdbError> {
 /// uses for clipboard pastes, ready to hand straight to `import_paths`
 /// exactly like a file-picked screenshot. Blocking (shells out and waits
 /// for both `adb` calls to exit) — callers run this via `gio::spawn_blocking`.
-pub fn capture_screenshot() -> Result<PathBuf, AdbError> {
+pub fn capture_screenshot(demo_mode: bool) -> Result<PathBuf, AdbError> {
     let device = pick_device()?;
-    let output = run_adb(&["-s", &device.serial, "exec-out", "screencap", "-p"])?;
+    if demo_mode {
+        enter_demo_mode(&device.serial);
+    }
+    let output = run_adb(&["-s", &device.serial, "exec-out", "screencap", "-p"]);
+    if demo_mode {
+        demo_command(&device.serial, &["-e", "command", "exit"]);
+    }
+    let output = output?;
     if !output.status.success() || output.stdout.is_empty() {
         return Err(AdbError::Screencap(String::from_utf8_lossy(&output.stderr).trim().to_string()));
     }
@@ -203,6 +210,28 @@ pub fn capture_screenshot() -> Result<PathBuf, AdbError> {
     let path = dir.join(format!("android-{}.png", uuid::Uuid::new_v4()));
     std::fs::write(&path, &output.stdout)?;
     Ok(path)
+}
+
+/// Android's System UI demo mode: a clean status bar for the screenshot —
+/// 12:00, full battery not charging, full Wi-Fi and mobile signal, no
+/// notification icons. Best effort: a device or ROM that ignores it just
+/// produces an ordinary screenshot.
+fn enter_demo_mode(serial: &str) {
+    let _ = run_adb(&["-s", serial, "shell", "settings", "put", "global", "sysui_demo_allowed", "1"]);
+    demo_command(serial, &["-e", "command", "enter"]);
+    demo_command(serial, &["-e", "command", "clock", "-e", "hhmm", "1200"]);
+    demo_command(serial, &["-e", "command", "battery", "-e", "level", "100", "-e", "plugged", "false"]);
+    demo_command(serial, &["-e", "command", "network", "-e", "wifi", "show", "-e", "level", "4"]);
+    demo_command(serial, &["-e", "command", "network", "-e", "mobile", "show", "-e", "datatype", "none", "-e", "level", "4"]);
+    demo_command(serial, &["-e", "command", "notifications", "-e", "visible", "false"]);
+    // Give System UI a moment to redraw before the capture.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+}
+
+fn demo_command(serial: &str, extras: &[&str]) {
+    let mut args = vec!["-s", serial, "shell", "am", "broadcast", "-a", "com.android.systemui.demo"];
+    args.extend_from_slice(extras);
+    let _ = run_adb(&args);
 }
 
 #[cfg(test)]

@@ -94,6 +94,10 @@ pub(crate) fn register_selection_sync(window: &Window, canvas: &Canvas, state: &
         move || {
             sync_label_controls(&window, &canvas, &state);
             sync_callouts_controls(&window, &canvas, &state);
+            let syncs = state.borrow().selection_syncs.clone();
+            for sync in syncs {
+                sync();
+            }
             if single_selected_label_target(&canvas, &state).is_some() {
                 window.label_content_view().grab_focus();
             }

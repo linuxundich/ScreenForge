@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="de.christophlangner.ScreenForge" path="/de/christophlangner/ScreenForge/">
+    <key name="adb-demo-mode" type="b">
+      <default>true</default>
+      <summary>Clean Android status bar</summary>
+      <description>
+        Switch the device to System UI demo mode (12:00, full battery and
+        signal, no notifications) for each screenshot taken via adb.
+      </description>
+    </key>
     <key name="default-spacing" type="d">
       <default>24.0</default>
       <summary>Default spacing</summary>

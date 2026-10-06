@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::model::{Document, LayoutMode, ScreenshotElement};
+use crate::model::{Document, LayoutMode, ScreenshotElement, Transform};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Placement {
@@ -224,6 +224,52 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
     doc.canvas.content_offset_y = -final_min_y;
     doc.canvas.export_width = (final_max_x - final_min_x).round().max(1.0) as u32;
     doc.canvas.export_height = (final_max_y - final_min_y).round().max(1.0) as u32;
+    apply_aspect(doc);
+}
+
+/// With a fixed `doc.canvas.aspect`, grows the content-fitted canvas in
+/// whichever direction is too short and shifts the content by half the
+/// growth, so it stays centered. Never shrinks, so nothing gets cropped.
+fn apply_aspect(doc: &mut Document) {
+    let Some((aw, ah)) = doc.canvas.aspect else { return };
+    if aw == 0 || ah == 0 {
+        return;
+    }
+    let ratio = aw as f64 / ah as f64;
+    let (w, h) = (doc.canvas.export_width as f64, doc.canvas.export_height as f64);
+    if w / h < ratio {
+        let new_w = (h * ratio).round();
+        doc.canvas.content_offset_x += (new_w - w) / 2.0;
+        doc.canvas.export_width = new_w as u32;
+    } else {
+        let new_h = (w / ratio).round();
+        doc.canvas.content_offset_y += (new_h - h) / 2.0;
+        doc.canvas.export_height = new_h as u32;
+    }
+}
+
+/// For the free layout: the visible screenshots' transforms rearranged
+/// into one row in their current left-to-right order, `spacing` apart,
+/// with their vertical centers on one shared line (the mean of their
+/// current centers). Returns only the transforms that change.
+pub fn balanced_transforms(elements: &[ScreenshotElement], spacing: f64) -> Vec<(Uuid, Transform, Transform)> {
+    let mut visible: Vec<&ScreenshotElement> = elements.iter().filter(|e| e.visible).collect();
+    if visible.len() < 2 {
+        return Vec::new();
+    }
+    visible.sort_by(|a, b| a.transform.x.total_cmp(&b.transform.x));
+    let center_y = visible.iter().map(|e| e.transform.y + e.transform.height / 2.0).sum::<f64>() / visible.len() as f64;
+    let mut cursor = visible[0].transform.x;
+    let mut changes = Vec::new();
+    for element in visible {
+        let old = element.transform;
+        let new = Transform { x: cursor, y: center_y - old.height / 2.0, ..old };
+        cursor += old.width + spacing;
+        if new != old {
+            changes.push((element.id, old, new));
+        }
+    }
+    changes
 }
 
 #[cfg(test)]
@@ -314,6 +360,33 @@ mod tests {
 
         assert_eq!(doc.canvas.export_width, (1080.0 + 48.0 * 2.0) as u32);
         assert_eq!(doc.canvas.export_height, (2424.0 + 48.0 * 2.0) as u32);
+    }
+
+    #[test]
+    fn a_fixed_aspect_grows_the_canvas_and_centers_the_content() {
+        let mut doc = Document::new();
+        doc.elements.push(fixture(100.0, 200.0));
+        doc.canvas.aspect = Some((16, 9));
+        fit_canvas_to_content(&mut doc);
+        let ratio = doc.canvas.export_width as f64 / doc.canvas.export_height as f64;
+        assert!((ratio - 16.0 / 9.0).abs() < 0.01, "ratio {ratio}");
+        assert!(doc.canvas.content_offset_x > 0.0);
+        assert_eq!(doc.canvas.content_offset_y, 0.0);
+    }
+
+    #[test]
+    fn balanced_transforms_line_up_with_equal_gaps_and_a_shared_center() {
+        let mut elements = vec![fixture(100.0, 200.0), fixture(100.0, 100.0), fixture(50.0, 300.0)];
+        elements[0].transform = Transform { x: 0.0, y: 0.0, width: 100.0, height: 200.0, ..Transform::default() };
+        elements[1].transform = Transform { x: 400.0, y: 50.0, width: 100.0, height: 100.0, ..Transform::default() };
+        elements[2].transform = Transform { x: 150.0, y: 300.0, width: 50.0, height: 300.0, ..Transform::default() };
+        let changes = balanced_transforms(&elements, 20.0);
+        let mut all: Vec<Transform> = elements.iter().map(|e| changes.iter().find(|c| c.0 == e.id).map(|c| c.2).unwrap_or(e.transform)).collect();
+        all.sort_by(|a, b| a.x.total_cmp(&b.x));
+        assert_eq!(all[1].x, all[0].x + all[0].width + 20.0);
+        assert_eq!(all[2].x, all[1].x + all[1].width + 20.0);
+        let centers: Vec<f64> = all.iter().map(|t| t.y + t.height / 2.0).collect();
+        assert!(centers.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-9));
     }
 
     #[test]

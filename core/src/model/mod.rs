@@ -652,7 +652,46 @@ pub struct ScreenshotElement {
     /// any existing screenshot.
     #[serde(default)]
     pub callouts: Vec<Callout>,
+    /// Areas hidden on this screenshot (an e-mail address, a token …).
+    /// Coordinates are fractions of the unflipped source image, so a
+    /// redaction stays on its content when the screenshot is flipped or
+    /// resized. Missing in projects saved before v0.28.0.
+    #[serde(default)]
+    pub redactions: Vec<Redaction>,
     pub visible: bool,
+}
+
+/// How a [`Redaction`] hides its area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum RedactionStyle {
+    /// A solid dark bar.
+    #[default]
+    Blackout,
+    /// Coarse pixel blocks.
+    Pixelate,
+    /// A strong blur.
+    Blur,
+}
+
+/// One hidden area on a screenshot; `x`/`y`/`width`/`height` are fractions
+/// (`0.0..=1.0`) of the source image.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Redaction {
+    pub id: Uuid,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub style: RedactionStyle,
+}
+
+impl Redaction {
+    /// A new redaction across the middle of the screenshot, wide and flat
+    /// like a line of text, so it is easy to see and then move.
+    pub fn new(style: RedactionStyle) -> Self {
+        Self { id: Uuid::new_v4(), x: 0.15, y: 0.45, width: 0.7, height: 0.06, style }
+    }
 }
 
 impl ScreenshotElement {
@@ -672,6 +711,7 @@ impl ScreenshotElement {
             // has no per-screenshot width to scale against.
             label: Label::new(),
             callouts: Vec::new(),
+            redactions: Vec::new(),
             visible: true,
         }
     }
@@ -887,6 +927,25 @@ pub enum Background {
     Gradient(GradientSpec),
     Image(ImageBackgroundSpec),
     Generated(GeneratedBackground),
+    /// The first visible screenshot itself, scaled to fill the canvas and
+    /// heavily blurred, like the "glass" backgrounds of Shots or Xnapper.
+    BlurredScreenshot(BlurredScreenshotSpec),
+}
+
+/// Settings for [`Background::BlurredScreenshot`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BlurredScreenshotSpec {
+    /// `0.0..=1.0` — how soft the blur is.
+    pub blur: f64,
+    /// `-1.0..=1.0` — darkens (negative) or lightens (positive) the blurred
+    /// image so the sharp screenshots stand out from it.
+    pub brightness: f64,
+}
+
+impl Default for BlurredScreenshotSpec {
+    fn default() -> Self {
+        Self { blur: 0.6, brightness: -0.15 }
+    }
 }
 
 impl Default for Background {
@@ -947,6 +1006,8 @@ pub enum ExportFormat {
     Jpeg,
     WebP,
     Avif,
+    /// A single-page PDF with the composition as an embedded image.
+    Pdf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -987,6 +1048,16 @@ pub struct CanvasSettings {
     pub export_format: ExportFormat,
     /// `0..=100`, ignored for [`ExportFormat::Png`] (lossless).
     pub export_quality: u8,
+    /// A fixed aspect ratio (width, height) for the canvas — e.g. (16, 9)
+    /// or (1200, 630) for an Open Graph image. The canvas then grows in one
+    /// direction around the content, which stays centered. `None` (and
+    /// projects saved before v0.28.0) fits the canvas to the content.
+    #[serde(default)]
+    pub aspect: Option<(u32, u32)>,
+    /// Leaves the background out of the export, for formats with an alpha
+    /// channel (PNG, WebP, AVIF, PDF).
+    #[serde(default)]
+    pub transparent_background: bool,
 }
 
 fn default_export_target_width() -> u32 {
@@ -1003,6 +1074,8 @@ impl Default for CanvasSettings {
             export_target_width: default_export_target_width(),
             export_format: ExportFormat::Png,
             export_quality: 90,
+            aspect: None,
+            transparent_background: false,
         }
     }
 }
@@ -1027,6 +1100,45 @@ pub struct Document {
     /// each of that project's existing labels is migrated to match.
     #[serde(default)]
     pub label_defaults: LabelStyle,
+    /// A small text mark (e.g. the blog's domain) in a corner of the
+    /// canvas. Missing in projects saved before v0.28.0.
+    #[serde(default)]
+    pub watermark: Watermark,
+}
+
+/// Which canvas corner the [`Watermark`] sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum WatermarkCorner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Watermark {
+    pub enabled: bool,
+    pub text: String,
+    pub corner: WatermarkCorner,
+    /// Text height as a fraction of the canvas's shorter side.
+    pub size: f64,
+    pub color: Rgba,
+    pub opacity: f64,
+}
+
+impl Default for Watermark {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            text: String::new(),
+            corner: WatermarkCorner::BottomRight,
+            size: 0.03,
+            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            opacity: 0.8,
+        }
+    }
 }
 
 impl Document {
@@ -1038,6 +1150,7 @@ impl Document {
             background: Background::default(),
             canvas: CanvasSettings::default(),
             label_defaults: LabelStyle::default(),
+            watermark: Watermark::default(),
         }
     }
 }

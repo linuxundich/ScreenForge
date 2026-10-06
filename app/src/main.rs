@@ -37,12 +37,13 @@ use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddCallout, AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveCallout, RemoveScreenshot,
     RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLabelDefaults,
-    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack,
+    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack, SetRedactions, SetWatermark, SetCanvasFormat, SetTransparentBackground,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GeneratorStyle, GradientKind, Mood,
     GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, Label, LabelStyle, LayoutMode, Rgba, ScreenshotElement, ShadowParams,
-    ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor,
+    ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor, BlurredScreenshotSpec, Redaction, RedactionStyle,
+    Watermark, WatermarkCorner,
 };
 use uuid::Uuid;
 
@@ -62,9 +63,21 @@ fn main() -> glib::ExitCode {
 
     gio::resources_register_include!("screenforge.gresource").expect("failed to register GResource bundle");
 
-    let app = adw::Application::builder().application_id(APP_ID).build();
+    let app = adw::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
     register_about_action(&app);
-    app.connect_activate(build_ui);
+    app.connect_activate(|app| {
+        // A second activation (e.g. via "Öffnen mit" after the window
+        // exists) must not build another window.
+        match app.active_window() {
+            Some(window) => window.present(),
+            None => build_ui(app),
+        }
+    });
+    app.connect_open(|app, files, _| {
+        app.activate();
+        let paths: Vec<String> = files.iter().filter_map(|f| f.path()).map(|p| p.to_string_lossy().into_owned()).collect();
+        app.activate_action("import-files", Some(&paths.to_variant()));
+    });
     app.run()
 }
 
@@ -130,6 +143,13 @@ fn build_ui(app: &adw::Application) {
     register_eyedroppers(&window, &canvas);
     register_variant_controls(&window, &canvas, &state);
     register_shortcuts_action(app);
+    register_output_controls(&window, &canvas, &state);
+    register_redaction_controls(&window, &canvas, &state);
+    register_balance_control(&window, &canvas, &state);
+    register_copy_image_action(app, &window, &state);
+    register_drag_out(&window, &state);
+    register_take_screenshot_action(&window, &canvas, &state);
+    register_import_files_action(app, &window, &canvas, &state);
     let model = state.borrow().model.clone();
     bind_editor_model(&window, &canvas, &model);
     register_text_focus_guards(&window, &model);

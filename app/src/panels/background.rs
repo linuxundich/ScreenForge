@@ -109,6 +109,11 @@ pub(crate) fn sync_background_controls(window: &Window, background: &Background)
             window.background_type_row().set_selected(4);
             sync_generator_controls(window, generated);
         }
+        Background::BlurredScreenshot(spec) => {
+            window.background_type_row().set_selected(5);
+            window.blurred_blur_row().set_value(spec.blur * 100.0);
+            window.blurred_brightness_row().set_value(spec.brightness * 100.0);
+        }
     }
 }
 
@@ -159,6 +164,10 @@ pub(crate) fn background_from_controls(window: &Window) -> Background {
                 stops: vec![(0.0, color1), (1.0, color2)],
             })
         }
+        5 => Background::BlurredScreenshot(BlurredScreenshotSpec {
+            blur: window.blurred_blur_row().value() / 100.0,
+            brightness: window.blurred_brightness_row().value() / 100.0,
+        }),
         _ => Background::Solid(color1),
     }
 }

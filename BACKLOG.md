@@ -33,18 +33,24 @@ mockups: generator prototype with six styles, UI variant "A + B").
 - [x] Variant grid (6) in the background tab, "More…" opens the background
       studio dialog with large previews of the real composition
 
-## Phase 3 — Quick features
+## Phase 3 — Quick features — done in v0.28.0
 
-- [ ] Format presets (16:9, 1:1, OG 1200×630, Mastodon, Play feature 1024×500)
-- [ ] Copy result to clipboard (Ctrl+Shift+C) and drag-out
-- [ ] Clean Android status bar via ADB demo mode (12:00, full battery)
-- [ ] Redact/pixelate regions
-- [ ] Background from a blurred screenshot
-- [ ] Auto-balance (optical centering, equal spacing)
-- [ ] Transparent background on export
-- [ ] Watermark/logo
-- [ ] Desktop screenshot via portal, "Open with" from Nautilus
-- [ ] PDF export
+- [x] Format presets (16:9, 1:1, OG 1200×630, Mastodon, Play feature 1024×500)
+- [x] Copy result to clipboard (Ctrl+Shift+C) and drag-out
+- [x] Clean Android status bar via ADB demo mode (12:00, full battery)
+- [x] Redact/pixelate regions
+- [x] Background from a blurred screenshot
+- [x] Auto-balance (optical centering, equal spacing)
+- [x] Transparent background on export
+- [x] Watermark/logo
+- [x] Desktop screenshot via portal, "Open with" from Nautilus
+- [x] PDF export
+
+Follow-ups from phase 3:
+
+- [ ] Redactions: draw and move them directly on the canvas, not only via
+      percent values in the sidebar
+- [ ] Watermark: optional logo image besides the text
 
 ## Phase 4 — Translation and packaging
 

@@ -282,6 +282,13 @@
                                     </child>
                                   </object>
                                 </child>
+                                <child>
+                                  <object class="AdwButtonRow" id="balance_row">
+                                    <property name="title" translatable="yes">Gleichmäßig verteilen</property>
+                                    <property name="start-icon-name">sf-layout-horizontal-symbolic</property>
+                                    <property name="tooltip-text" translatable="yes">Alle Screenshots in eine Reihe mit gleichen Abständen, mittig auf einer Linie</property>
+                                  </object>
+                                </child>
                               </object>
                             </child>
                       </object>
@@ -309,6 +316,7 @@
                                           <item translatable="yes">Radialer Verlauf</item>
                                           <item translatable="yes">Bild</item>
                                           <item translatable="yes">Generiert</item>
+                                  <item translatable="yes">Screenshot (unscharf)</item>
                                         </items>
                                       </object>
                                     </property>
@@ -427,6 +435,40 @@
                                         <property name="step-increment">5</property>
                                         <property name="page-increment">20</property>
                                         <property name="value">100</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="blurred_blur_row">
+                                    <property name="title" translatable="yes">Unschärfe</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — erster sichtbarer Screenshot als Hintergrund</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">60</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="blurred_brightness_row">
+                                    <property name="title" translatable="yes">Helligkeit</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — negativ abdunkeln, positiv aufhellen</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">-100</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">-15</property>
                                       </object>
                                     </property>
                                   </object>
@@ -989,6 +1031,7 @@
                                           <item>JPEG</item>
                                           <item>WebP</item>
                                           <item>AVIF</item>
+                                  <item>PDF</item>
                                         </items>
                                       </object>
                                     </property>
@@ -1105,6 +1148,22 @@
                           <object class="GtkSeparator"/>
                         </child>
                         <child>
+                          <object class="GtkButton" id="drag_out_button">
+                            <property name="icon-name">document-send-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Bild herausziehen — in den Browser, Dateimanager oder Chat ziehen</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton">
+                            <property name="icon-name">edit-copy-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Bild in die Zwischenablage kopieren (Strg+Umschalt+C)</property>
+                            <property name="action-name">win.copy-image</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkSeparator"/>
+                        </child>
+                        <child>
                           <object class="GtkToggleButton" id="hide_screenshots_button">
                             <property name="icon-name">view-conceal-symbolic</property>
                             <property name="tooltip-text" translatable="yes">Screenshots vorübergehend ausblenden, um den Hintergrund zu beurteilen</property>
@@ -1130,6 +1189,10 @@
       <item>
         <attribute name="label" translatable="yes">Aus Zwischenablage einfügen</attribute>
         <attribute name="action">win.paste</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Bildschirmfoto aufnehmen …</attribute>
+        <attribute name="action">win.take-screenshot</attribute>
       </item>
     </section>
     <section>

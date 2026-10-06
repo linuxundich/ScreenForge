@@ -12,9 +12,11 @@ PNG, JPEG or WebP image.
 ## Features
 
 - **Import** via file dialog (`Ctrl+O`), drag-and-drop, pasting from the
-  clipboard (`Ctrl+V`), or directly from a connected Android device over
-  `adb` (the toolbar button shows live whether a device is actually
-  reachable, with a tooltip explaining why not otherwise).
+  clipboard (`Ctrl+V`), "Open with" from the file manager, a desktop
+  screenshot through the screenshot portal, or directly from a connected
+  Android device over `adb` — with a clean status bar (12:00, full
+  battery and signal) thanks to Android's demo mode. The toolbar button
+  shows live whether a device is reachable.
 - **Layout modes**: horizontal, vertical, or grid (each scaling
   screenshots to a common size automatically, with adjustable spacing
   and separate horizontal/vertical outer margins), or free — drag any
@@ -48,15 +50,23 @@ PNG, JPEG or WebP image.
 - **Variants**: six alternative backgrounds one click away in the
   sidebar, or nine large previews of the real composition in the
   background studio — per style or mixed, in any mood.
+- **Formats**: fit to content or fixed presets (16:9, 1:1, 4:5, 9:16,
+  Open Graph 1200 × 630, Mastodon/Bluesky, Play Store feature graphic),
+  the content always centered and never cropped.
+- **Redactions**: hide parts of a screenshot as a dark bar, pixel blocks
+  or a blur.
+- **Watermark**: a text mark in any corner, with size, opacity and color.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
 - **Workspace**: a tabbed sidebar (Layout, Background, Style, Text,
   Export) that turns into an overlay on narrow windows, a floating zoom
   bar (fit, 100 %, step in/out), and a shortcuts overview (Ctrl+?).
 - **Undo/redo** for every edit.
-- **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target
-  width (height always following proportionally), rendered off the UI
-  thread so the app never blocks.
+- **Export** to PNG, JPEG, WebP, AVIF or PDF, scaled to a freely chosen
+  target width (height always following proportionally), optionally with
+  a transparent background, rendered off the UI thread so the app never
+  blocks. Or copy the result straight to the clipboard (`Ctrl+Shift+C`),
+  or drag it out of the window into a browser or chat.
 - **Projects**: save/load as self-contained `.screenforge` files (a zip
   archive bundling a versioned JSON manifest with every screenshot's and
   background's own original image bytes, so a saved project keeps

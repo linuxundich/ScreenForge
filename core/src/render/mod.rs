@@ -14,8 +14,9 @@ use uuid::Uuid;
 use crate::background_cache::BackgroundCache;
 use crate::layout::{compute_layout, Placement};
 use crate::model::{
-    Background, BackgroundImageFit, Callout, CornerRadius, Document, GeneratedBackground, GradientKind, ScreenshotElement,
-    ShadowParams, TextAlign, TextBackground, TextElement,
+    Background, BackgroundImageFit, BlurredScreenshotSpec, Callout, CornerRadius, Document, GeneratedBackground, GradientKind,
+    Redaction, RedactionStyle, ScreenshotElement, ShadowParams, TextAlign, TextBackground, TextElement, Watermark,
+    WatermarkCorner,
 };
 use crate::shadow_cache::{ShadowCache, MAX_SHADOW_SURFACE_DIM};
 
@@ -64,18 +65,158 @@ pub fn compose(
         .map(|p| crate::generator::ScreenshotRegion { x: p.x, y: p.y, width: p.width, height: p.height })
         .collect();
 
-    draw_background(
-        &ctx,
-        &doc.background,
-        doc.canvas.export_width as f64,
-        doc.canvas.export_height as f64,
-        background_image,
-        &screenshot_regions,
-        scale,
-        background_cache,
-    )?;
+    let (width, height) = (doc.canvas.export_width as f64, doc.canvas.export_height as f64);
+    if !doc.canvas.transparent_background {
+        // `BlurredScreenshot` uses the first visible screenshot itself.
+        let first_screenshot = visible.first().and_then(|el| resolved_images.get(&el.id));
+        let background_image = if matches!(doc.background, Background::BlurredScreenshot(_)) { first_screenshot } else { background_image };
+        draw_background(&ctx, &doc.background, width, height, background_image, &screenshot_regions, scale, background_cache)?;
+    }
 
-    draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)
+    draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)?;
+    draw_watermark(&ctx, &doc.watermark, width, height)
+}
+
+/// Draws `watermark` into its corner of the `width`×`height` canvas, with
+/// a soft dark halo so light text stays legible on light backgrounds.
+fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64) -> Result<(), RenderError> {
+    if !watermark.enabled || watermark.text.trim().is_empty() {
+        return Ok(());
+    }
+    let unit = width.min(height);
+    let font_px = (unit * watermark.size.clamp(0.005, 0.2)).max(1.0);
+    let margin = unit * 0.03;
+    let layout = pangocairo::functions::create_layout(ctx);
+    let mut font = pango::FontDescription::from_string("Sans Bold");
+    font.set_absolute_size(font_px * pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_text(watermark.text.trim());
+    let (_, logical) = layout.pixel_extents();
+    let (text_w, text_h) = (logical.width() as f64, logical.height() as f64);
+    let x = match watermark.corner {
+        WatermarkCorner::TopLeft | WatermarkCorner::BottomLeft => margin,
+        WatermarkCorner::TopRight | WatermarkCorner::BottomRight => width - margin - text_w,
+    };
+    let y = match watermark.corner {
+        WatermarkCorner::TopLeft | WatermarkCorner::TopRight => margin,
+        WatermarkCorner::BottomLeft | WatermarkCorner::BottomRight => height - margin - text_h,
+    };
+    let alpha = watermark.opacity.clamp(0.0, 1.0);
+    ctx.save()?;
+    ctx.set_source_rgba(0.0, 0.0, 0.0, 0.25 * alpha);
+    for (dx, dy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+        let d = (font_px * 0.05).max(0.5);
+        ctx.move_to(x + dx * d, y + dy * d);
+        pangocairo::functions::show_layout(ctx, &layout);
+    }
+    let c = watermark.color;
+    ctx.set_source_rgba(c.r, c.g, c.b, c.a * alpha);
+    ctx.move_to(x, y);
+    pangocairo::functions::show_layout(ctx, &layout);
+    ctx.restore()?;
+    Ok(())
+}
+
+/// `Background::BlurredScreenshot`: `image` scaled to cover the canvas,
+/// drawn small, blurred there, stretched back up (which smooths it
+/// further), then darkened or lightened.
+fn draw_blurred_screenshot(ctx: &Context, image: &cairo::ImageSurface, spec: &BlurredScreenshotSpec, width: f64, height: f64) -> Result<(), RenderError> {
+    let (img_w, img_h) = (image.width() as f64, image.height() as f64);
+    if img_w <= 0.0 || img_h <= 0.0 {
+        return Ok(());
+    }
+    let blur = spec.blur.clamp(0.0, 1.0);
+    let small_w = ((width / (12.0 + 40.0 * blur)).round().max(4.0)) as i32;
+    let small_h = ((small_w as f64 * height / width).round().max(4.0)) as i32;
+    let mut small = cairo::ImageSurface::create(cairo::Format::ARgb32, small_w, small_h)?;
+    {
+        let sctx = Context::new(&small)?;
+        let s = (small_w as f64 / img_w).max(small_h as f64 / img_h);
+        sctx.translate((small_w as f64 - img_w * s) / 2.0, (small_h as f64 - img_h * s) / 2.0);
+        sctx.scale(s, s);
+        sctx.set_source_surface(image, 0.0, 0.0)?;
+        sctx.source().set_filter(cairo::Filter::Good);
+        sctx.source().set_extend(cairo::Extend::Pad);
+        sctx.paint()?;
+    }
+    let stride = small.stride();
+    {
+        let mut data = small.data()?;
+        crate::blur::box_blur(&mut data, small_w, small_h, stride, 1.5 + 4.0 * blur);
+    }
+    ctx.save()?;
+    ctx.rectangle(0.0, 0.0, width, height);
+    ctx.clip();
+    ctx.scale(width / small_w as f64, height / small_h as f64);
+    ctx.set_source_surface(&small, 0.0, 0.0)?;
+    ctx.source().set_filter(cairo::Filter::Good);
+    // Pad, so the edges don't fade into transparency when stretched.
+    ctx.source().set_extend(cairo::Extend::Pad);
+    ctx.paint()?;
+    ctx.restore()?;
+    let b = spec.brightness.clamp(-1.0, 1.0);
+    if b != 0.0 {
+        let shade = if b < 0.0 { 0.0 } else { 1.0 };
+        ctx.set_source_rgba(shade, shade, shade, b.abs() * 0.7);
+        ctx.rectangle(0.0, 0.0, width, height);
+        ctx.fill()?;
+    }
+    Ok(())
+}
+
+/// Hides each of `redactions` on `image`. Called with the context already
+/// in the source image's own pixel space (after the element's flips), so
+/// the fractions map straight onto image pixels.
+fn draw_redactions(ctx: &Context, image: &cairo::ImageSurface, redactions: &[Redaction]) -> Result<(), RenderError> {
+    let (img_w, img_h) = (image.width() as f64, image.height() as f64);
+    for r in redactions {
+        let (x, y) = (r.x.clamp(0.0, 1.0) * img_w, r.y.clamp(0.0, 1.0) * img_h);
+        let w = (r.width.clamp(0.0, 1.0) * img_w).min(img_w - x);
+        let h = (r.height.clamp(0.0, 1.0) * img_h).min(img_h - y);
+        if w < 1.0 || h < 1.0 {
+            continue;
+        }
+        ctx.save()?;
+        ctx.rectangle(x, y, w, h);
+        ctx.clip();
+        match r.style {
+            RedactionStyle::Blackout => {
+                ctx.set_source_rgb(0.12, 0.12, 0.13);
+                ctx.paint()?;
+            }
+            RedactionStyle::Pixelate | RedactionStyle::Blur => {
+                // Pixel blocks of about 1/40 of the screenshot's width;
+                // blur goes further down and smooths on the way back up.
+                let block = if r.style == RedactionStyle::Pixelate { (img_w / 40.0).max(4.0) } else { (img_w / 25.0).max(6.0) };
+                let small_w = (w / block).ceil().max(1.0) as i32;
+                let small_h = (h / block).ceil().max(1.0) as i32;
+                let mut small = cairo::ImageSurface::create(cairo::Format::ARgb32, small_w, small_h)?;
+                {
+                    let sctx = Context::new(&small)?;
+                    sctx.scale(small_w as f64 / w, small_h as f64 / h);
+                    sctx.set_source_surface(image, -x, -y)?;
+                    sctx.source().set_filter(cairo::Filter::Good);
+                    sctx.paint()?;
+                }
+                let filter = if r.style == RedactionStyle::Pixelate {
+                    cairo::Filter::Nearest
+                } else {
+                    let stride = small.stride();
+                    let mut data = small.data()?;
+                    crate::blur::box_blur(&mut data, small_w, small_h, stride, 1.5);
+                    cairo::Filter::Good
+                };
+                ctx.translate(x, y);
+                ctx.scale(w / small_w as f64, h / small_h as f64);
+                ctx.set_source_surface(&small, 0.0, 0.0)?;
+                ctx.source().set_filter(filter);
+                ctx.source().set_extend(cairo::Extend::Pad);
+                ctx.paint()?;
+            }
+        }
+        ctx.restore()?;
+    }
+    Ok(())
 }
 
 /// Renders every visible element (screenshots, their shadows, labels, and
@@ -161,6 +302,7 @@ fn draw_elements(
         ctx.scale(sx, sy);
         ctx.set_source_surface(image, 0.0, 0.0)?;
         ctx.paint()?;
+        draw_redactions(ctx, image, &el.redactions)?;
         ctx.restore()?;
 
         ctx.reset_clip();
@@ -591,6 +733,11 @@ fn draw_background(
                 ctx.restore()?;
             }
         }
+        Background::BlurredScreenshot(spec) => {
+            if let Some(image) = background_image {
+                draw_blurred_screenshot(ctx, image, spec, width, height)?;
+            }
+        }
         Background::Generated(generated) => {
             let surface = generated_background_bitmap(generated, width, height, scale, screenshot_regions, background_cache)?;
             ctx.save()?;
@@ -763,6 +910,95 @@ mod tests {
         assert!((actual.1 - expected.1).abs() < tol, "g: {actual:?} vs {expected:?}");
         assert!((actual.2 - expected.2).abs() < tol, "b: {actual:?} vs {expected:?}");
         assert!((actual.3 - expected.3).abs() < tol, "a: {actual:?} vs {expected:?}");
+    }
+
+    /// One 100×200 screenshot (left half white, right half red) in the
+    /// default horizontal layout, canvas fitted to it.
+    fn one_screenshot_doc() -> (Document, HashMap<Uuid, ImageSurface>) {
+        let mut doc = Document::new();
+        doc.layout = LayoutSettings { margin_x: 20.0, margin_y: 20.0, ..LayoutSettings::default() };
+        let el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("x.png")), 100.0, 200.0);
+        let image = solid_surface(100, 200, Rgba::new(1.0, 1.0, 1.0, 1.0));
+        {
+            let ctx = Context::new(&image).unwrap();
+            ctx.set_source_rgb(1.0, 0.0, 0.0);
+            ctx.rectangle(50.0, 0.0, 50.0, 200.0);
+            ctx.fill().unwrap();
+        }
+        let mut images = HashMap::new();
+        images.insert(el.id, image);
+        doc.elements.push(el);
+        doc.background = Background::Solid(Rgba::new(0.0, 0.0, 1.0, 1.0));
+        crate::layout::fit_canvas_to_content(&mut doc);
+        (doc, images)
+    }
+
+    fn render(doc: &Document, images: &HashMap<Uuid, ImageSurface>) -> ImageSurface {
+        let target = ImageSurface::create(Format::ARgb32, doc.canvas.export_width as i32, doc.canvas.export_height as i32).unwrap();
+        compose(doc, &target, 1.0, images, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
+        target
+    }
+
+    #[test]
+    fn a_blackout_redaction_covers_its_area_only() {
+        let (mut doc, images) = one_screenshot_doc();
+        doc.elements[0].shadow.enabled = false;
+        doc.elements[0].redactions.push(Redaction { x: 0.0, y: 0.0, width: 0.5, height: 0.25, ..Redaction::new(RedactionStyle::Blackout) });
+        let mut out = render(&doc, &images);
+        let (r, g, b, _) = read_pixel(&mut out, 20 + 10, 20 + 10);
+        assert!(r < 0.2 && g < 0.2 && b < 0.2, "redacted area not dark: {r} {g} {b}");
+        assert_close(read_pixel(&mut out, 20 + 10, 20 + 150), (1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn pixelate_and_blur_redactions_mix_the_colors_they_cover() {
+        for style in [RedactionStyle::Pixelate, RedactionStyle::Blur] {
+            let (mut doc, images) = one_screenshot_doc();
+            doc.elements[0].shadow.enabled = false;
+            doc.elements[0].redactions.push(Redaction { x: 0.0, y: 0.0, width: 1.0, height: 0.5, ..Redaction::new(style) });
+            let mut out = render(&doc, &images);
+            // Right at the white/red edge the blocks average both colors.
+            let (r, g, _, _) = read_pixel(&mut out, 20 + 50, 20 + 40);
+            assert!(r > 0.9 && g > 0.05 && g < 0.95, "{style:?} at the edge: r {r} g {g}");
+        }
+    }
+
+    #[test]
+    fn transparent_background_leaves_the_margins_clear() {
+        let (mut doc, images) = one_screenshot_doc();
+        doc.canvas.transparent_background = true;
+        let mut out = render(&doc, &images);
+        assert_eq!(read_pixel(&mut out, 2, 2).3, 0.0);
+    }
+
+    #[test]
+    fn blurred_screenshot_background_takes_its_colors_from_the_screenshot() {
+        let (mut doc, images) = one_screenshot_doc();
+        doc.background = Background::BlurredScreenshot(BlurredScreenshotSpec { blur: 0.5, brightness: 0.0 });
+        let mut out = render(&doc, &images);
+        let (r, _, b, a) = read_pixel(&mut out, 2, 2);
+        assert!(a > 0.99 && r > 0.5 && b < 0.9, "margin should be a blurred white/red, not the old blue: r {r} b {b}");
+    }
+
+    #[test]
+    fn a_watermark_draws_into_its_corner() {
+        let (mut doc, images) = one_screenshot_doc();
+        doc.canvas.aspect = Some((2, 1));
+        crate::layout::fit_canvas_to_content(&mut doc);
+        let plain = render(&doc, &images);
+        doc.watermark = Watermark { enabled: true, text: "linuxundich.de".into(), size: 0.08, ..Watermark::default() };
+        let marked = render(&doc, &images);
+        let (w, h) = (doc.canvas.export_width as i32, doc.canvas.export_height as i32);
+        let mut differs = false;
+        let (mut a, mut b) = (plain, marked);
+        for y in h * 3 / 4..h {
+            for x in w * 3 / 4..w {
+                if read_pixel(&mut a, x, y) != read_pixel(&mut b, x, y) {
+                    differs = true;
+                }
+            }
+        }
+        assert!(differs, "watermark left the bottom-right corner unchanged");
     }
 
     #[test]

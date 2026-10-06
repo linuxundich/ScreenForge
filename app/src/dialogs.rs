@@ -37,10 +37,20 @@ pub(crate) fn build_general_page() -> adw::PreferencesPage {
     group.add(&margin_y_row);
     group.add(&quality_row);
 
+    let demo_row = adw::SwitchRow::builder()
+        .title("Saubere Statusleiste")
+        .subtitle("Beim Android-Import 12:00 Uhr, voller Akku, volles Netz, keine Benachrichtigungen (Demo-Modus)")
+        .build();
+    settings.bind("adb-demo-mode", &demo_row, "active").build();
+    let android_group = adw::PreferencesGroup::new();
+    android_group.set_title("Android");
+    android_group.add(&demo_row);
+
     let page = adw::PreferencesPage::new();
     page.set_title("Allgemein");
     page.set_icon_name(Some("preferences-system-symbolic"));
     page.add(&group);
+    page.add(&android_group);
 
     let (look_group, position_group, styling_group) = build_global_label_defaults_groups();
     page.add(&look_group);
@@ -95,6 +105,14 @@ pub(crate) const RELEASE_NOTES: &str = "\
 <li>Neue Oberfläche: Seitenleiste mit Reitern, aufgeräumte Kopfleiste, schwebende Zoom-Leiste</li>
 <li>Varianten für generierte Hintergründe, dazu das Hintergrund-Studio mit großen Vorschauen</li>
 <li>Startseite statt leerer Arbeitsfläche, Tastenkürzel-Übersicht (Strg+?)</li>
+</ul>
+<p>Version 0.28.0</p>
+<ul>
+<li>Formatvorgaben (16:9, 1:1, Open Graph, Mastodon, Play Store …), transparenter Hintergrund, Wasserzeichen, PDF-Export</li>
+<li>Bild in die Zwischenablage kopieren (Strg+Umschalt+C) oder aus dem Fenster herausziehen</li>
+<li>Bereiche schwärzen, verpixeln oder weichzeichnen</li>
+<li>Unscharfer Screenshot als Hintergrund, „Gleichmäßig verteilen“ im freien Layout</li>
+<li>Saubere Android-Statusleiste beim Import, Bildschirmfoto über das Portal, „Öffnen mit“ aus dem Dateimanager</li>
 </ul>
 <p>Version 0.26.0</p>
 <ul>

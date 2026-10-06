@@ -254,3 +254,32 @@ pub(crate) fn register_alignment_controls(window: &Window, canvas: &Canvas, stat
         ));
     }
 }
+
+/// "Gleichmäßig verteilen" (free layout): one row, equal gaps, centers on
+/// one line — see `screenforge_core::layout::balanced_transforms`.
+pub(crate) fn register_balance_control(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
+    window.balance_row().connect_activated(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        move |_| {
+            let transforms = {
+                let state_ref = state.borrow();
+                screenforge_core::layout::balanced_transforms(&state_ref.document.elements, state_ref.document.layout.spacing_px)
+            };
+            if transforms.is_empty() {
+                return;
+            }
+            {
+                let mut state_ref = state.borrow_mut();
+                let EditorState { document, undo_stack, .. } = &mut *state_ref;
+                undo_stack.apply(Box::new(SetTransforms { transforms }), document);
+            }
+            refresh_canvas(&window, &canvas, &state);
+            update_undo_redo_sensitivity(&window, &state);
+        }
+    ));
+}
