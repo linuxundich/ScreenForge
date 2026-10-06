@@ -12,11 +12,13 @@
     <ul>
       <li>Horizontal, vertical, grid or free layouts, with shadows and rounded corners</li>
       <li>Generated abstract backgrounds in six styles, with variants to choose from</li>
+      <li>Generic phone, tablet and browser frames, and a 3D tilt</li>
       <li>Labels and callouts with arrows that point at details</li>
       <li>Redact sensitive areas with a black bar, pixels or blur</li>
       <li>Format presets for 16:9, square, Open Graph, Mastodon and app stores</li>
       <li>Import from files, the clipboard, a desktop screenshot or an Android device over adb, with a clean status bar</li>
-      <li>Export to PNG, JPEG, WebP, AVIF or PDF, or copy the result to the clipboard</li>
+      <li>Export to PNG, JPEG, WebP, AVIF, PDF or as an animated WebM, or copy the result to the clipboard</li>
+      <li>Panoramas split across several app store images</li>
     </ul>
     <p>ScreenForge works entirely offline. Nothing is uploaded anywhere.</p>
   </description>
@@ -59,6 +61,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.30.0" date="2026-10-06">
+      <description translate="no">
+        <p>Device frames, perspective tilt, panoramas split across several app store images, animated WebM export, a command line, and previews in the presets list.</p>
+      </description>
+    </release>
     <release version="0.29.0" date="2026-10-06">
       <description translate="no">
         <p>English user interface with a complete German translation, installable with meson and as a Flatpak.</p>

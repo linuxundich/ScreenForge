@@ -1,4 +1,5 @@
 mod adb;
+mod cli;
 mod canvas;
 mod export;
 mod import;
@@ -12,6 +13,7 @@ mod panels;
 mod presets;
 mod project;
 mod sources;
+mod video;
 mod state;
 
 use dialogs::*;
@@ -40,13 +42,13 @@ use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddCallout, AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveCallout, RemoveScreenshot,
     RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLabelDefaults,
-    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack, SetRedactions, SetWatermark, SetCanvasFormat, SetTransparentBackground,
+    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack, SetRedactions, SetWatermark, SetCanvasFormat, SetTransparentBackground, SetFrameForAllElements, SetTilts,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GeneratorStyle, GradientKind, Mood,
     GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, Label, LabelStyle, LayoutMode, Rgba, ScreenshotElement, ShadowParams,
     ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor, BlurredScreenshotSpec, Redaction, RedactionStyle,
-    Watermark, WatermarkCorner,
+    Watermark, WatermarkCorner, DeviceFrame, DeviceKind, FrameTone,
 };
 use uuid::Uuid;
 
@@ -69,6 +71,11 @@ fn main() -> glib::ExitCode {
     }
 
     gio::resources_register_include!("screenforge.gresource").expect("failed to register GResource bundle");
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if cli::wants_cli(&args) {
+        return cli::run(&args);
+    }
 
     let app = adw::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
     register_about_action(&app);
@@ -151,6 +158,7 @@ fn build_ui(app: &adw::Application) {
     register_variant_controls(&window, &canvas, &state);
     register_shortcuts_action(app);
     register_output_controls(&window, &canvas, &state);
+    register_device_controls(&window, &canvas, &state);
     register_redaction_controls(&window, &canvas, &state);
     register_balance_control(&window, &canvas, &state);
     register_copy_image_action(app, &window, &state);

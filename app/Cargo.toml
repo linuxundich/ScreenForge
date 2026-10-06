@@ -12,6 +12,9 @@ cairo-rs = { version = "0.22.9", features = ["png", "pdf"] }
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
 gio = "0.22.9"
 glib = "0.22.9"
+gstreamer = "0.25.4"
+gstreamer-app = "0.25.2"
+gstreamer-video = "0.25.4"
 gtk4 = { version = "0.11.4", features = ["v4_22"] }
 image = { version = "0.25.10", features = ["avif"] }
 libadwaita = { version = "0.9.2", features = ["v1_9"] }

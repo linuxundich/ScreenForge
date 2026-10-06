@@ -100,6 +100,13 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
+<p>Version 0.30.0</p>
+<ul>
+<li>Phone, tablet and browser frames, perspective tilt and fan-out</li>
+<li>Panoramas split across several app store images, App Store size presets</li>
+<li>Animated WebM export and a command line for rendering with presets</li>
+<li>Preview images in the presets list</li>
+</ul>
 <p>Version 0.29.0</p>
 <ul>
 <li>English user interface with a complete German translation, following the system language</li>

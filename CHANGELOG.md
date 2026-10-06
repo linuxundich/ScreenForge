@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-06
+
+### Added
+
+- Device frames: a generic phone (punch-hole camera), tablet or browser
+  window drawn around every screenshot, dark or light. Vector-drawn, so
+  there are no manufacturer images to maintain; the layout reserves the
+  frame's size, so screenshots keep their exact proportions.
+- Perspective tilt: turn the screenshots around their vertical axis and
+  lean them around the horizontal one, or fan them out so the outer
+  screenshots turn toward the middle. A real perspective warp with a
+  shadow cast from the tilted shape.
+- Panoramas for app stores: "Split Into" exports the composition as
+  several images side by side (`name-1.png`, `name-2.png` …, or one PDF
+  page each) with one continuous background; dashed guides on the canvas
+  show the cuts. New format presets for the App Store (iPhone 6.9″,
+  iPad 13″) set the size of each image.
+- Animated WebM export: the screenshots fly in one after another over
+  the background (VP9 via GStreamer, about three seconds).
+- Command line: `screenforge --preset NAME [--output FILE] [--width N]
+  IMAGE…` renders images with a saved preset without opening a window;
+  `--list-presets` lists them.
+- The presets list shows a preview of each preset's look.
+
+### Changed
+
+- Presets also save the device frame and the watermark.
+- Newly added screenshots take the shadow, corner radius, frame and tilt
+  of the existing ones, matching what the style controls show.
+
 ## [0.29.0] - 2026-10-06
 
 ### Added

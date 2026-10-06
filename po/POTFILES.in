@@ -3,11 +3,13 @@ app/data/de.christophlangner.ScreenForge.desktop.in
 app/data/de.christophlangner.ScreenForge.metainfo.xml.in
 app/resources/ui/window.ui
 app/src/adb.rs
+app/src/cli.rs
 app/src/dialogs.rs
 app/src/editing.rs
 app/src/editor_model.rs
 app/src/panels/background.rs
 app/src/panels/callouts.rs
+app/src/panels/device.rs
 app/src/panels/export.rs
 app/src/panels/layout.rs
 app/src/panels/output.rs

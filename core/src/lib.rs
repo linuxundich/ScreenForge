@@ -5,6 +5,7 @@
 pub mod background_cache;
 pub mod blur;
 pub mod command;
+pub mod frame;
 pub mod generator;
 pub mod layout;
 pub mod model;
@@ -15,4 +16,5 @@ pub mod rng;
 pub mod shadow_cache;
 pub mod snap;
 mod styles;
+pub mod warp;
 pub mod template;

@@ -13,7 +13,7 @@ struct FormatPreset {
     width: u32,
 }
 
-const FORMAT_PRESETS: [FormatPreset; 8] = [
+const FORMAT_PRESETS: [FormatPreset; 10] = [
     FormatPreset { label: N_("Fit to Content"), aspect: None, width: 0 },
     FormatPreset { label: "16:9 · 1920 × 1080", aspect: Some((16, 9)), width: 1920 },
     FormatPreset { label: "1:1 · 1080 × 1080", aspect: Some((1, 1)), width: 1080 },
@@ -22,6 +22,8 @@ const FORMAT_PRESETS: [FormatPreset; 8] = [
     FormatPreset { label: N_("Open Graph · 1200 × 630"), aspect: Some((1200, 630)), width: 1200 },
     FormatPreset { label: N_("Mastodon/Bluesky · 1600 × 900"), aspect: Some((16, 9)), width: 1600 },
     FormatPreset { label: N_("Play Store Graphic · 1024 × 500"), aspect: Some((1024, 500)), width: 1024 },
+    FormatPreset { label: N_("App Store iPhone 6.9″ · 1320 × 2868"), aspect: Some((1320, 2868)), width: 1320 },
+    FormatPreset { label: N_("App Store iPad 13″ · 2064 × 2752"), aspect: Some((2064, 2752)), width: 2064 },
 ];
 
 fn format_index_for(canvas: &screenforge_core::model::CanvasSettings) -> u32 {
@@ -29,7 +31,7 @@ fn format_index_for(canvas: &screenforge_core::model::CanvasSettings) -> u32 {
         None => 0,
         Some(aspect) => FORMAT_PRESETS
             .iter()
-            .position(|p| p.aspect == Some(aspect) && p.width == canvas.export_target_width)
+            .position(|p| p.aspect == Some(aspect) && p.width * canvas.slices.max(1) == canvas.export_target_width)
             .or_else(|| FORMAT_PRESETS.iter().position(|p| p.aspect == Some(aspect)))
             .unwrap_or(0) as u32,
     }
@@ -64,21 +66,33 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
         .subtitle(gettext("Fixed aspect ratios grow the canvas around the content"))
         .model(&gtk4::StringList::new(&FORMAT_PRESETS.iter().map(|p| gettext(p.label)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>()))
         .build();
+    let slices_row = adw::SpinRow::with_range(1.0, 10.0, 1.0);
+    slices_row.set_title(&gettext("Split Into"));
+    slices_row.set_subtitle(&gettext("Several images side by side with one continuous background, e.g. for app store screenshots"));
     let format_group = adw::PreferencesGroup::builder().title(gettext("Format")).build();
     format_group.add(&format_row);
-    format_row.connect_selected_notify(glib::clone!(
+    format_group.add(&slices_row);
+    let apply_format = Rc::new(glib::clone!(
         #[weak]
         window,
         #[weak]
         canvas,
         #[strong]
         state,
-        move |row| {
-            let Some(preset) = FORMAT_PRESETS.get(row.selected() as usize) else { return };
+        #[weak]
+        format_row,
+        #[weak]
+        slices_row,
+        move || {
+            let Some(preset) = FORMAT_PRESETS.get(format_row.selected() as usize) else { return };
             let current = state.borrow().document.canvas;
-            let old = (current.aspect, current.export_target_width);
-            let width = if preset.aspect.is_none() { current.export_target_width } else { preset.width };
-            let new = (preset.aspect, width);
+            let slices = slices_row.value().round().max(1.0) as u32;
+            let old = (current.aspect, current.export_target_width, current.slices);
+            // A preset's width is per image; with several images the export
+            // is that many times as wide. Without a fixed format the
+            // current width stays.
+            let width = if preset.aspect.is_none() { current.export_target_width } else { preset.width * slices };
+            let new = (preset.aspect, width, slices);
             if old == new {
                 return;
             }
@@ -89,6 +103,8 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
             state.borrow_mut().syncing_controls = was;
         }
     ));
+    format_row.connect_selected_notify(glib::clone!(#[strong] apply_format, move |_| apply_format()));
+    slices_row.connect_value_notify(glib::clone!(#[strong] apply_format, move |_| apply_format()));
 
     // Transparent background, part of the template's export group.
     let transparent_row = adw::SwitchRow::builder()
@@ -182,6 +198,7 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
     // Reflect the document onto these rows after undo/redo/load.
     let sync: Rc<dyn Fn(&Document)> = Rc::new(move |doc: &Document| {
         format_row.set_selected(format_index_for(&doc.canvas));
+        slices_row.set_value(doc.canvas.slices.max(1) as f64);
         transparent_row.set_active(doc.canvas.transparent_background);
         let wm = &doc.watermark;
         wm_enabled.set_active(wm.enabled);

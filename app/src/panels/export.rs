@@ -6,7 +6,8 @@ pub(crate) fn export_format_for_index(index: u32) -> ExportFormat {
         1 => ExportFormat::Jpeg,
         2 => ExportFormat::WebP,
         3 => ExportFormat::Avif,
-        _ => ExportFormat::Pdf,
+        4 => ExportFormat::Pdf,
+        _ => ExportFormat::WebM,
     }
 }
 
@@ -17,6 +18,7 @@ pub(crate) fn index_for_export_format(format: ExportFormat) -> u32 {
         ExportFormat::WebP => 2,
         ExportFormat::Avif => 3,
         ExportFormat::Pdf => 4,
+        ExportFormat::WebM => 5,
     }
 }
 
@@ -82,7 +84,7 @@ pub(crate) fn register_export_controls(window: &Window, state: &Rc<RefCell<Edito
 /// spin row must be disabled rather than implying a control that does
 /// nothing.
 pub(crate) fn format_supports_quality(format: ExportFormat) -> bool {
-    !matches!(format, ExportFormat::Png | ExportFormat::Pdf)
+    !matches!(format, ExportFormat::Png | ExportFormat::Pdf | ExportFormat::WebM)
 }
 
 pub(crate) fn extension_for_format(format: ExportFormat) -> &'static str {
@@ -92,6 +94,7 @@ pub(crate) fn extension_for_format(format: ExportFormat) -> &'static str {
         ExportFormat::WebP => "webp",
         ExportFormat::Avif => "avif",
         ExportFormat::Pdf => "pdf",
+        ExportFormat::WebM => "webm",
     }
 }
 

@@ -64,15 +64,22 @@ Follow-ups from phase 4:
 - [ ] Publish a GitHub release with the Flatpak bundle, then submit to Flathub
 - [ ] Demo video for the README (see media/app-demo-video)
 
-## Phase 5 — Larger features
+## Phase 5 — Larger features — done in v0.30.0
 
-- [ ] Generic device frames (phone with punch hole, tablet, browser window)
-- [ ] 3D tilt/perspective per screenshot
-- [ ] Series/panorama: one background across several exports, App Store
+- [x] Generic device frames (phone with punch hole, tablet, browser window)
+- [x] 3D tilt/perspective per screenshot
+- [x] Series/panorama: one background across several exports, App Store
       size sets in one go
-- [ ] Preset gallery with thumbnails
-- [ ] Command line: `screenforge --preset X images/*.png`
-- [ ] Animated export (WebM)
+- [x] Preset gallery with thumbnails
+- [x] Command line: `screenforge --preset X images/*.png`
+- [x] Animated export (WebM)
+
+Follow-ups from phase 5:
+
+- [ ] Frame and tilt per screenshot (the model supports it; the style
+      tab sets all screenshots at once)
+- [ ] Export several store sizes (e.g. iPhone and iPad) in one go
+- [ ] Animated export: choice of animation, duration and frame rate
 
 ---
 

@@ -56,5 +56,10 @@ GNOME 51 runtime. Inside the sandbox, Android import calls the host's
     widgets bind to.
   - `sources.rs` (import, adb, portal screenshot, open with), `project.rs`,
     `presets.rs`, `dialogs.rs`, `editing.rs` (canvas actions), `i18n.rs`.
+- `app/src/cli.rs`: the command line (`--preset`, `--list-presets`);
+  `app/src/video.rs`: the animated WebM export through GStreamer
+  (needs the `vp9enc` and `webmmux` elements, part of gst-plugins-good).
+- `core/src/frame.rs`: device frames; `core/src/warp.rs`: the
+  perspective warp for tilted screenshots.
 - `po/`: translations, see [po/README.md](../po/README.md).
 - `build-aux/`: meson's cargo wrapper and the Flatpak manifest.

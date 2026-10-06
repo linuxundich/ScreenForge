@@ -77,6 +77,78 @@ pub fn compose(
     draw_watermark(&ctx, &doc.watermark, width, height)
 }
 
+/// One element at outer size `w`×`h`: device frame (if any), the
+/// screenshot clipped to its screen area with flips and redactions, and the
+/// frame's overlay (camera). No shadow; the caller draws that.
+fn draw_element_body(ctx: &Context, el: &ScreenshotElement, image: &cairo::ImageSurface, w: f64, h: f64) -> Result<(), RenderError> {
+    crate::frame::draw_body(ctx, el.frame, w, h, &el.corner_radius)?;
+    let area = crate::frame::screen_area(el.frame, w, h, &el.corner_radius);
+    ctx.save()?;
+    rounded_rect_path(ctx, area.x, area.y, area.width, area.height, &area.radius);
+    ctx.clip();
+    ctx.translate(area.x, area.y);
+    if el.transform.flip_horizontal {
+        ctx.translate(area.width, 0.0);
+        ctx.scale(-1.0, 1.0);
+    }
+    if el.transform.flip_vertical {
+        ctx.translate(0.0, area.height);
+        ctx.scale(1.0, -1.0);
+    }
+    ctx.scale(area.width / image.width() as f64, area.height / image.height() as f64);
+    ctx.set_source_surface(image, 0.0, 0.0)?;
+    ctx.paint()?;
+    draw_redactions(ctx, image, &el.redactions)?;
+    ctx.restore()?;
+    crate::frame::draw_overlay(ctx, el.frame, w, &area)
+}
+
+/// A tilted element: drawn flat into a bitmap at device resolution, warped
+/// onto its perspective quad (`crate::warp`), with a shadow cast from the
+/// warped shape itself.
+fn draw_tilted_body(ctx: &Context, el: &ScreenshotElement, image: &cairo::ImageSurface, w: f64, h: f64, scale: f64) -> Result<(), RenderError> {
+    // Twice the device resolution (supersampling, so the warp's bilinear
+    // sampling doesn't soften text), capped so a huge export can't ask for
+    // a gigantic intermediate bitmap.
+    let s = (scale.max(0.01) * 2.0).min(6144.0 / w.max(h));
+    let mut flat = cairo::ImageSurface::create(cairo::Format::ARgb32, (w * s).ceil().max(1.0) as i32, (h * s).ceil().max(1.0) as i32)?;
+    {
+        let fctx = Context::new(&flat)?;
+        fctx.scale(s, s);
+        draw_element_body(&fctx, el, image, w, h)?;
+    }
+    let quad = crate::warp::tilted_quad(w, h, el.transform.tilt_x, el.transform.tilt_y).map(|(x, y)| (x * s, y * s));
+    let (warped, ox, oy) = crate::warp::warp(&mut flat, &quad)?;
+
+    ctx.save()?;
+    ctx.scale(1.0 / s, 1.0 / s);
+    let shadow = &el.shadow;
+    if shadow.enabled && shadow.opacity > 0.0 {
+        let blur = shadow.blur * s;
+        let pad = (blur * 3.0 + 2.0).ceil();
+        let mut shadow_surface =
+            cairo::ImageSurface::create(cairo::Format::ARgb32, warped.width() + 2 * pad as i32, warped.height() + 2 * pad as i32)?;
+        {
+            let sctx = Context::new(&shadow_surface)?;
+            let c = shadow.color;
+            sctx.set_source_rgba(c.r, c.g, c.b, c.a * shadow.opacity);
+            sctx.mask_surface(&warped, pad, pad)?;
+        }
+        if blur > 0.0 {
+            let (sw, sh, stride) = (shadow_surface.width(), shadow_surface.height(), shadow_surface.stride());
+            let mut data = shadow_surface.data()?;
+            crate::blur::box_blur(&mut data, sw, sh, stride, blur / 2.0);
+        }
+        ctx.set_source_surface(&shadow_surface, ox - pad + shadow.offset_x * s, oy - pad + shadow.offset_y * s)?;
+        ctx.paint()?;
+    }
+    ctx.set_source_surface(&warped, ox, oy)?;
+    ctx.source().set_filter(cairo::Filter::Good);
+    ctx.paint()?;
+    ctx.restore()?;
+    Ok(())
+}
+
 /// Draws `watermark` into its corner of the `width`×`height` canvas, with
 /// a soft dark halo so light text stays legible on light backgrounds.
 fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64) -> Result<(), RenderError> {
@@ -240,6 +312,51 @@ fn draw_redactions(ctx: &Context, image: &cairo::ImageSurface, redactions: &[Red
     Ok(())
 }
 
+/// The composition split into layers for animation: the background alone,
+/// then each visible element alone (screenshot, frame, shadow, label,
+/// callouts) at its final position, every layer `target_w`×`target_h`
+/// pixels at `scale`. The watermark goes on the background layer.
+/// Painting all layers in order reproduces [`compose`].
+pub fn compose_layers(
+    doc: &Document,
+    scale: f64,
+    resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
+    background_image: Option<&cairo::ImageSurface>,
+    target_w: i32,
+    target_h: i32,
+) -> Result<(cairo::ImageSurface, Vec<cairo::ImageSurface>), RenderError> {
+    let shadow_cache = ShadowCache::new();
+    let background_cache = BackgroundCache::new();
+    let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
+    let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
+    let regions: Vec<crate::generator::ScreenshotRegion> =
+        placements.iter().map(|p| crate::generator::ScreenshotRegion { x: p.x, y: p.y, width: p.width, height: p.height }).collect();
+    let (width, height) = (doc.canvas.export_width as f64, doc.canvas.export_height as f64);
+
+    let background = cairo::ImageSurface::create(cairo::Format::ARgb32, target_w, target_h)?;
+    {
+        let ctx = Context::new(&background)?;
+        ctx.scale(scale, scale);
+        if !doc.canvas.transparent_background {
+            let first = visible.first().and_then(|el| resolved_images.get(&el.id));
+            let image = if matches!(doc.background, Background::BlurredScreenshot(_)) { first } else { background_image };
+            draw_background(&ctx, &doc.background, width, height, image, &regions, scale, &background_cache)?;
+        }
+        draw_watermark(&ctx, &doc.watermark, width, height)?;
+    }
+    let mut layers = Vec::new();
+    for i in 0..visible.len() {
+        let layer = cairo::ImageSurface::create(cairo::Format::ARgb32, target_w, target_h)?;
+        {
+            let ctx = Context::new(&layer)?;
+            ctx.scale(scale, scale);
+            draw_elements(&ctx, doc, &visible[i..=i], &placements[i..=i], resolved_images, scale, &shadow_cache)?;
+        }
+        layers.push(layer);
+    }
+    Ok((background, layers))
+}
+
 /// Renders every visible element (screenshots, their shadows, labels, and
 /// callouts) onto `target` — everything [`compose`] draws *except* the
 /// background — so a caller that can prove the background hasn't changed
@@ -302,31 +419,16 @@ fn draw_elements(
         ctx.rotate(el.transform.rotation_deg.to_radians());
         ctx.translate(-placement.width / 2.0, -placement.height / 2.0);
 
-        if el.shadow.enabled {
-            draw_shadow(ctx, placement.width, placement.height, &el.corner_radius, &el.shadow, scale, shadow_cache)?;
+        let (w, h) = (placement.width, placement.height);
+        if el.transform.tilt_x.abs() > 0.01 || el.transform.tilt_y.abs() > 0.01 {
+            draw_tilted_body(ctx, el, image, w, h, scale)?;
+        } else {
+            if el.shadow.enabled {
+                let radius = crate::frame::outer_radius(el.frame, w, &el.corner_radius);
+                draw_shadow(ctx, w, h, &radius, &el.shadow, scale, shadow_cache)?;
+            }
+            draw_element_body(ctx, el, image, w, h)?;
         }
-
-        rounded_rect_path(ctx, 0.0, 0.0, placement.width, placement.height, &el.corner_radius);
-        ctx.clip();
-
-        ctx.save()?;
-        if el.transform.flip_horizontal {
-            ctx.translate(placement.width, 0.0);
-            ctx.scale(-1.0, 1.0);
-        }
-        if el.transform.flip_vertical {
-            ctx.translate(0.0, placement.height);
-            ctx.scale(1.0, -1.0);
-        }
-        let sx = placement.width / image.width() as f64;
-        let sy = placement.height / image.height() as f64;
-        ctx.scale(sx, sy);
-        ctx.set_source_surface(image, 0.0, 0.0)?;
-        ctx.paint()?;
-        draw_redactions(ctx, image, &el.redactions)?;
-        ctx.restore()?;
-
-        ctx.reset_clip();
 
         // Drawn screenshot-relative, still inside this element's own
         // translate/rotate block (so the label moves and rotates with its
@@ -851,7 +953,7 @@ fn render_generated_background_2x(
 /// per-corner radii. Cairo has no native rounded-rect primitive, so this is
 /// four `arc()` calls joined by implicit `line_to`s (cairo draws a
 /// straight line to the next arc's start automatically).
-fn rounded_rect_path(ctx: &Context, x: f64, y: f64, w: f64, h: f64, r: &CornerRadius) {
+pub(crate) fn rounded_rect_path(ctx: &Context, x: f64, y: f64, w: f64, h: f64, r: &CornerRadius) {
     let tl = r.top_left.max(0.0).min(w / 2.0).min(h / 2.0);
     let tr = r.top_right.max(0.0).min(w / 2.0).min(h / 2.0);
     let br = r.bottom_right.max(0.0).min(w / 2.0).min(h / 2.0);

@@ -66,13 +66,13 @@ pub fn compute_vertical_layout(elements: &[ScreenshotElement], spacing_px: f64, 
         return Vec::new();
     }
 
-    let target_width = elements.iter().map(|el| el.natural_width).fold(f64::INFINITY, f64::min);
+    let target_width = elements.iter().map(|el| el.outer_size().0).fold(f64::INFINITY, f64::min);
 
     let mut y = margin_y;
     let mut placements = Vec::with_capacity(elements.len());
     for el in elements {
-        let scale = if el.natural_width > 0.0 { target_width / el.natural_width } else { 1.0 };
-        let height = el.natural_height * scale;
+        let scale = if el.outer_size().0 > 0.0 { target_width / el.outer_size().0 } else { 1.0 };
+        let height = el.outer_size().1 * scale;
         placements.push(Placement { element_id: el.id, x: margin_x, y, width: target_width, height });
         y += height + spacing_px;
     }
@@ -90,7 +90,7 @@ pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, marg
     }
 
     let columns = (elements.len() as f64).sqrt().ceil() as usize;
-    let target_height = elements.iter().map(|el| el.natural_height).fold(f64::INFINITY, f64::min);
+    let target_height = elements.iter().map(|el| el.outer_size().1).fold(f64::INFINITY, f64::min);
 
     let mut x = margin_x;
     let mut y = margin_y;
@@ -100,8 +100,8 @@ pub fn compute_grid_layout(elements: &[ScreenshotElement], spacing_px: f64, marg
             x = margin_x;
             y += target_height + spacing_px;
         }
-        let scale = if el.natural_height > 0.0 { target_height / el.natural_height } else { 1.0 };
-        let width = el.natural_width * scale;
+        let scale = if el.outer_size().1 > 0.0 { target_height / el.outer_size().1 } else { 1.0 };
+        let width = el.outer_size().0 * scale;
         placements.push(Placement { element_id: el.id, x, y, width, height: target_height });
         x += width + spacing_px;
     }
@@ -125,14 +125,14 @@ pub fn compute_horizontal_layout(
 
     let target_height = elements
         .iter()
-        .map(|el| el.natural_height)
+        .map(|el| el.outer_size().1)
         .fold(f64::INFINITY, f64::min);
 
     let mut x = margin_x;
     let mut placements = Vec::with_capacity(elements.len());
     for el in elements {
-        let scale = if el.natural_height > 0.0 { target_height / el.natural_height } else { 1.0 };
-        let width = el.natural_width * scale;
+        let scale = if el.outer_size().1 > 0.0 { target_height / el.outer_size().1 } else { 1.0 };
+        let width = el.outer_size().0 * scale;
         placements.push(Placement { element_id: el.id, x, y: margin_y, width, height: target_height });
         x += width + spacing_px;
     }
@@ -235,7 +235,9 @@ fn apply_aspect(doc: &mut Document) {
     if aw == 0 || ah == 0 {
         return;
     }
-    let ratio = aw as f64 / ah as f64;
+    // With several slices, the aspect describes each slice; the whole
+    // canvas is that many slices wide.
+    let ratio = (aw * doc.canvas.slices.max(1)) as f64 / ah as f64;
     let (w, h) = (doc.canvas.export_width as f64, doc.canvas.export_height as f64);
     if w / h < ratio {
         let new_w = (h * ratio).round();
@@ -372,6 +374,17 @@ mod tests {
         assert!((ratio - 16.0 / 9.0).abs() < 0.01, "ratio {ratio}");
         assert!(doc.canvas.content_offset_x > 0.0);
         assert_eq!(doc.canvas.content_offset_y, 0.0);
+    }
+
+    #[test]
+    fn slices_multiply_the_aspect_width() {
+        let mut doc = Document::new();
+        doc.elements.push(fixture(100.0, 200.0));
+        doc.canvas.aspect = Some((9, 16));
+        doc.canvas.slices = 3;
+        fit_canvas_to_content(&mut doc);
+        let ratio = doc.canvas.export_width as f64 / doc.canvas.export_height as f64;
+        assert!((ratio - 27.0 / 16.0).abs() < 0.01, "ratio {ratio}");
     }
 
     #[test]

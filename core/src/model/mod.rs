@@ -56,6 +56,14 @@ pub struct Transform {
     pub flip_horizontal: bool,
     #[serde(default)]
     pub flip_vertical: bool,
+    /// Perspective tilt in degrees: `tilt_y` turns the element around its
+    /// vertical axis (positive turns the right edge away), `tilt_x` around
+    /// its horizontal axis (positive tips the top edge away). `0.0` for
+    /// projects saved before v0.30.0.
+    #[serde(default)]
+    pub tilt_x: f64,
+    #[serde(default)]
+    pub tilt_y: f64,
 }
 
 impl Default for Transform {
@@ -69,6 +77,8 @@ impl Default for Transform {
             aspect_locked: true,
             flip_horizontal: false,
             flip_vertical: false,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }
     }
 }
@@ -658,7 +668,41 @@ pub struct ScreenshotElement {
     /// resized. Missing in projects saved before v0.28.0.
     #[serde(default)]
     pub redactions: Vec<Redaction>,
+    /// A device drawn around the screenshot. `None` (and projects saved
+    /// before v0.30.0) draws the screenshot on its own.
+    #[serde(default)]
+    pub frame: DeviceFrame,
     pub visible: bool,
+}
+
+/// Which device [`DeviceFrame`] draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeviceKind {
+    #[default]
+    None,
+    /// A phone with thin bezels and a punch-hole camera.
+    Phone,
+    /// A tablet with even, wider bezels.
+    Tablet,
+    /// A browser window with a title bar.
+    Browser,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum FrameTone {
+    #[default]
+    Dark,
+    Light,
+}
+
+/// A generic, vector-drawn device around a screenshot — no manufacturer
+/// artwork, so nothing to keep up to date. See `crate::frame`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct DeviceFrame {
+    pub kind: DeviceKind,
+    pub tone: FrameTone,
 }
 
 /// How a [`Redaction`] hides its area.
@@ -695,6 +739,12 @@ impl Redaction {
 }
 
 impl ScreenshotElement {
+    /// The size the layout reserves for this element at natural scale:
+    /// the screenshot plus its device frame, if any.
+    pub fn outer_size(&self) -> (f64, f64) {
+        crate::frame::outer_size(self.frame, self.natural_width, self.natural_height)
+    }
+
     pub fn new(source: ImageSource, natural_width: f64, natural_height: f64) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -712,6 +762,7 @@ impl ScreenshotElement {
             label: Label::new(),
             callouts: Vec::new(),
             redactions: Vec::new(),
+            frame: DeviceFrame::default(),
             visible: true,
         }
     }
@@ -1008,6 +1059,9 @@ pub enum ExportFormat {
     Avif,
     /// A single-page PDF with the composition as an embedded image.
     Pdf,
+    /// A short WebM video in which the screenshots fly in one by one.
+    #[serde(rename = "webm")]
+    WebM,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -1058,6 +1112,15 @@ pub struct CanvasSettings {
     /// channel (PNG, WebP, AVIF, PDF).
     #[serde(default)]
     pub transparent_background: bool,
+    /// Export as this many images side by side, each `aspect`-shaped — a
+    /// panorama spread across several app store screenshots. `1` (and
+    /// projects saved before v0.30.0) exports one image.
+    #[serde(default = "default_slices")]
+    pub slices: u32,
+}
+
+fn default_slices() -> u32 {
+    1
 }
 
 fn default_export_target_width() -> u32 {
@@ -1076,6 +1139,7 @@ impl Default for CanvasSettings {
             export_quality: 90,
             aspect: None,
             transparent_background: false,
+            slices: 1,
         }
     }
 }

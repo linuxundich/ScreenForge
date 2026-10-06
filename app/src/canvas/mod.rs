@@ -622,6 +622,26 @@ mod imp {
                     }
                 }
 
+                // Where a panorama export splits into separate images
+                // (`CanvasSettings::slices`): dashed guides, preview only.
+                let slices = self.document.borrow().canvas.slices;
+                if slices > 1 {
+                    ctx.set_line_width(1.5);
+                    ctx.set_dash(&[8.0, 6.0], 0.0);
+                    for k in 1..slices {
+                        let x = (offset_x + render_w as f64 * k as f64 / slices as f64).round() + 0.5;
+                        ctx.move_to(x, offset_y);
+                        ctx.line_to(x, offset_y + render_h as f64);
+                        ctx.set_source_rgba(0.0, 0.0, 0.0, 0.45);
+                        let _ = ctx.stroke_preserve();
+                        ctx.set_dash(&[8.0, 6.0], 7.0);
+                        ctx.set_source_rgba(1.0, 1.0, 1.0, 0.8);
+                        let _ = ctx.stroke();
+                        ctx.set_dash(&[8.0, 6.0], 0.0);
+                    }
+                    ctx.set_dash(&[], 0.0);
+                }
+
                 if let Some(hover) = self.drag_hover.get() {
                     let placements = self.last_placements.borrow();
                     let doc_x = match placements.get(hover) {

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: screenforge\n"
 "Report-Msgid-Bugs-To: https://github.com/linuxundich/ScreenForge/issues\n"
-"POT-Creation-Date: 2026-10-06 19:52+0200\n"
+"POT-Creation-Date: 2026-10-06 20:18+0200\n"
 "PO-Revision-Date: 2026-10-06 19:00+0200\n"
 "Last-Translator: Christoph Langner\n"
 "Language-Team: German\n"
@@ -291,7 +291,7 @@ msgstr "Passung"
 msgid "Fill (crop)"
 msgstr "Ausfüllen (zuschneiden)"
 
-#: app/resources/ui/window.ui:417 app/resources/ui/window.ui:1133
+#: app/resources/ui/window.ui:417 app/resources/ui/window.ui:1134
 msgid "Fit"
 msgstr "Einpassen"
 
@@ -600,96 +600,100 @@ msgstr "Automatisch, behält das Seitenverhältnis bei"
 msgid "Format"
 msgstr "Format"
 
-#: app/resources/ui/window.ui:1042
+#: app/resources/ui/window.ui:1035
+msgid "WebM (animated)"
+msgstr "WebM (animiert)"
+
+#: app/resources/ui/window.ui:1043
 msgid "Quality"
 msgstr "Qualität"
 
-#: app/resources/ui/window.ui:1043
+#: app/resources/ui/window.ui:1044
 msgid "Only for JPEG/WebP/AVIF"
 msgstr "Nur für JPEG/WebP/AVIF"
 
-#: app/resources/ui/window.ui:1083
+#: app/resources/ui/window.ui:1084
 msgid "Add Screenshots"
 msgstr "Screenshots hinzufügen"
 
-#: app/resources/ui/window.ui:1084
+#: app/resources/ui/window.ui:1085
 msgid "Drag images here, paste them with Ctrl+V or fetch them from an Android device"
 msgstr "Bilder hierher ziehen, mit Strg+V einfügen oder vom Android-Gerät holen"
 
-#: app/resources/ui/window.ui:1091 app/resources/ui/window.ui:1186
+#: app/resources/ui/window.ui:1092 app/resources/ui/window.ui:1187
 msgid "Open Images…"
 msgstr "Bilder öffnen …"
 
-#: app/resources/ui/window.ui:1101 app/resources/ui/window.ui:1200
-#: app/resources/ui/window.ui:1230
+#: app/resources/ui/window.ui:1102 app/resources/ui/window.ui:1201
+#: app/resources/ui/window.ui:1231
 msgid "Open Project…"
 msgstr "Projekt öffnen …"
 
-#: app/resources/ui/window.ui:1127
+#: app/resources/ui/window.ui:1128
 msgid "Zoom Out (Ctrl+−)"
 msgstr "Verkleinern (Strg+−)"
 
-#: app/resources/ui/window.ui:1134
+#: app/resources/ui/window.ui:1135
 msgid "Zoom"
 msgstr "Zoom"
 
-#: app/resources/ui/window.ui:1143
+#: app/resources/ui/window.ui:1144
 msgid "Zoom In (Ctrl++)"
 msgstr "Vergrößern (Strg++)"
 
-#: app/resources/ui/window.ui:1153
+#: app/resources/ui/window.ui:1154
 msgid "Drag out the image — into a browser, file manager or chat"
 msgstr "Bild herausziehen — in den Browser, Dateimanager oder Chat ziehen"
 
-#: app/resources/ui/window.ui:1159
+#: app/resources/ui/window.ui:1160
 msgid "Copy Image to Clipboard (Ctrl+Shift+C)"
 msgstr "Bild in die Zwischenablage kopieren (Strg+Umschalt+C)"
 
-#: app/resources/ui/window.ui:1169
+#: app/resources/ui/window.ui:1170
 msgid "Hide the screenshots temporarily to judge the background"
 msgstr "Screenshots vorübergehend ausblenden, um den Hintergrund zu beurteilen"
 
-#: app/resources/ui/window.ui:1190
+#: app/resources/ui/window.ui:1191
 msgid "Paste from Clipboard"
 msgstr "Aus Zwischenablage einfügen"
 
-#: app/resources/ui/window.ui:1194
+#: app/resources/ui/window.ui:1195
 msgid "Take Screenshot…"
 msgstr "Bildschirmfoto aufnehmen …"
 
-#: app/resources/ui/window.ui:1207
+#: app/resources/ui/window.ui:1208
 msgid "Fit to Window"
 msgstr "An Fenster anpassen"
 
-#: app/resources/ui/window.ui:1212
+#: app/resources/ui/window.ui:1213
 msgid "100 %"
 msgstr "100 %"
 
-#: app/resources/ui/window.ui:1217
+#: app/resources/ui/window.ui:1218
 msgid "Zoom In"
 msgstr "Vergrößern"
 
-#: app/resources/ui/window.ui:1222
+#: app/resources/ui/window.ui:1223
 msgid "Zoom Out"
 msgstr "Verkleinern"
 
-#: app/resources/ui/window.ui:1234
+#: app/resources/ui/window.ui:1235
 msgid "Save"
 msgstr "Speichern"
 
-#: app/resources/ui/window.ui:1238
+#: app/resources/ui/window.ui:1239
 msgid "Save As…"
 msgstr "Speichern unter …"
 
-#: app/resources/ui/window.ui:1244
+#: app/resources/ui/window.ui:1245
 msgid "Preferences"
 msgstr "Einstellungen"
 
-#: app/resources/ui/window.ui:1248
+#: app/resources/ui/window.ui:1249
 msgid "Keyboard Shortcuts"
 msgstr "Tastenkürzel"
 
-#: app/resources/ui/window.ui:1252
+#: app/resources/ui/window.ui:1253
 msgid "About ScreenForge"
 msgstr "Info zu ScreenForge"
 
@@ -732,6 +736,44 @@ msgstr "Von Android-Gerät importieren — nicht möglich: {reason}"
 #: app/src/adb.rs:186
 msgid "adb not found"
 msgstr "adb nicht gefunden"
+
+#: app/src/cli.rs:24
+msgid ""
+"Usage:\n"
+"  screenforge [FILE…]                  open the app\n"
+"  screenforge --preset NAME [--output FILE] [--width N] IMAGE…\n"
+"                                       render IMAGEs with a saved preset\n"
+"  screenforge --list-presets           list saved presets\n"
+"\n"
+"The output format follows the file extension: png, jpg, webp, avif, pdf or webm (animated)."
+msgstr ""
+"Aufruf:\n"
+"  screenforge [DATEI…]                 die App öffnen\n"
+"  screenforge --preset NAME [--output DATEI] [--width N] BILD…\n"
+"                                       BILDer mit einem gespeicherten Preset rendern\n"
+"  screenforge --list-presets           gespeicherte Presets auflisten\n"
+"\n"
+"Das Ausgabeformat richtet sich nach der Dateiendung: png, jpg, webp, avif, pdf oder webm (animiert)."
+
+#: app/src/cli.rs:62
+msgid "--width needs a number of pixels"
+msgstr "--width braucht eine Pixelzahl"
+
+#: app/src/cli.rs:64
+msgid "Unknown option: {option}"
+msgstr "Unbekannte Option: {option}"
+
+#: app/src/cli.rs:70
+msgid "No images given."
+msgstr "Keine Bilder angegeben."
+
+#: app/src/cli.rs:75
+msgid "No preset named “{name}”. See --list-presets."
+msgstr "Kein Preset namens „{name}“. Siehe --list-presets."
+
+#: app/src/cli.rs:106
+msgid "Unsupported output format “{ext}”; use png, jpg, webp, avif, pdf or webm."
+msgstr "Nicht unterstütztes Ausgabeformat „{ext}“; möglich sind png, jpg, webp, avif, pdf oder webm."
 
 #: app/src/dialogs.rs:29
 msgid "Export Quality"
@@ -849,7 +891,7 @@ msgstr "Duplizieren"
 msgid "Replace Screenshot…"
 msgstr "Screenshot ersetzen…"
 
-#: app/src/editing.rs:408 app/src/presets.rs:155
+#: app/src/editing.rs:408 app/src/presets.rs:167
 msgid "Delete"
 msgstr "Löschen"
 
@@ -1003,31 +1045,83 @@ msgstr "Pfeilbreite"
 msgid "Dot Size"
 msgstr "Punktgröße"
 
-#: app/src/panels/export.rs:115
+#: app/src/panels/device.rs:8
+msgid "No Frame"
+msgstr "Kein Rahmen"
+
+#: app/src/panels/device.rs:9
+msgid "Phone"
+msgstr "Smartphone"
+
+#: app/src/panels/device.rs:10
+msgid "Tablet"
+msgstr "Tablet"
+
+#: app/src/panels/device.rs:11
+msgid "Browser Window"
+msgstr "Browserfenster"
+
+#: app/src/panels/device.rs:55
+msgid "Device"
+msgstr "Gerät"
+
+#: app/src/panels/device.rs:56
+msgid "Frame Color"
+msgstr "Rahmenfarbe"
+
+#: app/src/panels/device.rs:58
+msgid "Turn"
+msgstr "Drehung"
+
+#: app/src/panels/device.rs:59
+msgid "Around the vertical axis, in degrees"
+msgstr "Um die senkrechte Achse, in Grad"
+
+#: app/src/panels/device.rs:63
+msgid "Lean"
+msgstr "Neigung"
+
+#: app/src/panels/device.rs:64
+msgid "Around the horizontal axis, in degrees"
+msgstr "Um die waagerechte Achse, in Grad"
+
+#: app/src/panels/device.rs:66
+msgid "Fan Out"
+msgstr "Auffächern"
+
+#: app/src/panels/device.rs:66
+msgid "The outer screenshots turn toward the middle"
+msgstr "Die äußeren Screenshots drehen sich zur Mitte"
+
+#: app/src/panels/device.rs:68
+msgid "Device and Perspective"
+msgstr "Gerät und Perspektive"
+
+#: app/src/panels/export.rs:118
 msgid "Export Composition"
 msgstr "Komposition exportieren"
 
-#: app/src/panels/export.rs:144
+#: app/src/panels/export.rs:147
 msgid "Export successful"
 msgstr "Export erfolgreich"
 
-#: app/src/panels/export.rs:145
+#: app/src/panels/export.rs:148
 msgid "Export failed: {err}"
 msgstr "Export fehlgeschlagen: {err}"
 
-#: app/src/panels/export.rs:146
+#: app/src/panels/export.rs:149
 msgid "Export failed: background task was cancelled"
 msgstr "Export fehlgeschlagen: Hintergrundaufgabe abgebrochen"
 
-#: app/src/panels/export.rs:197
+#: app/src/panels/export.rs:200
 msgid "Image copied to clipboard"
 msgstr "Bild in die Zwischenablage kopiert"
 
-#: app/src/panels/export.rs:199
+#: app/src/panels/export.rs:202
 msgid "Copying failed: {err}"
 msgstr "Kopieren fehlgeschlagen: {err}"
 
-#: app/src/panels/export.rs:200
+#: app/src/panels/export.rs:203
 msgid "Copying failed: background task was cancelled"
 msgstr "Kopieren fehlgeschlagen: Hintergrundaufgabe abgebrochen"
 
@@ -1059,64 +1153,80 @@ msgstr "Mastodon/Bluesky · 1600 × 900"
 msgid "Play Store Graphic · 1024 × 500"
 msgstr "Play-Store-Grafik · 1024 × 500"
 
-#: app/src/panels/output.rs:39
+#: app/src/panels/output.rs:25
+msgid "App Store iPhone 6.9″ · 1320 × 2868"
+msgstr "App Store iPhone 6,9″ · 1320 × 2868"
+
+#: app/src/panels/output.rs:26
+msgid "App Store iPad 13″ · 2064 × 2752"
+msgstr "App Store iPad 13″ · 2064 × 2752"
+
+#: app/src/panels/output.rs:41
 msgid "Bottom Right"
 msgstr "Unten rechts"
 
-#: app/src/panels/output.rs:40
+#: app/src/panels/output.rs:42
 msgid "Bottom Left"
 msgstr "Unten links"
 
-#: app/src/panels/output.rs:41
+#: app/src/panels/output.rs:43
 msgid "Top Right"
 msgstr "Oben rechts"
 
-#: app/src/panels/output.rs:42
+#: app/src/panels/output.rs:44
 msgid "Top Left"
 msgstr "Oben links"
 
-#: app/src/panels/output.rs:64
+#: app/src/panels/output.rs:66
 msgid "Fixed aspect ratios grow the canvas around the content"
 msgstr "Feste Seitenverhältnisse vergrößern die Fläche um den Inhalt herum"
 
-#: app/src/panels/output.rs:95
+#: app/src/panels/output.rs:70
+msgid "Split Into"
+msgstr "Aufteilen in"
+
+#: app/src/panels/output.rs:71
+msgid "Several images side by side with one continuous background, e.g. for app store screenshots"
+msgstr "Mehrere Bilder nebeneinander mit durchgehendem Hintergrund, z. B. für App-Store-Screenshots"
+
+#: app/src/panels/output.rs:111
 msgid "Transparent Background"
 msgstr "Transparenter Hintergrund"
 
-#: app/src/panels/output.rs:96
+#: app/src/panels/output.rs:112
 msgid "Export without background (PNG, WebP, AVIF, PDF; JPEG becomes white)"
 msgstr "Ohne Hintergrund exportieren (PNG, WebP, AVIF, PDF; JPEG wird weiß)"
 
-#: app/src/panels/output.rs:112
+#: app/src/panels/output.rs:128
 msgid "Copy to Clipboard"
 msgstr "In Zwischenablage kopieren"
 
-#: app/src/panels/output.rs:116
+#: app/src/panels/output.rs:132
 msgid "Show Watermark"
 msgstr "Wasserzeichen anzeigen"
 
-#: app/src/panels/output.rs:119 app/src/panels/text.rs:218
+#: app/src/panels/output.rs:135 app/src/panels/text.rs:218
 #: app/src/panels/text.rs:612
 msgid "Position"
 msgstr "Position"
 
-#: app/src/panels/output.rs:123
+#: app/src/panels/output.rs:139
 msgid "Size"
 msgstr "Größe"
 
-#: app/src/panels/output.rs:124
+#: app/src/panels/output.rs:140
 msgid "In percent of the shorter side"
 msgstr "In Prozent der kürzeren Seite"
 
-#: app/src/panels/output.rs:130
+#: app/src/panels/output.rs:146
 msgid "Color"
 msgstr "Farbe"
 
-#: app/src/panels/output.rs:132
+#: app/src/panels/output.rs:148
 msgid "Watermark"
 msgstr "Wasserzeichen"
 
-#: app/src/panels/output.rs:132
+#: app/src/panels/output.rs:148
 msgid "For example your blog's domain, in a corner of the image"
 msgstr "Zum Beispiel die Domain des Blogs, in einer Ecke der Grafik"
 
@@ -1208,7 +1318,7 @@ msgstr "Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screens
 msgid "Choose Background"
 msgstr "Hintergrund wählen"
 
-#: app/src/panels/variants.rs:198 app/src/presets.rs:105
+#: app/src/panels/variants.rs:198 app/src/presets.rs:116
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -1224,41 +1334,41 @@ msgstr "Alle Stile"
 msgid "Show Screenshots"
 msgstr "Screenshots zeigen"
 
-#: app/src/presets.rs:26
+#: app/src/presets.rs:19
 msgid "Preset applied"
 msgstr "Preset angewendet"
 
-#: app/src/presets.rs:93
+#: app/src/presets.rs:104
 msgid "Name"
 msgstr "Name"
 
-#: app/src/presets.rs:139
+#: app/src/presets.rs:150
 msgid "No presets saved yet"
 msgstr "Noch keine Presets gespeichert"
 
-#: app/src/presets.rs:145
+#: app/src/presets.rs:156
 msgid "Click to apply"
 msgstr "Anwenden antippen"
 
-#: app/src/presets.rs:149
+#: app/src/presets.rs:161
 msgid "Rename"
 msgstr "Umbenennen"
 
-#: app/src/presets.rs:203
+#: app/src/presets.rs:215
 msgid "Rename Preset"
 msgstr "Preset umbenennen"
 
-#: app/src/presets.rs:270
+#: app/src/presets.rs:282
 msgid "Save Current Settings as Preset…"
 msgstr "Aktuelles als Preset speichern…"
 
-#: app/src/presets.rs:296
+#: app/src/presets.rs:308
 msgid "Save Preset"
 msgstr "Preset speichern"
 
-#: app/src/presets.rs:307
-msgid "This project's layout, background, shadow, corner radius and label settings"
-msgstr "Layout, Hintergrund, Schatten, Eckenradius und Label-Einstellungen dieses Projekts"
+#: app/src/presets.rs:319
+msgid "This project's layout, background, shadow, corner radius, device frame, watermark and label settings"
+msgstr "Layout, Hintergrund, Schatten, Eckenradius, Geräterahmen, Wasserzeichen und Label-Einstellungen dieses Projekts"
 
 #: app/src/project.rs:22
 msgid "Project saved"

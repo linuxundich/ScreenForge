@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::model::{
     Background, Callout, CornerRadius, Document, ImageSource, Label, LabelStyle, LayoutMode, LayoutSettings, ScreenshotElement, Redaction, ShadowParams,
-    Transform, Watermark,
+    Transform, Watermark, DeviceFrame,
 };
 
 /// A single reversible mutation of a [`Document`]. Implementations should
@@ -89,8 +89,21 @@ pub struct AddScreenshots {
 }
 
 impl Command for AddScreenshots {
+    /// New screenshots take the composition's uniform style (shadow, corner
+    /// radius, device frame, tilt) from the first existing one, so they
+    /// match the rest and what the style controls show.
     fn apply(&self, doc: &mut Document) {
-        doc.elements.extend(self.elements.iter().cloned());
+        let style = doc.elements.first().map(|e| (e.shadow, e.corner_radius, e.frame, e.transform.tilt_x, e.transform.tilt_y));
+        doc.elements.extend(self.elements.iter().cloned().map(|mut element| {
+            if let Some((shadow, corner_radius, frame, tilt_x, tilt_y)) = style {
+                element.shadow = shadow;
+                element.corner_radius = corner_radius;
+                element.frame = frame;
+                element.transform.tilt_x = tilt_x;
+                element.transform.tilt_y = tilt_y;
+            }
+            element
+        }));
     }
 
     fn undo(&self, doc: &mut Document) {
@@ -597,7 +610,25 @@ pub struct ApplyTemplate {
     pub old_shadows: Vec<ShadowParams>,
     pub old_corner_radii: Vec<CornerRadius>,
     pub old_label_defaults: LabelStyle,
+    pub old_frames: Vec<DeviceFrame>,
+    pub old_watermark: Watermark,
     pub new: crate::template::Template,
+}
+
+impl ApplyTemplate {
+    /// Applying `new` to `doc`, remembering everything it replaces.
+    pub fn capturing(doc: &Document, new: crate::template::Template) -> Self {
+        ApplyTemplate {
+            old_layout: doc.layout,
+            old_background: doc.background.clone(),
+            old_shadows: doc.elements.iter().map(|e| e.shadow).collect(),
+            old_corner_radii: doc.elements.iter().map(|e| e.corner_radius).collect(),
+            old_label_defaults: doc.label_defaults.clone(),
+            old_frames: doc.elements.iter().map(|e| e.frame).collect(),
+            old_watermark: doc.watermark.clone(),
+            new,
+        }
+    }
 }
 
 impl Command for ApplyTemplate {
@@ -607,8 +638,10 @@ impl Command for ApplyTemplate {
         for element in &mut doc.elements {
             element.shadow = self.new.shadow;
             element.corner_radius = self.new.corner_radius;
+            element.frame = self.new.frame;
         }
         doc.label_defaults = self.new.label_defaults.clone();
+        doc.watermark = self.new.watermark.clone();
     }
 
     fn undo(&self, doc: &mut Document) {
@@ -619,7 +652,11 @@ impl Command for ApplyTemplate {
             element.shadow = *shadow;
             element.corner_radius = *corner_radius;
         }
+        for (element, frame) in doc.elements.iter_mut().zip(self.old_frames.iter()) {
+            element.frame = *frame;
+        }
         doc.label_defaults = self.old_label_defaults.clone();
+        doc.watermark = self.old_watermark.clone();
     }
 }
 
@@ -662,21 +699,22 @@ impl Command for SetWatermark {
     }
 }
 
-/// Picks a canvas format: the fixed aspect ratio (or `None` to fit the
-/// content) together with the export width that format implies.
+/// Picks a canvas format: the fixed aspect ratio of each slice (or `None`
+/// to fit the content), the total export width that implies, and the
+/// number of slices.
 #[derive(Debug)]
 pub struct SetCanvasFormat {
-    pub old: (Option<(u32, u32)>, u32),
-    pub new: (Option<(u32, u32)>, u32),
+    pub old: (Option<(u32, u32)>, u32, u32),
+    pub new: (Option<(u32, u32)>, u32, u32),
 }
 
 impl Command for SetCanvasFormat {
     fn apply(&self, doc: &mut Document) {
-        (doc.canvas.aspect, doc.canvas.export_target_width) = self.new;
+        (doc.canvas.aspect, doc.canvas.export_target_width, doc.canvas.slices) = self.new;
     }
 
     fn undo(&self, doc: &mut Document) {
-        (doc.canvas.aspect, doc.canvas.export_target_width) = self.old;
+        (doc.canvas.aspect, doc.canvas.export_target_width, doc.canvas.slices) = self.old;
     }
 }
 
@@ -695,9 +733,67 @@ impl Command for SetTransparentBackground {
     }
 }
 
+/// Puts one device frame around every screenshot.
+#[derive(Debug)]
+pub struct SetFrameForAllElements {
+    pub old: Vec<DeviceFrame>,
+    pub new: DeviceFrame,
+}
+
+impl Command for SetFrameForAllElements {
+    fn apply(&self, doc: &mut Document) {
+        for element in &mut doc.elements {
+            element.frame = self.new;
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        for (element, old) in doc.elements.iter_mut().zip(self.old.iter()) {
+            element.frame = *old;
+        }
+    }
+}
+
+/// Sets every screenshot's perspective tilt (`tilt_x`, `tilt_y`), one
+/// pair per element in document order.
+#[derive(Debug)]
+pub struct SetTilts {
+    pub old: Vec<(f64, f64)>,
+    pub new: Vec<(f64, f64)>,
+}
+
+impl Command for SetTilts {
+    fn apply(&self, doc: &mut Document) {
+        for (element, &(x, y)) in doc.elements.iter_mut().zip(self.new.iter()) {
+            element.transform.tilt_x = x;
+            element.transform.tilt_y = y;
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        for (element, &(x, y)) in doc.elements.iter_mut().zip(self.old.iter()) {
+            element.transform.tilt_x = x;
+            element.transform.tilt_y = y;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn added_screenshots_take_the_style_of_the_existing_ones() {
+        let mut doc = Document::new();
+        let mut first = ScreenshotElement::new(ImageSource::Path("a.png".into()), 100.0, 200.0);
+        first.shadow = ShadowParams::strong();
+        first.frame.kind = crate::model::DeviceKind::Phone;
+        doc.elements.push(first);
+        let added = ScreenshotElement::new(ImageSource::Path("b.png".into()), 100.0, 200.0);
+        AddScreenshots { elements: vec![added] }.apply(&mut doc);
+        assert_eq!(doc.elements[1].shadow, ShadowParams::strong());
+        assert_eq!(doc.elements[1].frame.kind, crate::model::DeviceKind::Phone);
+    }
     use crate::model::{ImageSource, LayoutSettings, Rgba};
     use std::path::PathBuf;
 
@@ -1041,6 +1137,8 @@ mod tests {
             shadow: ShadowParams::strong(),
             corner_radius: CornerRadius::uniform(8.0),
             label_defaults: LabelStyle { padding_x: 55.0, ..LabelStyle::label_default() },
+            frame: Default::default(),
+            watermark: Default::default(),
         };
 
         let mut stack = UndoStack::new();
@@ -1051,6 +1149,8 @@ mod tests {
                 old_shadows,
                 old_corner_radii,
                 old_label_defaults: old_label_defaults.clone(),
+                old_frames: doc.elements.iter().map(|e| e.frame).collect(),
+                old_watermark: doc.watermark.clone(),
                 new: template.clone(),
             }),
             &mut doc,

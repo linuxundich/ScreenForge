@@ -1032,6 +1032,7 @@
                                           <item>WebP</item>
                                           <item>AVIF</item>
                                   <item>PDF</item>
+                                  <item translatable="yes">WebM (animated)</item>
                                         </items>
                                       </object>
                                     </property>

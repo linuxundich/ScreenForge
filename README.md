@@ -39,13 +39,17 @@ The background generator draws abstract scenes in six styles: layered paper, con
   <img src="docs/screenshots/background-studio.png" alt="The background studio with nine variants of the arcs style" width="100%">
 </p>
 
+### Phones, tablets, browsers, in perspective
+
+Put each screenshot into a generic phone with a punch-hole camera, a tablet or a browser window, dark or light. Turn and lean them in real perspective, or fan them out so the outer ones face the middle.
+
 ### Point things out, hide what's private
 
 Give each screenshot a label, add callouts with arrows that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share.
 
 ### The right size for every place
 
-Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story, Open Graph, Mastodon and Bluesky, or the Play Store feature graphic. Your content stays centered and is never cropped. Add a watermark, export as PNG, JPEG, WebP, AVIF or PDF, with a transparent background if you like, or copy the result to the clipboard and drag it straight into a browser or chat.
+Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story, Open Graph, Mastodon and Bluesky, the Play Store feature graphic or App Store sizes. Your content stays centered and is never cropped. Split a composition into several images with one continuous background for app store panoramas, or export a short animated WebM in which the screenshots fly in. Add a watermark, export as PNG, JPEG, WebP, AVIF or PDF, with a transparent background if you like, or copy the result to the clipboard and drag it straight into a browser or chat.
 
 <p align="center">
   <img src="docs/screenshots/export.png" alt="The export tab with format presets, transparent background and watermark settings" width="100%">
@@ -53,7 +57,7 @@ Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story
 
 ### At home on GNOME
 
-Adaptive layout, a tabbed sidebar, keyboard shortcuts and undo for every edit. Open images from the file manager, take a desktop screenshot through the system dialog, or import from an Android device over adb, with a clean status bar showing 12:00 and a full battery. Save projects as single `.screenforge` files and reuse your look as presets. English and German included.
+Adaptive layout, a tabbed sidebar, keyboard shortcuts and undo for every edit. Open images from the file manager, take a desktop screenshot through the system dialog, or import from an Android device over adb, with a clean status bar showing 12:00 and a full battery. Save projects as single `.screenforge` files and reuse your look as presets, also from the command line: `screenforge --preset Blog --output shots.png *.png`. English and German included.
 
 ## Install
 

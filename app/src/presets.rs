@@ -9,21 +9,32 @@ use crate::*;
 pub(crate) fn apply_preset(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, new: screenforge_core::template::Template) {
     {
         let mut state_ref = state.borrow_mut();
-        let old_layout = state_ref.document.layout;
-        let old_background = state_ref.document.background.clone();
-        let old_shadows: Vec<ShadowParams> = state_ref.document.elements.iter().map(|e| e.shadow).collect();
-        let old_corner_radii: Vec<CornerRadius> = state_ref.document.elements.iter().map(|e| e.corner_radius).collect();
-        let old_label_defaults = state_ref.document.label_defaults.clone();
         let EditorState { document, undo_stack, .. } = &mut *state_ref;
-        undo_stack.apply(
-            Box::new(ApplyTemplate { old_layout, old_background, old_shadows, old_corner_radii, old_label_defaults, new }),
-            document,
-        );
+        let command = ApplyTemplate::capturing(document, new);
+        undo_stack.apply(Box::new(command), document);
     }
     refresh_canvas(window, canvas, state);
     sync_controls_from_document(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
     window.toast_overlay().add_toast(adw::Toast::new(&gettext("Preset applied")));
+}
+
+/// The preset's look on placeholder screenshots, as a small picture for
+/// its row (`screenforge_core::template::render_preview`).
+fn preset_picture(template: &screenforge_core::template::Template) -> gtk4::Picture {
+    let picture = gtk4::Picture::builder().content_fit(gtk4::ContentFit::Cover).width_request(120).height_request(68).css_classes(["variant-picture"]).build();
+    if let Ok(mut surface) = screenforge_core::template::render_preview(template, 240) {
+        surface.flush();
+        let (w, h, stride) = (surface.width(), surface.height(), surface.stride() as usize);
+        if let Ok(data) = surface.data() {
+            let bytes = glib::Bytes::from_owned(data.to_vec());
+            let texture = gdk::MemoryTexture::new(w, h, gdk::MemoryFormat::B8g8r8a8Premultiplied, &bytes, stride);
+            picture.set_paintable(Some(&texture));
+        }
+    }
+    picture.set_margin_top(6);
+    picture.set_margin_bottom(6);
+    picture
 }
 
 /// Reads every saved preset from `GSettings` (spec: "Verwende dafür den
@@ -143,6 +154,7 @@ pub(crate) fn rebuild_preset_list(list_box: &gtk4::ListBox, window: &Window, can
     for (index, named) in presets.iter().enumerate() {
         let row = adw::ActionRow::builder().title(named.name.clone()).activatable(true).build();
         row.set_subtitle(&gettext("Click to apply"));
+        row.add_prefix(&preset_picture(&named.template));
 
         let rename_button = gtk4::Button::from_icon_name("document-edit-symbolic");
         rename_button.set_valign(gtk4::Align::Center);
@@ -304,7 +316,7 @@ pub(crate) fn register_presets_menu(window: &Window, canvas: &Canvas, state: &Rc
         }
     ));
 
-    let hint = gtk4::Label::new(Some(&gettext("This project's layout, background, shadow, corner radius and label settings")));
+    let hint = gtk4::Label::new(Some(&gettext("This project's layout, background, shadow, corner radius, device frame, watermark and label settings")));
     hint.set_wrap(true);
     hint.set_xalign(0.0);
     hint.add_css_class("caption");

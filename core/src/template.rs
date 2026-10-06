@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::{Background, CornerRadius, Document, LabelStyle, LayoutSettings, ShadowParams};
+use crate::model::{Background, CornerRadius, Document, LabelStyle, LayoutSettings, ShadowParams, DeviceFrame, Watermark};
 
 pub const CURRENT_VERSION: u32 = 1;
 
@@ -37,6 +37,12 @@ pub struct Template {
     /// `crate::command::ApplyTemplate`).
     #[serde(default)]
     pub label_defaults: LabelStyle,
+    /// Device frame around every screenshot (v0.30.0; none before).
+    #[serde(default)]
+    pub frame: DeviceFrame,
+    /// Watermark (v0.30.0; none before).
+    #[serde(default)]
+    pub watermark: Watermark,
 }
 
 impl Template {
@@ -44,12 +50,71 @@ impl Template {
     /// the first element (if any) — again mirroring the rest of the app's
     /// "uniform across all elements" assumption for these two properties.
     pub fn from_document(doc: &Document) -> Self {
-        let (shadow, corner_radius) = match doc.elements.first() {
-            Some(el) => (el.shadow, el.corner_radius),
-            None => (ShadowParams::default(), CornerRadius::default()),
+        let (shadow, corner_radius, frame) = match doc.elements.first() {
+            Some(el) => (el.shadow, el.corner_radius, el.frame),
+            None => (ShadowParams::default(), CornerRadius::default(), DeviceFrame::default()),
         };
-        Template { layout: doc.layout, background: doc.background.clone(), shadow, corner_radius, label_defaults: doc.label_defaults.clone() }
+        Template {
+            layout: doc.layout,
+            background: doc.background.clone(),
+            shadow,
+            corner_radius,
+            label_defaults: doc.label_defaults.clone(),
+            frame,
+            watermark: doc.watermark.clone(),
+        }
     }
+}
+
+/// Renders `template` on three placeholder phone screens, `width` pixels
+/// wide — the preview image in the preset list. Deterministic, needs no
+/// real screenshots.
+pub fn render_preview(template: &Template, width: i32) -> Result<cairo::ImageSurface, crate::render::RenderError> {
+    let accents = [(0.21, 0.52, 0.89), (0.18, 0.62, 0.45), (0.85, 0.45, 0.20)];
+    let (sw, sh) = (360.0, 780.0);
+    let mut doc = Document::new();
+    let mut images = std::collections::HashMap::new();
+    for accent in accents {
+        let mut element = crate::model::ScreenshotElement::new(crate::model::ImageSource::Path("preview".into()), sw, sh);
+        element.shadow = template.shadow;
+        element.corner_radius = template.corner_radius;
+        element.frame = template.frame;
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, sw as i32, sh as i32)?;
+        {
+            let ctx = cairo::Context::new(&surface)?;
+            ctx.set_source_rgb(0.97, 0.97, 0.98);
+            ctx.paint()?;
+            ctx.set_source_rgb(accent.0, accent.1, accent.2);
+            ctx.rectangle(0.0, 0.0, sw, sh * 0.16);
+            ctx.fill()?;
+            ctx.set_source_rgb(0.86, 0.87, 0.89);
+            for k in 0..6 {
+                let y = sh * (0.24 + k as f64 * 0.11);
+                let w = sw * if k % 2 == 0 { 0.8 } else { 0.55 };
+                crate::render::rounded_rect_path(&ctx, sw * 0.1, y, w, sh * 0.05, &CornerRadius::uniform(sh * 0.02));
+                ctx.fill()?;
+            }
+        }
+        images.insert(element.id, surface);
+        doc.elements.push(element);
+    }
+    doc.layout = template.layout;
+    doc.background = template.background.clone();
+    doc.watermark = template.watermark.clone();
+    crate::layout::fit_canvas_to_content(&mut doc);
+    let scale = width as f64 / doc.canvas.export_width.max(1) as f64;
+    let height = (doc.canvas.export_height as f64 * scale).round().max(1.0) as i32;
+    let target = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height)?;
+    crate::render::compose(
+        &doc,
+        &target,
+        scale,
+        &images,
+        None,
+        &crate::shadow_cache::ShadowCache::new(),
+        &crate::background_cache::BackgroundCache::new(),
+    )?;
+    Ok(target)
 }
 
 /// One saved preset together with the name the user gave it (spec: "Der
@@ -150,6 +215,14 @@ pub fn deserialize_label_style(json: &str) -> Result<LabelStyle, LabelStyleError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_preview_renders_at_the_requested_width() {
+        let doc = Document::new();
+        let preview = render_preview(&Template::from_document(&doc), 160).unwrap();
+        assert_eq!(preview.width(), 160);
+        assert!(preview.height() > 0);
+    }
     use crate::model::{ImageSource, LayoutMode, Rgba, ScreenshotElement};
     use std::path::PathBuf;
 

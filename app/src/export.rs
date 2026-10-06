@@ -31,6 +31,8 @@ pub enum ExportError {
     Encode(#[from] image::ImageError),
     #[error("could not build source surface: {0}")]
     Import(#[from] import::ImportError),
+    #[error("video encoding failed: {0}")]
+    Video(String),
 }
 
 /// Renders `doc` scaled to its configured target export width (height
@@ -46,44 +48,93 @@ pub fn render_and_write(
     background_image: Option<&DecodedImage>,
     path: &Path,
 ) -> Result<(), ExportError> {
-    let mut target = render_surface(doc, decoded_images, background_image)?;
-    let (out_width, out_height) = (target.width() as f64, target.height() as f64);
+    if doc.canvas.export_format == ExportFormat::WebM {
+        return crate::video::render_and_write(doc, decoded_images, background_image, path);
+    }
+    let target = render_surface(doc, decoded_images, background_image)?;
+    let slices = doc.canvas.slices.max(1);
+    let parts = split(target, slices)?;
 
-    match doc.canvas.export_format {
+    if doc.canvas.export_format == ExportFormat::Pdf {
+        // One page per slice, each the size of its slice in points.
+        let (w, h) = (parts[0].width() as f64, parts[0].height() as f64);
+        let pdf = cairo::PdfSurface::new(w, h, path)?;
+        let ctx = cairo::Context::new(&pdf)?;
+        for part in &parts {
+            pdf.set_size(part.width() as f64, part.height() as f64)?;
+            ctx.set_source_surface(part, 0.0, 0.0)?;
+            ctx.paint()?;
+            ctx.show_page()?;
+        }
+        drop(ctx);
+        pdf.finish();
+        return Ok(());
+    }
+
+    for (index, mut part) in parts.into_iter().enumerate() {
+        let part_path = if slices > 1 { numbered_path(path, index + 1) } else { path.to_path_buf() };
+        write_image(&mut part, doc.canvas.export_format, doc.canvas.export_quality, &part_path)?;
+    }
+    Ok(())
+}
+
+/// `path` with `-n` appended to the file stem: `shots.png` → `shots-2.png`.
+pub fn numbered_path(path: &Path, n: usize) -> std::path::PathBuf {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = match path.extension() {
+        Some(ext) => format!("{stem}-{n}.{}", ext.to_string_lossy()),
+        None => format!("{stem}-{n}"),
+    };
+    path.with_file_name(name)
+}
+
+/// Cuts `surface` into `n` equally wide vertical strips (the last one takes
+/// the rounding remainder). `n == 1` returns the surface itself.
+fn split(surface: cairo::ImageSurface, n: u32) -> Result<Vec<cairo::ImageSurface>, ExportError> {
+    if n <= 1 {
+        return Ok(vec![surface]);
+    }
+    let (w, h) = (surface.width(), surface.height());
+    let mut parts = Vec::new();
+    for k in 0..n as i32 {
+        let x0 = (w as f64 * k as f64 / n as f64).round() as i32;
+        let x1 = (w as f64 * (k + 1) as f64 / n as f64).round() as i32;
+        let part = cairo::ImageSurface::create(cairo::Format::ARgb32, (x1 - x0).max(1), h)?;
+        let ctx = cairo::Context::new(&part)?;
+        ctx.set_source_surface(&surface, -x0 as f64, 0.0)?;
+        ctx.paint()?;
+        drop(ctx);
+        parts.push(part);
+    }
+    Ok(parts)
+}
+
+fn write_image(target: &mut cairo::ImageSurface, format: ExportFormat, quality: u8, path: &Path) -> Result<(), ExportError> {
+    match format {
         ExportFormat::Png => {
             let mut file = File::create(path)?;
             target.write_to_png(&mut file)?;
         }
         ExportFormat::Jpeg => {
             // JPEG has no alpha: flatten a transparent export onto white.
-            let rgba = surface_to_rgba_image(&mut flattened_on_white(&target)?)?;
+            let rgba = surface_to_rgba_image(&mut flattened_on_white(target)?)?;
             let mut file = File::create(path)?;
-            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, doc.canvas.export_quality);
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
             encoder.encode_image(&rgba)?;
         }
         ExportFormat::WebP => {
-            let rgba = surface_to_rgba_image(&mut target)?;
+            let rgba = surface_to_rgba_image(target)?;
             let file = File::create(path)?;
             let encoder = image::codecs::webp::WebPEncoder::new_lossless(file);
             encoder.write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)?;
         }
         ExportFormat::Avif => {
-            let rgba = surface_to_rgba_image(&mut target)?;
+            let rgba = surface_to_rgba_image(target)?;
             let file = File::create(path)?;
-            let quality = doc.canvas.export_quality.clamp(1, 100);
-            let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(file, 4, quality);
+            let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(file, 4, quality.clamp(1, 100));
             encoder.write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)?;
         }
-        ExportFormat::Pdf => {
-            // One page the size of the export, in points (1 px = 1 pt), with
-            // the composition embedded as an image.
-            let pdf = cairo::PdfSurface::new(out_width, out_height, path)?;
-            let ctx = cairo::Context::new(&pdf)?;
-            ctx.set_source_surface(&target, 0.0, 0.0)?;
-            ctx.paint()?;
-            drop(ctx);
-            pdf.finish();
-        }
+        ExportFormat::Pdf | ExportFormat::WebM => unreachable!("written by render_and_write"),
     }
     Ok(())
 }
@@ -200,6 +251,24 @@ mod tests {
     /// (background-only) document — enough to catch an encoder call that
     /// panics or a file that never gets written, without needing any real
     /// screenshots decoded.
+    #[test]
+    fn slices_are_written_as_numbered_files() {
+        let mut doc = Document::new();
+        doc.canvas.export_width = 30;
+        doc.canvas.export_height = 20;
+        doc.canvas.export_target_width = 30;
+        doc.canvas.slices = 3;
+        let path = std::env::temp_dir().join("screenforge-slices-test.png");
+        render_and_write(&doc, &HashMap::new(), None, &path).unwrap();
+        for n in 1..=3 {
+            let part = numbered_path(&path, n);
+            let mut file = File::open(&part).unwrap();
+            let surface = cairo::ImageSurface::create_from_png(&mut file).unwrap();
+            assert_eq!((surface.width(), surface.height()), (10, 20));
+            std::fs::remove_file(part).ok();
+        }
+    }
+
     #[test]
     fn every_export_format_writes_a_non_empty_file() {
         for format in [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::WebP, ExportFormat::Avif, ExportFormat::Pdf] {
