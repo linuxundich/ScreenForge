@@ -108,6 +108,8 @@ pub(crate) fn register_effect_controls(window: &Window, canvas: &Canvas, state: 
             window.generator_contrast_row().set_visible(is_generated);
             window.generator_seed_row().set_visible(is_generated);
             window.generator_generate_row().set_visible(is_generated);
+            window.variants_group().set_visible(is_generated);
+            window.variants_actions_group().set_visible(is_generated);
             sync_generator_color_strategy_visibility(&window, is_generated, color_strategy_for_index(window.generator_color_strategy_row().selected()));
             // Selecting "Bild" only reveals the file picker — there's
             // nothing to render until a file is actually chosen (below).

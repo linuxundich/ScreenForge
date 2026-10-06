@@ -163,8 +163,13 @@ pub(crate) fn register_zoom_actions(app: &adw::Application, window: &Window, can
     let zoom_fit = gio::SimpleAction::new("zoom-fit", None);
     zoom_fit.connect_activate(glib::clone!(
         #[weak]
+        window,
+        #[weak]
         canvas,
-        move |_, _| canvas.set_zoom(None)
+        move |_, _| {
+            canvas.set_zoom(None);
+            update_zoom_label(&window, &canvas);
+        }
     ));
     window.add_action(&zoom_fit);
     app.set_accels_for_action("win.zoom-fit", &["<Ctrl>0"]);
@@ -172,8 +177,13 @@ pub(crate) fn register_zoom_actions(app: &adw::Application, window: &Window, can
     let zoom_100 = gio::SimpleAction::new("zoom-100", None);
     zoom_100.connect_activate(glib::clone!(
         #[weak]
+        window,
+        #[weak]
         canvas,
-        move |_, _| canvas.set_zoom(Some(1.0))
+        move |_, _| {
+            canvas.set_zoom(Some(1.0));
+            update_zoom_label(&window, &canvas);
+        }
     ));
     window.add_action(&zoom_100);
     app.set_accels_for_action("win.zoom-100", &["<Ctrl>1"]);
@@ -181,10 +191,13 @@ pub(crate) fn register_zoom_actions(app: &adw::Application, window: &Window, can
     let zoom_in = gio::SimpleAction::new("zoom-in", None);
     zoom_in.connect_activate(glib::clone!(
         #[weak]
+        window,
+        #[weak]
         canvas,
         move |_, _| {
-            let current = canvas.zoom().unwrap_or(1.0);
+            let current = canvas.zoom().unwrap_or_else(|| canvas.effective_zoom());
             canvas.set_zoom(Some((current * ZOOM_STEP).min(ZOOM_MAX)));
+            update_zoom_label(&window, &canvas);
         }
     ));
     window.add_action(&zoom_in);
@@ -193,10 +206,13 @@ pub(crate) fn register_zoom_actions(app: &adw::Application, window: &Window, can
     let zoom_out = gio::SimpleAction::new("zoom-out", None);
     zoom_out.connect_activate(glib::clone!(
         #[weak]
+        window,
+        #[weak]
         canvas,
         move |_, _| {
-            let current = canvas.zoom().unwrap_or(1.0);
+            let current = canvas.zoom().unwrap_or_else(|| canvas.effective_zoom());
             canvas.set_zoom(Some((current / ZOOM_STEP).max(ZOOM_MIN)));
+            update_zoom_label(&window, &canvas);
         }
     ));
     window.add_action(&zoom_out);
@@ -594,4 +610,14 @@ pub(crate) fn register_context_menu(window: &Window, canvas: &Canvas, state: &Rc
     });
 
     register_replace_action(window, canvas, state, &context_target);
+}
+
+/// The floating toolbar's zoom button reads "Einpassen" while the canvas
+/// fits the window and the percentage otherwise.
+pub(crate) fn update_zoom_label(window: &Window, canvas: &Canvas) {
+    let label = match canvas.zoom() {
+        None => "Einpassen".to_owned(),
+        Some(zoom) => format!("{:.0} %", zoom * 100.0),
+    };
+    window.zoom_menu_button().set_label(&label);
 }

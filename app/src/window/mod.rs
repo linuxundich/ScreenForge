@@ -28,9 +28,6 @@ impl Window {
         self.imp().sidebar_toggle_button.get().clone()
     }
 
-    pub fn layout_mode_row(&self) -> adw::ComboRow {
-        self.imp().layout_mode_row.get().clone()
-    }
 
     pub fn spacing_row(&self) -> adw::SpinRow {
         self.imp().spacing_row.get().clone()
@@ -220,13 +217,10 @@ impl Window {
         self.imp().generator_seed_row.get().clone()
     }
 
-    pub fn generator_generate_row(&self) -> adw::ActionRow {
+    pub fn generator_generate_row(&self) -> adw::ButtonRow {
         self.imp().generator_generate_row.get().clone()
     }
 
-    pub fn generator_generate_button(&self) -> gtk4::Button {
-        self.imp().generator_generate_button.get().clone()
-    }
 
     pub fn shadow_row(&self) -> adw::ComboRow {
         self.imp().shadow_row.get().clone()
@@ -248,9 +242,6 @@ impl Window {
         self.imp().corner_radius_row.get().clone()
     }
 
-    pub fn sidebar_page(&self) -> adw::PreferencesPage {
-        self.imp().sidebar_page.get().clone()
-    }
 
     pub fn label_group(&self) -> adw::PreferencesGroup {
         self.imp().label_group.get().clone()
@@ -312,6 +303,78 @@ impl Window {
         self.imp().presets_menu_button.get().clone()
     }
 
+    pub fn window_title(&self) -> adw::WindowTitle {
+        self.imp().window_title.get().clone()
+    }
+
+    pub fn sidebar_stack(&self) -> adw::ViewStack {
+        self.imp().sidebar_stack.get().clone()
+    }
+
+    pub fn layout_page(&self) -> adw::PreferencesPage {
+        self.imp().layout_page.get().clone()
+    }
+
+    pub fn background_page(&self) -> adw::PreferencesPage {
+        self.imp().background_page.get().clone()
+    }
+
+    pub fn style_page(&self) -> adw::PreferencesPage {
+        self.imp().style_page.get().clone()
+    }
+
+    pub fn text_page(&self) -> adw::PreferencesPage {
+        self.imp().text_page.get().clone()
+    }
+
+    pub fn export_page(&self) -> adw::PreferencesPage {
+        self.imp().export_page.get().clone()
+    }
+
+    pub fn layout_mode_toggle(&self) -> adw::ToggleGroup {
+        self.imp().layout_mode_toggle.get().clone()
+    }
+
+    pub fn canvas_overlay(&self) -> gtk4::Overlay {
+        self.imp().canvas_overlay.get().clone()
+    }
+
+    pub fn empty_state(&self) -> adw::StatusPage {
+        self.imp().empty_state.get().clone()
+    }
+
+    pub fn canvas_toolbar(&self) -> gtk4::Box {
+        self.imp().canvas_toolbar.get().clone()
+    }
+
+    pub fn zoom_menu_button(&self) -> gtk4::MenuButton {
+        self.imp().zoom_menu_button.get().clone()
+    }
+
+    pub fn variants_group(&self) -> adw::PreferencesGroup {
+        self.imp().variants_group.get().clone()
+    }
+
+    pub fn variants_actions_group(&self) -> adw::PreferencesGroup {
+        self.imp().variants_actions_group.get().clone()
+    }
+
+    pub fn variants_flow(&self) -> gtk4::FlowBox {
+        self.imp().variants_flow.get().clone()
+    }
+
+    pub fn variants_mix_row(&self) -> adw::SwitchRow {
+        self.imp().variants_mix_row.get().clone()
+    }
+
+    pub fn variants_reroll_row(&self) -> adw::ButtonRow {
+        self.imp().variants_reroll_row.get().clone()
+    }
+
+    pub fn variants_studio_row(&self) -> adw::ButtonRow {
+        self.imp().variants_studio_row.get().clone()
+    }
+
     pub fn toast_overlay(&self) -> adw::ToastOverlay {
         self.imp().toast_overlay.get().clone()
     }
@@ -336,10 +399,6 @@ mod imp {
         pub split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub sidebar_toggle_button: TemplateChild<gtk4::ToggleButton>,
-        #[template_child]
-        pub sidebar_page: TemplateChild<adw::PreferencesPage>,
-        #[template_child]
-        pub layout_mode_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub spacing_row: TemplateChild<adw::SpinRow>,
         #[template_child]
@@ -435,9 +494,7 @@ mod imp {
         #[template_child]
         pub generator_seed_row: TemplateChild<adw::SpinRow>,
         #[template_child]
-        pub generator_generate_row: TemplateChild<adw::ActionRow>,
-        #[template_child]
-        pub generator_generate_button: TemplateChild<gtk4::Button>,
+        pub generator_generate_row: TemplateChild<adw::ButtonRow>,
         #[template_child]
         pub shadow_row: TemplateChild<adw::ComboRow>,
         #[template_child]
@@ -478,6 +535,42 @@ mod imp {
         pub android_import_button: TemplateChild<gtk4::Button>,
         #[template_child]
         pub presets_menu_button: TemplateChild<gtk4::MenuButton>,
+        #[template_child]
+        pub window_title: TemplateChild<adw::WindowTitle>,
+        #[template_child]
+        pub sidebar_stack: TemplateChild<adw::ViewStack>,
+        #[template_child]
+        pub layout_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
+        pub background_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
+        pub style_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
+        pub text_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
+        pub export_page: TemplateChild<adw::PreferencesPage>,
+        #[template_child]
+        pub layout_mode_toggle: TemplateChild<adw::ToggleGroup>,
+        #[template_child]
+        pub canvas_overlay: TemplateChild<gtk4::Overlay>,
+        #[template_child]
+        pub empty_state: TemplateChild<adw::StatusPage>,
+        #[template_child]
+        pub canvas_toolbar: TemplateChild<gtk4::Box>,
+        #[template_child]
+        pub zoom_menu_button: TemplateChild<gtk4::MenuButton>,
+        #[template_child]
+        pub variants_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub variants_actions_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub variants_flow: TemplateChild<gtk4::FlowBox>,
+        #[template_child]
+        pub variants_mix_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub variants_reroll_row: TemplateChild<adw::ButtonRow>,
+        #[template_child]
+        pub variants_studio_row: TemplateChild<adw::ButtonRow>,
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
     }

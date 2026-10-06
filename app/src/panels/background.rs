@@ -112,6 +112,8 @@ pub(crate) fn sync_background_controls(window: &Window, background: &Background)
     window.generator_contrast_row().set_visible(is_generated);
     window.generator_seed_row().set_visible(is_generated);
     window.generator_generate_row().set_visible(is_generated);
+    window.variants_group().set_visible(is_generated);
+    window.variants_actions_group().set_visible(is_generated);
     sync_generator_color_strategy_visibility(
         window,
         is_generated,
@@ -582,7 +584,7 @@ pub(crate) fn register_generator_controls(window: &Window, canvas: &Canvas, stat
     window.generator_mood_row().connect_selected_notify(glib::clone!(#[strong] apply, move |_| apply()));
     window.generator_grain_row().connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
 
-    window.generator_generate_button().connect_clicked(glib::clone!(
+    window.generator_generate_row().connect_activated(glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -724,4 +726,5 @@ pub(crate) fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<R
 
     refresh_canvas(window, canvas, state);
     update_undo_redo_sensitivity(window, state);
+    rebuild_sidebar_variants(window, canvas, state);
 }

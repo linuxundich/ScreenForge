@@ -128,6 +128,7 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
                 let export_button = window.export_button();
                 let toast_overlay = window.toast_overlay();
                 export_button.set_sensitive(false);
+                export_button.set_child(Some(&adw::Spinner::new()));
 
                 let doc = state.borrow().document.clone();
                 let (decoded_images, background_image) = {
@@ -151,6 +152,7 @@ pub(crate) fn register_export_action(app: &adw::Application, window: &Window, st
                         .await;
 
                 export_button.set_sensitive(true);
+                export_button.set_label("Exportieren");
                 let toast = match result {
                     Ok(Ok(())) => adw::Toast::new("Export erfolgreich"),
                     Ok(Err(err)) => adw::Toast::new(&format!("Export fehlgeschlagen: {err}")),

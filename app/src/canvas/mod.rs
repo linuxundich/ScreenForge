@@ -57,6 +57,12 @@ impl Canvas {
         self.queue_draw();
     }
 
+    /// The scale actually on screen — the fit-to-window scale while in fit
+    /// mode, so zoom steps continue from what the user sees.
+    pub fn effective_zoom(&self) -> f64 {
+        self.imp().last_scale.get()
+    }
+
     pub fn zoom(&self) -> Option<f64> {
         self.imp().zoom()
     }
@@ -356,7 +362,7 @@ mod imp {
         /// last render, flat (not index-aligned with `last_placements`) —
         /// see `CalloutPlacement`.
         last_callout_placements: RefCell<Vec<CalloutPlacement>>,
-        last_scale: Cell<f64>,
+        pub(super) last_scale: Cell<f64>,
         /// Index into `last_placements`/`Document.elements` the current
         /// reorder drag picked up, if any.
         drag_from: Cell<Option<usize>>,

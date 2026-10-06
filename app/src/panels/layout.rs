@@ -32,21 +32,21 @@ pub(crate) fn sync_alignment_group_visibility(window: &Window, mode: LayoutMode)
 /// mutating it directly through the undo stack (spec §17: layout changes are
 /// undoable).
 pub(crate) fn register_layout_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let layout_mode_row = window.layout_mode_row();
+    let layout_mode_toggle = window.layout_mode_toggle();
     let spacing_row = window.spacing_row();
     let margin_x_row = window.margin_x_row();
     let margin_y_row = window.margin_y_row();
 
     {
         let state_ref = state.borrow();
-        layout_mode_row.set_selected(index_for_layout_mode(state_ref.document.layout.mode));
+        layout_mode_toggle.set_active(index_for_layout_mode(state_ref.document.layout.mode));
         spacing_row.set_value(state_ref.document.layout.spacing_px);
         margin_x_row.set_value(state_ref.document.layout.margin_x);
         margin_y_row.set_value(state_ref.document.layout.margin_y);
         sync_alignment_group_visibility(window, state_ref.document.layout.mode);
     }
 
-    layout_mode_row.connect_selected_notify(glib::clone!(
+    layout_mode_toggle.connect_active_notify(glib::clone!(
         #[weak]
         window,
         #[weak]
@@ -54,7 +54,7 @@ pub(crate) fn register_layout_controls(window: &Window, canvas: &Canvas, state: 
         #[strong]
         state,
         move |row| {
-            let new = layout_mode_for_index(row.selected());
+            let new = layout_mode_for_index(row.active());
             sync_alignment_group_visibility(&window, new);
             let mut state_ref = state.borrow_mut();
             let old = state_ref.document.layout.mode;

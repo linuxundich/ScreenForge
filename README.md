@@ -45,10 +45,14 @@ PNG, JPEG or WebP image.
   — with harmonious palettes (vivid, light or dark, random or derived
   from the screenshots), soft shadows and film grain. The original wave
   generator remains available as "Waves (classic)".
+- **Variants**: six alternative backgrounds one click away in the
+  sidebar, or nine large previews of the real composition in the
+  background studio — per style or mixed, in any mood.
 - **Effects**: shadow presets (None/Subtle/Standard/Strong/Floating) with
   freely adjustable direction, length and blur, and rounded corners.
-- **Zoom**: fit to window, 100%, step in/out, with scrolling once zoomed
-  in; the sidebar can be collapsed to give the canvas more room.
+- **Workspace**: a tabbed sidebar (Layout, Background, Style, Text,
+  Export) that turns into an overlay on narrow windows, a floating zoom
+  bar (fit, 100 %, step in/out), and a shortcuts overview (Ctrl+?).
 - **Undo/redo** for every edit.
 - **Export** to PNG, JPEG, WebP or AVIF, scaled to a freely chosen target
   width (height always following proportionally), rendered off the UI

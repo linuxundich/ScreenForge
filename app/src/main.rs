@@ -88,6 +88,7 @@ fn register_app_icon_theme() {
 
 fn build_ui(app: &adw::Application) {
     register_app_icon_theme();
+    register_css();
     let window = Window::new(app);
     let canvas = window.canvas();
 
@@ -126,6 +127,8 @@ fn build_ui(app: &adw::Application) {
     register_sidebar_toggle(&window);
     register_eyedroppers(&window, &canvas);
     register_text_focus_guards(&window);
+    register_variant_controls(&window, &canvas, &state);
+    register_shortcuts_action(app);
 
     window.present();
 }
@@ -142,4 +145,32 @@ fn build_ui(app: &adw::Application) {
 fn register_sidebar_toggle(window: &Window) {
     window.sidebar_toggle_button().set_active(window.split_view().shows_sidebar());
     window.sidebar_toggle_button().bind_property("active", &window.split_view(), "show-sidebar").bidirectional().sync_create().build();
+    let toggle = gio::SimpleAction::new("toggle-sidebar", None);
+    toggle.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        move |_, _| {
+            let button = window.sidebar_toggle_button();
+            button.set_active(!button.is_active());
+        }
+    ));
+    window.add_action(&toggle);
+    if let Some(app) = window.application() {
+        app.set_accels_for_action("win.toggle-sidebar", &["F9"]);
+    }
+}
+
+/// Small style additions on top of libadwaita: rounded floating canvas
+/// toolbar and the variant thumbnails.
+fn register_css() {
+    let Some(display) = gdk::Display::default() else { return };
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_string(
+        ".canvas-toolbar { border-radius: 12px; padding: 4px; }
+         .variant-thumb { padding: 0; border-radius: 8px; }
+         .variant-picture { border-radius: 8px; }
+         flowboxchild:selected .variant-picture { outline: 3px solid var(--accent-bg-color); outline-offset: 2px; }
+         flowboxchild:selected { background: none; }",
+    );
+    gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }

@@ -2,25 +2,28 @@
 <interface>
   <template class="ScreenForgeWindow" parent="AdwApplicationWindow">
     <property name="title" translatable="yes">ScreenForge</property>
-    <property name="default-width">1100</property>
-    <property name="default-height">700</property>
+    <property name="default-width">1200</property>
+    <property name="default-height">760</property>
     <property name="width-request">360</property>
     <property name="height-request">400</property>
+    <!-- Narrow windows: the sidebar becomes an overlay that starts hidden,
+         so the canvas keeps the full width. -->
     <child>
+      <object class="AdwBreakpoint">
+        <condition>max-width: 760sp</condition>
+        <setter object="split_view" property="collapsed">True</setter>
+        <setter object="split_view" property="show-sidebar">False</setter>
+      </object>
+    </child>
+    <property name="content">
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar">
             <child type="start">
-              <object class="GtkToggleButton" id="sidebar_toggle_button">
-                <property name="icon-name">sidebar-show-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Seitenleiste ein-/ausblenden</property>
-              </object>
-            </child>
-            <child type="start">
-              <object class="GtkMenuButton" id="open_menu_button">
-                <property name="icon-name">document-open-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Öffnen</property>
-                <property name="menu-model">open_menu</property>
+              <object class="GtkMenuButton" id="add_menu_button">
+                <property name="icon-name">list-add-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Hinzufügen</property>
+                <property name="menu-model">add_menu</property>
               </object>
             </child>
             <child type="start">
@@ -45,18 +48,20 @@
                 <property name="action-name">win.redo</property>
               </object>
             </child>
-            <!-- AdwHeaderBar packs "end" children in the REVERSE of their
-                 declaration order here (the first one declared ends up
-                 rightmost, closest to the window controls) — confirmed
-                 live, not just inferred from the XML. So this list is
-                 written back-to-front relative to the desired on-screen
-                 left-to-right order: Presets, Zoom, "Screenshots
-                 ausblenden", Exportieren, Hauptmenü (rightmost). -->
+            <property name="title-widget">
+              <object class="AdwWindowTitle" id="window_title">
+                <property name="title" translatable="yes">ScreenForge</property>
+              </object>
+            </property>
+            <!-- "end" children are packed right to left: menu, export,
+                 sidebar toggle, presets appear as presets | sidebar |
+                 Exportieren | menu on screen. -->
             <child type="end">
               <object class="GtkMenuButton" id="primary_menu_button">
                 <property name="icon-name">open-menu-symbolic</property>
                 <property name="tooltip-text" translatable="yes">Hauptmenü</property>
                 <property name="menu-model">primary_menu</property>
+                <property name="primary">true</property>
               </object>
             </child>
             <child type="end">
@@ -69,26 +74,14 @@
               </object>
             </child>
             <child type="end">
-              <object class="GtkToggleButton" id="hide_screenshots_button">
-                <property name="icon-name">view-reveal-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Screenshots vorübergehend ausblenden</property>
+              <object class="GtkToggleButton" id="sidebar_toggle_button">
+                <property name="icon-name">sidebar-show-right-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Seitenleiste ein-/ausblenden (F9)</property>
               </object>
             </child>
             <child type="end">
-              <object class="GtkMenuButton" id="zoom_menu_button">
-                <property name="icon-name">zoom-fit-best-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Zoom</property>
-                <property name="menu-model">zoom_menu</property>
-              </object>
-            </child>
-            <child type="end">
-              <!-- Popover content built and attached programmatically in
-                   main.rs's register_presets_menu (a dynamic, persisted
-                   list can't be declared statically as a menu-model here)
-                   — deliberately its own header-bar entry point rather
-                   than a page in the "Einstellungen" dialog, since a
-                   preset captures *this project's* current settings, not
-                   the app-wide ones that dialog otherwise holds. -->
+              <!-- Popover content is built in presets.rs (a persisted,
+                   editable list can't be a static menu model). -->
               <object class="GtkMenuButton" id="presets_menu_button">
                 <property name="icon-name">user-bookmarks-symbolic</property>
                 <property name="tooltip-text" translatable="yes">Presets</property>
@@ -96,835 +89,1052 @@
             </child>
           </object>
         </child>
-        <child>
+        <property name="content">
           <object class="AdwToastOverlay" id="toast_overlay">
-            <child>
+            <property name="child">
               <object class="AdwOverlaySplitView" id="split_view">
-            <property name="sidebar-width-fraction">0.28</property>
-            <property name="min-sidebar-width">240</property>
-            <property name="max-sidebar-width">360</property>
-            <child type="sidebar">
-              <object class="GtkScrolledWindow">
-                <property name="hscrollbar-policy">never</property>
+                <property name="sidebar-position">end</property>
+                <property name="sidebar-width-fraction">0.3</property>
+                <property name="min-sidebar-width">320</property>
+                <property name="max-sidebar-width">400</property>
+                <property name="sidebar">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <child>
+                      <object class="AdwInlineViewSwitcher">
+                        <property name="stack">sidebar_stack</property>
+                        <property name="display-mode">labels</property>
+                        <property name="can-shrink">false</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="margin-top">8</property>
+                        <property name="margin-bottom">2</property>
+                        <style>
+                          <class name="flat"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwViewStack" id="sidebar_stack">
+                        <property name="vexpand">true</property>
                 <child>
-                  <object class="AdwPreferencesPage" id="sidebar_page">
-                    <child>
-                      <object class="AdwPreferencesGroup">
-                        <property name="title" translatable="yes">Layout</property>
-                        <child>
-                          <object class="AdwComboRow" id="layout_mode_row">
-                            <property name="title" translatable="yes">Art</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Horizontal</item>
-                                  <item translatable="yes">Vertikal</item>
-                                  <item translatable="yes">Raster</item>
-                                  <item translatable="yes">Frei</item>
-                                </items>
+                  <object class="AdwViewStackPage">
+                    <property name="name">layout</property>
+                    <property name="title" translatable="yes">Layout</property>
+                    <property name="icon-name">view-grid-symbolic</property>
+                    <property name="child">
+                      <object class="AdwPreferencesPage" id="layout_page">
+                            <child>
+                              <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="yes">Layout</property>
+                                <child>
+                                  <object class="AdwToggleGroup" id="layout_mode_toggle">
+                                    <property name="homogeneous">true</property>
+                                    <child>
+                                      <object class="AdwToggle">
+                                        <property name="name">horizontal</property>
+                                        <property name="icon-name">sf-layout-horizontal-symbolic</property>
+                                        <property name="tooltip" translatable="yes">Horizontal</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="AdwToggle">
+                                        <property name="name">vertical</property>
+                                        <property name="icon-name">sf-layout-vertical-symbolic</property>
+                                        <property name="tooltip" translatable="yes">Vertikal</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="AdwToggle">
+                                        <property name="name">grid</property>
+                                        <property name="icon-name">sf-layout-grid-symbolic</property>
+                                        <property name="tooltip" translatable="yes">Raster</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="AdwToggle">
+                                        <property name="name">free</property>
+                                        <property name="icon-name">sf-layout-free-symbolic</property>
+                                        <property name="tooltip" translatable="yes">Frei — Screenshots per Maus platzieren</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
                               </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="spacing_row">
-                            <property name="title" translatable="yes">Abstand</property>
-                            <property name="subtitle" translatable="yes">Zwischen den Screenshots, in Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">500</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">24</property>
+                            </child>
+                            <child>
+                              <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="yes">Abstände</property>
+                                <child>
+                                  <object class="AdwSpinRow" id="spacing_row">
+                                    <property name="title" translatable="yes">Abstand</property>
+                                    <property name="subtitle" translatable="yes">Zwischen den Screenshots, in Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">500</property>
+                                        <property name="step-increment">4</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">24</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="margin_x_row">
+                                    <property name="title" translatable="yes">Außenabstand horizontal</property>
+                                    <property name="subtitle" translatable="yes">Links/rechts um die Komposition, in Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">500</property>
+                                        <property name="step-increment">4</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">48</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="margin_y_row">
+                                    <property name="title" translatable="yes">Außenabstand vertikal</property>
+                                    <property name="subtitle" translatable="yes">Oben/unten um die Komposition, in Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">500</property>
+                                        <property name="step-increment">4</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">48</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
                               </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="margin_x_row">
-                            <property name="title" translatable="yes">Außenabstand horizontal</property>
-                            <property name="subtitle" translatable="yes">Links/rechts um die Komposition, in Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">500</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">48</property>
+                            </child>
+                            <child>
+                              <object class="AdwPreferencesGroup" id="alignment_group">
+                                <property name="title" translatable="yes">Ausrichtung</property>
+                                <property name="description" translatable="yes">Für mindestens 2 ausgewählte Screenshots im freien Layout</property>
+                                <property name="visible">false</property>
+                                <child>
+                                  <object class="AdwActionRow">
+                                    <property name="title" translatable="yes">Horizontal</property>
+                                    <child type="suffix">
+                                      <object class="GtkBox">
+                                        <property name="valign">center</property>
+                                        <style>
+                                          <class name="linked"/>
+                                        </style>
+                                        <child>
+                                          <object class="GtkButton" id="align_left_button">
+                                            <property name="icon-name">sf-align-left-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Linke Kanten ausrichten</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="align_center_h_button">
+                                            <property name="icon-name">sf-align-center-h-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Horizontal zentrieren</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="align_right_button">
+                                            <property name="icon-name">sf-align-right-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Rechte Kanten ausrichten</property>
+                                          </object>
+                                        </child>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow">
+                                    <property name="title" translatable="yes">Vertikal</property>
+                                    <child type="suffix">
+                                      <object class="GtkBox">
+                                        <property name="valign">center</property>
+                                        <style>
+                                          <class name="linked"/>
+                                        </style>
+                                        <child>
+                                          <object class="GtkButton" id="align_top_button">
+                                            <property name="icon-name">sf-align-top-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Obere Kanten ausrichten</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="align_center_v_button">
+                                            <property name="icon-name">sf-align-center-v-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Vertikal zentrieren</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="align_bottom_button">
+                                            <property name="icon-name">sf-align-bottom-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Untere Kanten ausrichten</property>
+                                          </object>
+                                        </child>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
                               </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="margin_y_row">
-                            <property name="title" translatable="yes">Außenabstand vertikal</property>
-                            <property name="subtitle" translatable="yes">Oben/unten um die Komposition, in Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">500</property>
-                                <property name="step-increment">4</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">48</property>
+                            </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">background</property>
+                    <property name="title" translatable="yes">Hintergrund</property>
+                    <property name="icon-name">image-x-generic-symbolic</property>
+                    <property name="child">
+                      <object class="AdwPreferencesPage" id="background_page">
+                            <child>
+                              <object class="AdwPreferencesGroup" id="background_group">
+                                <property name="title" translatable="yes">Hintergrund</property>
+                                <child>
+                                  <object class="AdwComboRow" id="background_type_row">
+                                    <property name="title" translatable="yes">Art</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Einfarbig</item>
+                                          <item translatable="yes">Linearer Verlauf</item>
+                                          <item translatable="yes">Radialer Verlauf</item>
+                                          <item translatable="yes">Bild</item>
+                                          <item translatable="yes">Generiert</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="background_color1_row">
+                                    <property name="title" translatable="yes">Farbe 1</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="background_color_button">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="background_eyedropper_button">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="gradient_color2_row">
+                                    <property name="title" translatable="yes">Farbe 2</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="gradient_color2_button">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="gradient_color2_eyedropper_button">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="gradient_angle_row">
+                                    <property name="title" translatable="yes">Winkel</property>
+                                    <property name="subtitle" translatable="yes">In Grad</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">360</property>
+                                        <property name="step-increment">15</property>
+                                        <property name="page-increment">45</property>
+                                        <property name="value">90</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="gradient_auto_colors_row">
+                                    <property name="title" translatable="yes">Automatische Farben</property>
+                                    <property name="subtitle" translatable="yes">Aus den importierten Screenshots vorschlagen — erneut klicken für einen anderen Vorschlag</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="gradient_generate_button">
+                                        <property name="valign">center</property>
+                                        <property name="label" translatable="yes">Generieren</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="background_image_row">
+                                    <property name="title" translatable="yes">Bilddatei</property>
+                                    <property name="subtitle" translatable="yes">Kein Bild ausgewählt</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="background_image_button">
+                                        <property name="valign">center</property>
+                                        <property name="label" translatable="yes">Wählen…</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwComboRow" id="background_image_fit_row">
+                                    <property name="title" translatable="yes">Passung</property>
+                                    <property name="visible">false</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Ausfüllen (zuschneiden)</item>
+                                          <item translatable="yes">Einpassen</item>
+                                          <item translatable="yes">Strecken</item>
+                                          <item translatable="yes">Kacheln</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="background_image_opacity_row">
+                                    <property name="title" translatable="yes">Deckkraft</property>
+                                    <property name="subtitle" translatable="yes">In Prozent</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">100</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwComboRow" id="generator_style_row">
+                                    <property name="title" translatable="yes">Stil</property>
+                                    <property name="visible">false</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Schichten</item>
+                                          <item translatable="yes">Bögen</item>
+                                          <item translatable="yes">Bänder</item>
+                                          <item translatable="yes">Flächen</item>
+                                          <item translatable="yes">Linien</item>
+                                          <item translatable="yes">Nebel</item>
+                                          <item translatable="yes">Wellen (klassisch)</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwComboRow" id="generator_color_strategy_row">
+                                    <property name="title" translatable="yes">Farben</property>
+                                    <property name="visible">false</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Manuell</item>
+                                          <item translatable="yes">Von Screenshots</item>
+                                          <item translatable="yes">Schwarz-Weiß</item>
+                                          <item translatable="yes">Zufällig</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                    <!-- Index 3 ("Zufällig") — the default
+                                         generation mode (spec: "Zufällig soll zum
+                                         Default-Modus für generierte Hintergründe
+                                         werden"). Must come *after* `model` above:
+                                         GtkBuilder applies properties in document
+                                         order, and `selected` against a still-empty
+                                         model silently clamps to 0 regardless of
+                                         what's set here — confirmed by hand after
+                                         the first attempt (property listed before
+                                         `model`) had no effect. `generate_background`
+                                         in main.rs reads this row's *current*
+                                         selection directly rather than deriving it
+                                         from GeneratedBackground::new()'s own
+                                         default, so that Rust-level default alone
+                                         was never enough either — this property is
+                                         what actually makes the very first switch
+                                         to "Generiert" land on Random. Any real
+                                         Generated background (loaded, undone, or
+                                         already generated) overrides this via
+                                         sync_generator_controls regardless, so it
+                                         only matters before that ever happens. -->
+                                    <property name="selected">3</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwComboRow" id="generator_mood_row">
+                                    <property name="title" translatable="yes">Stimmung</property>
+                                    <property name="subtitle" translatable="yes">Helligkeit der erzeugten Farben</property>
+                                    <property name="visible">false</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Kräftig</item>
+                                          <item translatable="yes">Hell</item>
+                                          <item translatable="yes">Dunkel</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="generator_manual_color_row_1">
+                                    <property name="title" translatable="yes">Farbe 1</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="generator_manual_color_button_1">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="generator_manual_eyedropper_button_1">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="generator_manual_color_row_2">
+                                    <property name="title" translatable="yes">Farbe 2</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="generator_manual_color_button_2">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="generator_manual_eyedropper_button_2">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="generator_manual_color_row_3">
+                                    <property name="title" translatable="yes">Farbe 3</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="generator_manual_color_button_3">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="generator_manual_eyedropper_button_3">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow" id="generator_manual_color_row_4">
+                                    <property name="title" translatable="yes">Farbe 4</property>
+                                    <property name="visible">false</property>
+                                    <child type="suffix">
+                                      <object class="GtkColorDialogButton" id="generator_manual_color_button_4">
+                                        <property name="valign">center</property>
+                                        <property name="dialog">
+                                          <object class="GtkColorDialog"/>
+                                        </property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="generator_manual_eyedropper_button_4">
+                                        <property name="valign">center</property>
+                                        <property name="icon-name">color-select-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSwitchRow" id="generator_adapt_row">
+                                    <property name="title" translatable="yes">An Screenshots anpassen</property>
+                                    <property name="subtitle" translatable="yes">Farben und Platzierung berücksichtigen die Screenshots</property>
+                                    <property name="visible">false</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_inverse_contrast_row">
+                                    <property name="title" translatable="yes">Invertierter Kontrast</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — nur bei "Von Screenshots": höher wirkt stärker gegensätzlich/komplementär statt ähnlich</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">50</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_corner_bias_row">
+                                    <property name="title" translatable="yes">Fokus</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — 0 % Wellenbänder, 100 % Eckbögen</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">50</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_scale_row">
+                                    <property name="title" translatable="yes">Skalierung</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — vergrößert oder verkleinert das Muster</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">40</property>
+                                        <property name="upper">250</property>
+                                        <property name="step-increment">10</property>
+                                        <property name="page-increment">50</property>
+                                        <property name="value">100</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_contrast_row">
+                                    <property name="title" translatable="yes">Kontrast</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">50</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_grain_row">
+                                    <property name="title" translatable="yes">Körnung</property>
+                                    <property name="subtitle" translatable="yes">In Prozent — feines Rauschen gegen Farbstufen</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">35</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="generator_seed_row">
+                                    <property name="title" translatable="yes">Seed</property>
+                                    <property name="subtitle" translatable="yes">Für reproduzierbare Ergebnisse</property>
+                                    <property name="visible">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">999999999</property>
+                                        <property name="step-increment">1</property>
+                                        <property name="page-increment">1000</property>
+                                        <property name="value">1</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwButtonRow" id="generator_generate_row">
+                                    <property name="title" translatable="yes">Neu generieren</property>
+                                    <property name="start-icon-name">view-refresh-symbolic</property>
+                                    <property name="visible">false</property>
+                                  </object>
+                                </child>
                               </object>
-                            </property>
+                            </child>
+                            <child>
+                              <object class="AdwPreferencesGroup" id="variants_group">
+                                <property name="title" translatable="yes">Varianten</property>
+                                <property name="description" translatable="yes">Ein Klick übernimmt die Variante</property>
+                                <property name="visible">false</property>
+                                <child>
+                                  <object class="GtkFlowBox" id="variants_flow">
+                                    <property name="selection-mode">none</property>
+                                    <property name="homogeneous">true</property>
+                                    <property name="min-children-per-line">3</property>
+                                    <property name="max-children-per-line">3</property>
+                                    <property name="column-spacing">6</property>
+                                    <property name="row-spacing">6</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwPreferencesGroup" id="variants_actions_group">
+                                <property name="visible">false</property>
+                                <child>
+                                  <object class="AdwSwitchRow" id="variants_mix_row">
+                                    <property name="title" translatable="yes">Stile mischen</property>
+                                    <property name="subtitle" translatable="yes">Varianten aus allen Stilen statt nur dem gewählten</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwButtonRow" id="variants_reroll_row">
+                                    <property name="title" translatable="yes">Neue Varianten</property>
+                                    <property name="start-icon-name">view-refresh-symbolic</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwButtonRow" id="variants_studio_row">
+                                    <property name="title" translatable="yes">Mehr Varianten …</property>
+                                    <property name="end-icon-name">go-next-symbolic</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">style</property>
+                    <property name="title" translatable="yes">Stil</property>
+                    <property name="icon-name">applications-graphics-symbolic</property>
+                    <property name="child">
+                      <object class="AdwPreferencesPage" id="style_page">
+                            <child>
+                              <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="yes">Effekte</property>
+                                <child>
+                                  <object class="AdwComboRow" id="shadow_row">
+                                    <property name="title" translatable="yes">Schatten</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">Kein Schatten</item>
+                                          <item translatable="yes">Subtil</item>
+                                          <item translatable="yes">Standard</item>
+                                          <item translatable="yes">Stark</item>
+                                          <item translatable="yes">Floating</item>
+                                          <item translatable="yes">Angepasst</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="shadow_angle_row">
+                                    <property name="title" translatable="yes">Schatten-Winkel</property>
+                                    <property name="subtitle" translatable="yes">Richtung des Schattenwurfs, in Grad</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">360</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">45</property>
+                                        <property name="value">90</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="shadow_distance_row">
+                                    <property name="title" translatable="yes">Schatten-Distanz</property>
+                                    <property name="subtitle" translatable="yes">Länge des Schattenwurfs, in Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">300</property>
+                                        <property name="step-increment">2</property>
+                                        <property name="page-increment">20</property>
+                                        <property name="value">6</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="shadow_blur_row">
+                                    <property name="title" translatable="yes">Weichzeichner</property>
+                                    <property name="subtitle" translatable="yes">Unschärfe des Schattens, in Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">150</property>
+                                        <property name="step-increment">2</property>
+                                        <property name="page-increment">10</property>
+                                        <property name="value">16</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="corner_radius_row">
+                                    <property name="title" translatable="yes">Eckenradius</property>
+                                    <property name="subtitle" translatable="yes">In Pixeln</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">0</property>
+                                        <property name="upper">200</property>
+                                        <property name="step-increment">2</property>
+                                        <property name="page-increment">10</property>
+                                        <property name="value">0</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">text</property>
+                    <property name="title" translatable="yes">Text</property>
+                    <property name="icon-name">insert-text-symbolic</property>
+                    <property name="child">
+                      <object class="AdwPreferencesPage" id="text_page">
+                            <child>
+                              <object class="AdwPreferencesGroup" id="label_group">
+                                <property name="title" translatable="yes">Label</property>
+                                <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
+                                <property name="visible">false</property>
+                                <child>
+                                  <object class="AdwSwitchRow" id="label_enabled_row">
+                                    <property name="title" translatable="yes">Label anzeigen</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkBox" id="label_content_box">
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">6</property>
+                                    <property name="margin-top">12</property>
+                                    <property name="margin-bottom">12</property>
+                                    <property name="margin-start">12</property>
+                                    <property name="margin-end">12</property>
+                                    <child>
+                                      <object class="GtkLabel">
+                                        <property name="label" translatable="yes">Text</property>
+                                        <property name="halign">start</property>
+                                        <style>
+                                          <class name="caption-heading"/>
+                                        </style>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkScrolledWindow">
+                                        <property name="hscrollbar-policy">never</property>
+                                        <property name="min-content-height">64</property>
+                                        <property name="max-content-height">120</property>
+                                        <style>
+                                          <class name="card"/>
+                                        </style>
+                                        <child>
+                                          <object class="GtkTextView" id="label_content_view">
+                                            <property name="sensitive">false</property>
+                                            <property name="wrap-mode">word-char</property>
+                                            <property name="top-margin">8</property>
+                                            <property name="bottom-margin">8</property>
+                                            <property name="left-margin">8</property>
+                                            <property name="right-margin">8</property>
+                                          </object>
+                                        </child>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwPreferencesGroup" id="callouts_group">
+                                <property name="title" translatable="yes">Callouts</property>
+                                <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
+                                <property name="visible">false</property>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">12</property>
+                                    <child>
+                                      <object class="GtkListBox" id="callouts_list_box">
+                                        <property name="selection-mode">none</property>
+                                        <property name="visible">false</property>
+                                        <style>
+                                          <class name="boxed-list"/>
+                                        </style>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkButton" id="add_callout_button">
+                                        <property name="label" translatable="yes">+ Callout hinzufügen</property>
+                                        <property name="halign">start</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">export</property>
+                    <property name="title" translatable="yes">Export</property>
+                    <property name="icon-name">document-save-symbolic</property>
+                    <property name="child">
+                      <object class="AdwPreferencesPage" id="export_page">
+                            <child>
+                              <object class="AdwPreferencesGroup" id="export_group">
+                                <property name="title" translatable="yes">Export</property>
+                                <child>
+                                  <object class="AdwSpinRow" id="export_width_row">
+                                    <property name="title" translatable="yes">Zielbreite</property>
+                                    <property name="subtitle" translatable="yes">Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die Ausgabegröße skaliert</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">100</property>
+                                        <property name="upper">8000</property>
+                                        <property name="step-increment">10</property>
+                                        <property name="page-increment">100</property>
+                                        <property name="value">1920</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="export_height_row">
+                                    <property name="title" translatable="yes">Höhe</property>
+                                    <property name="subtitle" translatable="yes">Automatisch, behält das Seitenverhältnis bei</property>
+                                    <property name="sensitive">false</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">1</property>
+                                        <property name="upper">100000</property>
+                                        <property name="step-increment">10</property>
+                                        <property name="page-increment">100</property>
+                                        <property name="value">1080</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwComboRow" id="export_format_row">
+                                    <property name="title" translatable="yes">Format</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item>PNG</item>
+                                          <item>JPEG</item>
+                                          <item>WebP</item>
+                                          <item>AVIF</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwSpinRow" id="export_quality_row">
+                                    <property name="title" translatable="yes">Qualität</property>
+                                    <property name="subtitle" translatable="yes">Nur für JPEG/WebP/AVIF</property>
+                                    <property name="digits">0</property>
+                                    <property name="adjustment">
+                                      <object class="GtkAdjustment">
+                                        <property name="lower">1</property>
+                                        <property name="upper">100</property>
+                                        <property name="step-increment">5</property>
+                                        <property name="page-increment">10</property>
+                                        <property name="value">90</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+                <property name="content">
+                  <object class="GtkOverlay" id="canvas_overlay">
+                    <property name="child">
+                      <object class="GtkScrolledWindow" id="canvas_scroller">
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">true</property>
+                        <child>
+                          <object class="ScreenForgeCanvas" id="canvas">
+                            <property name="hexpand">true</property>
+                            <property name="vexpand">true</property>
                           </object>
                         </child>
                       </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="alignment_group">
-                        <property name="title" translatable="yes">Ausrichtung</property>
-                        <property name="description" translatable="yes">Für mindestens 2 ausgewählte Screenshots im freien Layout</property>
-                        <property name="visible">false</property>
-                        <child>
-                          <object class="AdwActionRow">
-                            <property name="title" translatable="yes">Horizontal</property>
-                            <child type="suffix">
-                              <object class="GtkBox">
-                                <property name="spacing">6</property>
-                                <property name="valign">center</property>
-                                <child>
-                                  <object class="GtkButton" id="align_left_button">
-                                    <property name="label" translatable="yes">Links</property>
-                                    <property name="tooltip-text" translatable="yes">Linke Kanten ausrichten</property>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="align_center_h_button">
-                                    <property name="label" translatable="yes">Mitte</property>
-                                    <property name="tooltip-text" translatable="yes">Horizontal zentrieren</property>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="align_right_button">
-                                    <property name="label" translatable="yes">Rechts</property>
-                                    <property name="tooltip-text" translatable="yes">Rechte Kanten ausrichten</property>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow">
-                            <property name="title" translatable="yes">Vertikal</property>
-                            <child type="suffix">
-                              <object class="GtkBox">
-                                <property name="spacing">6</property>
-                                <property name="valign">center</property>
-                                <child>
-                                  <object class="GtkButton" id="align_top_button">
-                                    <property name="label" translatable="yes">Oben</property>
-                                    <property name="tooltip-text" translatable="yes">Obere Kanten ausrichten</property>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="align_center_v_button">
-                                    <property name="label" translatable="yes">Mitte</property>
-                                    <property name="tooltip-text" translatable="yes">Vertikal zentrieren</property>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="align_bottom_button">
-                                    <property name="label" translatable="yes">Unten</property>
-                                    <property name="tooltip-text" translatable="yes">Untere Kanten ausrichten</property>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="background_group">
-                        <property name="title" translatable="yes">Hintergrund</property>
-                        <child>
-                          <object class="AdwComboRow" id="background_type_row">
-                            <property name="title" translatable="yes">Art</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Einfarbig</item>
-                                  <item translatable="yes">Linearer Verlauf</item>
-                                  <item translatable="yes">Radialer Verlauf</item>
-                                  <item translatable="yes">Bild</item>
-                                  <item translatable="yes">Generiert</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="background_color1_row">
-                            <property name="title" translatable="yes">Farbe 1</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="background_color_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="background_eyedropper_button">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="gradient_color2_row">
-                            <property name="title" translatable="yes">Farbe 2</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="gradient_color2_button">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="gradient_color2_eyedropper_button">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="gradient_angle_row">
-                            <property name="title" translatable="yes">Winkel</property>
-                            <property name="subtitle" translatable="yes">In Grad</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">360</property>
-                                <property name="step-increment">15</property>
-                                <property name="page-increment">45</property>
-                                <property name="value">90</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="gradient_auto_colors_row">
-                            <property name="title" translatable="yes">Automatische Farben</property>
-                            <property name="subtitle" translatable="yes">Aus den importierten Screenshots vorschlagen — erneut klicken für einen anderen Vorschlag</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkButton" id="gradient_generate_button">
-                                <property name="valign">center</property>
-                                <property name="label" translatable="yes">Generieren</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="background_image_row">
-                            <property name="title" translatable="yes">Bilddatei</property>
-                            <property name="subtitle" translatable="yes">Kein Bild ausgewählt</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkButton" id="background_image_button">
-                                <property name="valign">center</property>
-                                <property name="label" translatable="yes">Wählen…</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="background_image_fit_row">
-                            <property name="title" translatable="yes">Passung</property>
-                            <property name="visible">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Ausfüllen (zuschneiden)</item>
-                                  <item translatable="yes">Einpassen</item>
-                                  <item translatable="yes">Strecken</item>
-                                  <item translatable="yes">Kacheln</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="background_image_opacity_row">
-                            <property name="title" translatable="yes">Deckkraft</property>
-                            <property name="subtitle" translatable="yes">In Prozent</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">100</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="generator_style_row">
-                            <property name="title" translatable="yes">Stil</property>
-                            <property name="visible">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Schichten</item>
-                                  <item translatable="yes">Bögen</item>
-                                  <item translatable="yes">Bänder</item>
-                                  <item translatable="yes">Flächen</item>
-                                  <item translatable="yes">Linien</item>
-                                  <item translatable="yes">Nebel</item>
-                                  <item translatable="yes">Wellen (klassisch)</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="generator_color_strategy_row">
-                            <property name="title" translatable="yes">Farben</property>
-                            <property name="visible">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Manuell</item>
-                                  <item translatable="yes">Von Screenshots</item>
-                                  <item translatable="yes">Schwarz-Weiß</item>
-                                  <item translatable="yes">Zufällig</item>
-                                </items>
-                              </object>
-                            </property>
-                            <!-- Index 3 ("Zufällig") — the default
-                                 generation mode (spec: "Zufällig soll zum
-                                 Default-Modus für generierte Hintergründe
-                                 werden"). Must come *after* `model` above:
-                                 GtkBuilder applies properties in document
-                                 order, and `selected` against a still-empty
-                                 model silently clamps to 0 regardless of
-                                 what's set here — confirmed by hand after
-                                 the first attempt (property listed before
-                                 `model`) had no effect. `generate_background`
-                                 in main.rs reads this row's *current*
-                                 selection directly rather than deriving it
-                                 from GeneratedBackground::new()'s own
-                                 default, so that Rust-level default alone
-                                 was never enough either — this property is
-                                 what actually makes the very first switch
-                                 to "Generiert" land on Random. Any real
-                                 Generated background (loaded, undone, or
-                                 already generated) overrides this via
-                                 sync_generator_controls regardless, so it
-                                 only matters before that ever happens. -->
-                            <property name="selected">3</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwComboRow" id="generator_mood_row">
-                            <property name="title" translatable="yes">Stimmung</property>
-                            <property name="subtitle" translatable="yes">Helligkeit der erzeugten Farben</property>
-                            <property name="visible">false</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Kräftig</item>
-                                  <item translatable="yes">Hell</item>
-                                  <item translatable="yes">Dunkel</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="generator_manual_color_row_1">
-                            <property name="title" translatable="yes">Farbe 1</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="generator_manual_color_button_1">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="generator_manual_eyedropper_button_1">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="generator_manual_color_row_2">
-                            <property name="title" translatable="yes">Farbe 2</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="generator_manual_color_button_2">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="generator_manual_eyedropper_button_2">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="generator_manual_color_row_3">
-                            <property name="title" translatable="yes">Farbe 3</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="generator_manual_color_button_3">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="generator_manual_eyedropper_button_3">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="generator_manual_color_row_4">
-                            <property name="title" translatable="yes">Farbe 4</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkColorDialogButton" id="generator_manual_color_button_4">
-                                <property name="valign">center</property>
-                                <property name="dialog">
-                                  <object class="GtkColorDialog"/>
-                                </property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="generator_manual_eyedropper_button_4">
-                                <property name="valign">center</property>
-                                <property name="icon-name">color-select-symbolic</property>
-                                <property name="tooltip-text" translatable="yes">Farbe aus einem Screenshot übernehmen</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSwitchRow" id="generator_adapt_row">
-                            <property name="title" translatable="yes">An Screenshots anpassen</property>
-                            <property name="subtitle" translatable="yes">Farben und Platzierung berücksichtigen die Screenshots</property>
-                            <property name="visible">false</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_inverse_contrast_row">
-                            <property name="title" translatable="yes">Invertierter Kontrast</property>
-                            <property name="subtitle" translatable="yes">In Prozent — nur bei "Von Screenshots": höher wirkt stärker gegensätzlich/komplementär statt ähnlich</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">50</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_corner_bias_row">
-                            <property name="title" translatable="yes">Fokus</property>
-                            <property name="subtitle" translatable="yes">In Prozent — 0 % Wellenbänder, 100 % Eckbögen</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">50</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_scale_row">
-                            <property name="title" translatable="yes">Skalierung</property>
-                            <property name="subtitle" translatable="yes">In Prozent — vergrößert oder verkleinert das Muster</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">40</property>
-                                <property name="upper">250</property>
-                                <property name="step-increment">10</property>
-                                <property name="page-increment">50</property>
-                                <property name="value">100</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_contrast_row">
-                            <property name="title" translatable="yes">Kontrast</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">50</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_grain_row">
-                            <property name="title" translatable="yes">Körnung</property>
-                            <property name="subtitle" translatable="yes">In Prozent — feines Rauschen gegen Farbstufen</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">35</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="generator_seed_row">
-                            <property name="title" translatable="yes">Seed</property>
-                            <property name="subtitle" translatable="yes">Für reproduzierbare Ergebnisse</property>
-                            <property name="visible">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">999999999</property>
-                                <property name="step-increment">1</property>
-                                <property name="page-increment">1000</property>
-                                <property name="value">1</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwActionRow" id="generator_generate_row">
-                            <property name="title" translatable="yes">Hintergrund generieren</property>
-                            <property name="subtitle" translatable="yes">Erneut klicken für eine neue Variante</property>
-                            <property name="visible">false</property>
-                            <child type="suffix">
-                              <object class="GtkButton" id="generator_generate_button">
-                                <property name="valign">center</property>
-                                <property name="label" translatable="yes">Generieren</property>
+                    </property>
+                    <child type="overlay">
+                      <object class="AdwStatusPage" id="empty_state">
+                        <property name="icon-name">de.christophlangner.ScreenForge-symbolic</property>
+                        <property name="title" translatable="yes">Screenshots hinzufügen</property>
+                        <property name="description" translatable="yes">Bilder hierher ziehen, mit Strg+V einfügen oder vom Android-Gerät holen</property>
+                        <property name="child">
+                          <object class="GtkBox">
+                            <property name="halign">center</property>
+                            <property name="spacing">12</property>
+                            <child>
+                              <object class="GtkButton">
+                                <property name="label" translatable="yes">Bilder öffnen …</property>
+                                <property name="action-name">win.open</property>
                                 <style>
+                                  <class name="pill"/>
                                   <class name="suggested-action"/>
                                 </style>
                               </object>
                             </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup">
-                        <property name="title" translatable="yes">Effekte</property>
-                        <child>
-                          <object class="AdwComboRow" id="shadow_row">
-                            <property name="title" translatable="yes">Schatten</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item translatable="yes">Kein Schatten</item>
-                                  <item translatable="yes">Subtil</item>
-                                  <item translatable="yes">Standard</item>
-                                  <item translatable="yes">Stark</item>
-                                  <item translatable="yes">Floating</item>
-                                  <item translatable="yes">Angepasst</item>
-                                </items>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="shadow_angle_row">
-                            <property name="title" translatable="yes">Schatten-Winkel</property>
-                            <property name="subtitle" translatable="yes">Richtung des Schattenwurfs, in Grad</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">360</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">45</property>
-                                <property name="value">90</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="shadow_distance_row">
-                            <property name="title" translatable="yes">Schatten-Distanz</property>
-                            <property name="subtitle" translatable="yes">Länge des Schattenwurfs, in Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">300</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">20</property>
-                                <property name="value">6</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="shadow_blur_row">
-                            <property name="title" translatable="yes">Weichzeichner</property>
-                            <property name="subtitle" translatable="yes">Unschärfe des Schattens, in Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">150</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">16</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwSpinRow" id="corner_radius_row">
-                            <property name="title" translatable="yes">Eckenradius</property>
-                            <property name="subtitle" translatable="yes">In Pixeln</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">200</property>
-                                <property name="step-increment">2</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">0</property>
-                              </object>
-                            </property>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="label_group">
-                        <property name="title" translatable="yes">Label</property>
-                        <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
-                        <property name="visible">false</property>
-                        <child>
-                          <object class="AdwSwitchRow" id="label_enabled_row">
-                            <property name="title" translatable="yes">Label anzeigen</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox" id="label_content_box">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">6</property>
-                            <property name="margin-top">12</property>
-                            <property name="margin-bottom">12</property>
-                            <property name="margin-start">12</property>
-                            <property name="margin-end">12</property>
                             <child>
-                              <object class="GtkLabel">
-                                <property name="label" translatable="yes">Text</property>
-                                <property name="halign">start</property>
+                              <object class="GtkButton">
+                                <property name="label" translatable="yes">Projekt öffnen …</property>
+                                <property name="action-name">win.open-project</property>
                                 <style>
-                                  <class name="caption-heading"/>
+                                  <class name="pill"/>
                                 </style>
                               </object>
                             </child>
-                            <child>
-                              <object class="GtkScrolledWindow">
-                                <property name="hscrollbar-policy">never</property>
-                                <property name="min-content-height">64</property>
-                                <property name="max-content-height">120</property>
-                                <style>
-                                  <class name="card"/>
-                                </style>
-                                <child>
-                                  <object class="GtkTextView" id="label_content_view">
-                                    <property name="sensitive">false</property>
-                                    <property name="wrap-mode">word-char</property>
-                                    <property name="top-margin">8</property>
-                                    <property name="bottom-margin">8</property>
-                                    <property name="left-margin">8</property>
-                                    <property name="right-margin">8</property>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
                           </object>
-                        </child>
+                        </property>
                       </object>
                     </child>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="callouts_group">
-                        <property name="title" translatable="yes">Callouts</property>
-                        <property name="description" translatable="yes">Für den ausgewählten Screenshot</property>
-                        <property name="visible">false</property>
+                    <child type="overlay">
+                      <object class="GtkBox" id="canvas_toolbar">
+                        <property name="halign">end</property>
+                        <property name="valign">end</property>
+                        <property name="margin-end">12</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="spacing">2</property>
+                        <style>
+                          <class name="toolbar"/>
+                          <class name="osd"/>
+                          <class name="canvas-toolbar"/>
+                        </style>
                         <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">12</property>
-                            <child>
-                              <object class="GtkListBox" id="callouts_list_box">
-                                <property name="selection-mode">none</property>
-                                <property name="visible">false</property>
-                                <style>
-                                  <class name="boxed-list"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton" id="add_callout_button">
-                                <property name="label" translatable="yes">+ Callout hinzufügen</property>
-                                <property name="halign">start</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="export_group">
-                        <property name="title" translatable="yes">Export</property>
-                        <child>
-                          <object class="AdwSpinRow" id="export_width_row">
-                            <property name="title" translatable="yes">Zielbreite</property>
-                            <property name="subtitle" translatable="yes">Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die Ausgabegröße skaliert</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">100</property>
-                                <property name="upper">8000</property>
-                                <property name="step-increment">10</property>
-                                <property name="page-increment">100</property>
-                                <property name="value">1920</property>
-                              </object>
-                            </property>
+                          <object class="GtkButton">
+                            <property name="icon-name">zoom-out-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Verkleinern (Strg+−)</property>
+                            <property name="action-name">win.zoom-out</property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="export_height_row">
-                            <property name="title" translatable="yes">Höhe</property>
-                            <property name="subtitle" translatable="yes">Automatisch, behält das Seitenverhältnis bei</property>
-                            <property name="sensitive">false</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">1</property>
-                                <property name="upper">100000</property>
-                                <property name="step-increment">10</property>
-                                <property name="page-increment">100</property>
-                                <property name="value">1080</property>
-                              </object>
-                            </property>
+                          <object class="GtkMenuButton" id="zoom_menu_button">
+                            <property name="label" translatable="yes">Einpassen</property>
+                            <property name="tooltip-text" translatable="yes">Zoom</property>
+                            <property name="menu-model">zoom_menu</property>
+                            <property name="direction">up</property>
+                            <property name="always-show-arrow">false</property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwComboRow" id="export_format_row">
-                            <property name="title" translatable="yes">Format</property>
-                            <property name="model">
-                              <object class="GtkStringList">
-                                <items>
-                                  <item>PNG</item>
-                                  <item>JPEG</item>
-                                  <item>WebP</item>
-                                  <item>AVIF</item>
-                                </items>
-                              </object>
-                            </property>
+                          <object class="GtkButton">
+                            <property name="icon-name">zoom-in-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Vergrößern (Strg++)</property>
+                            <property name="action-name">win.zoom-in</property>
                           </object>
                         </child>
                         <child>
-                          <object class="AdwSpinRow" id="export_quality_row">
-                            <property name="title" translatable="yes">Qualität</property>
-                            <property name="subtitle" translatable="yes">Nur für JPEG/WebP/AVIF</property>
-                            <property name="digits">0</property>
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">1</property>
-                                <property name="upper">100</property>
-                                <property name="step-increment">5</property>
-                                <property name="page-increment">10</property>
-                                <property name="value">90</property>
-                              </object>
-                            </property>
+                          <object class="GtkSeparator"/>
+                        </child>
+                        <child>
+                          <object class="GtkToggleButton" id="hide_screenshots_button">
+                            <property name="icon-name">view-conceal-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Screenshots vorübergehend ausblenden, um den Hintergrund zu beurteilen</property>
                           </object>
                         </child>
                       </object>
                     </child>
                   </object>
-                </child>
+                </property>
               </object>
-            </child>
-            <child type="content">
-              <object class="GtkScrolledWindow">
-                <property name="hexpand">true</property>
-                <property name="vexpand">true</property>
-                <child>
-                  <object class="ScreenForgeCanvas" id="canvas">
-                    <property name="hexpand">true</property>
-                    <property name="vexpand">true</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-              </object>
-            </child>
+            </property>
           </object>
-        </child>
+        </property>
       </object>
-    </child>
+    </property>
   </template>
-  <menu id="open_menu">
+  <menu id="add_menu">
     <section>
       <item>
-        <attribute name="label" translatable="yes">Screenshots importieren…</attribute>
+        <attribute name="label" translatable="yes">Bilder öffnen …</attribute>
         <attribute name="action">win.open</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">Projekt öffnen…</attribute>
+        <attribute name="label" translatable="yes">Aus Zwischenablage einfügen</attribute>
+        <attribute name="action">win.paste</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Projekt öffnen …</attribute>
         <attribute name="action">win.open-project</attribute>
       </item>
     </section>
@@ -952,14 +1162,33 @@
     </item>
   </menu>
   <menu id="primary_menu">
-    <item>
-      <attribute name="label" translatable="yes">Einstellungen…</attribute>
-      <attribute name="action">app.preferences</attribute>
-      <attribute name="accel">&lt;Ctrl&gt;comma</attribute>
-    </item>
-    <item>
-      <attribute name="label" translatable="yes">Info zu ScreenForge…</attribute>
-      <attribute name="action">app.about</attribute>
-    </item>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Projekt öffnen …</attribute>
+        <attribute name="action">win.open-project</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Speichern</attribute>
+        <attribute name="action">win.save</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Speichern unter …</attribute>
+        <attribute name="action">win.save-as</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Einstellungen</attribute>
+        <attribute name="action">app.preferences</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Tastenkürzel</attribute>
+        <attribute name="action">app.shortcuts</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Info zu ScreenForge</attribute>
+        <attribute name="action">app.about</attribute>
+      </item>
+    </section>
   </menu>
 </interface>

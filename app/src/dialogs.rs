@@ -90,6 +90,12 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
+<p>Version 0.27.0</p>
+<ul>
+<li>Neue Oberfläche: Seitenleiste mit Reitern, aufgeräumte Kopfleiste, schwebende Zoom-Leiste</li>
+<li>Varianten für generierte Hintergründe, dazu das Hintergrund-Studio mit großen Vorschauen</li>
+<li>Startseite statt leerer Arbeitsfläche, Tastenkürzel-Übersicht (Strg+?)</li>
+</ul>
 <p>Version 0.26.0</p>
 <ul>
 <li>Sechs neue Stile für generierte Hintergründe: Schichten, Bögen, Bänder, Flächen, Linien und Nebel — mit weichen Kurven, Schatten und Farbverläufen</li>
@@ -210,4 +216,56 @@ pub(crate) fn register_about_action(app: &adw::Application) {
         }
     ));
     app.add_action(&action);
+}
+
+/// `app.shortcuts` (Ctrl+?): the shortcuts overview, built from the
+/// accelerators the app actually registers.
+pub(crate) fn register_shortcuts_action(app: &adw::Application) {
+    let action = gio::SimpleAction::new("shortcuts", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            let dialog = adw::ShortcutsDialog::new();
+            let sections: [(&str, &[(&str, &str)]); 3] = [
+                (
+                    "Allgemein",
+                    &[
+                        ("Bilder öffnen", "<Ctrl>o"),
+                        ("Aus Zwischenablage einfügen", "<Ctrl>v"),
+                        ("Vom Android-Gerät importieren", "<Ctrl><Shift>a"),
+                        ("Projekt speichern", "<Ctrl>s"),
+                        ("Projekt speichern unter", "<Ctrl><Shift>s"),
+                        ("Exportieren", "<Ctrl>e"),
+                        ("Einstellungen", "<Ctrl>comma"),
+                        ("Tastenkürzel", "<Ctrl>question"),
+                    ],
+                ),
+                (
+                    "Bearbeiten",
+                    &[("Rückgängig", "<Ctrl>z"), ("Wiederholen", "<Ctrl><Shift>z"), ("Auswahl löschen", "Delete")],
+                ),
+                (
+                    "Ansicht",
+                    &[
+                        ("An Fenster anpassen", "<Ctrl>0"),
+                        ("Originalgröße", "<Ctrl>1"),
+                        ("Vergrößern", "<Ctrl>plus"),
+                        ("Verkleinern", "<Ctrl>minus"),
+                        ("Seitenleiste ein-/ausblenden", "F9"),
+                    ],
+                ),
+            ];
+            for (title, items) in sections {
+                let section = adw::ShortcutsSection::new(Some(title));
+                for (label, accel) in items {
+                    section.add(adw::ShortcutsItem::new(label, accel));
+                }
+                dialog.add(section);
+            }
+            dialog.present(app.active_window().as_ref());
+        }
+    ));
+    app.add_action(&action);
+    app.set_accels_for_action("app.shortcuts", &["<Ctrl>question"]);
 }

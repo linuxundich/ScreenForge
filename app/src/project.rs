@@ -64,7 +64,7 @@ pub(crate) fn sync_controls_from_document(window: &Window, canvas: &Canvas, stat
 
     let doc = state.borrow().document.clone();
 
-    window.layout_mode_row().set_selected(index_for_layout_mode(doc.layout.mode));
+    window.layout_mode_toggle().set_active(index_for_layout_mode(doc.layout.mode));
     window.spacing_row().set_value(doc.layout.spacing_px);
     window.margin_x_row().set_value(doc.layout.margin_x);
     window.margin_y_row().set_value(doc.layout.margin_y);

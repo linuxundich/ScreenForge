@@ -53,6 +53,9 @@ pub(crate) struct EditorState {
     /// preset apply, and canvas label-drags. `None` only during the brief
     /// window before that setup runs.
     pub(crate) label_style_sync: Option<LabelStyleSync>,
+    /// Bumped by "Neue Varianten" so the variant grid shows a fresh,
+    /// still deterministic set. Transient, not saved.
+    pub(crate) variant_roll: u64,
 }
 
 impl EditorState {
@@ -83,6 +86,7 @@ impl EditorState {
             gradient_auto_seed: 0,
             hide_screenshots: false,
             label_style_sync: None,
+            variant_roll: 0,
         }
     }
 }
@@ -125,16 +129,13 @@ pub(crate) fn get_or_decode<'a>(cache: &'a mut HashMap<PathBuf, DecodedImage>, p
 /// not just the ones that go through `sync_controls_from_document`.
 pub(crate) fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let mut state_ref = state.borrow_mut();
+    let surfaces = element_surfaces(&mut state_ref);
+    update_window_title(window, &state_ref);
+    let is_empty = state_ref.document.elements.is_empty();
+    window.empty_state().set_visible(is_empty);
+    window.canvas_toolbar().set_visible(!is_empty);
+    canvas.set_visible(!is_empty);
     let EditorState { document, image_cache, hide_screenshots, .. } = &mut *state_ref;
-    let mut surfaces = HashMap::new();
-    for element in &document.elements {
-        let ImageSource::Path(path) = &element.source else { continue };
-        if let Some(image) = get_or_decode(image_cache, path) {
-            if let Ok(surface) = import::surface_from_decoded(image) {
-                surfaces.insert(element.id, surface);
-            }
-        }
-    }
     let background_image = background_image_path(&document.background)
         .and_then(|path| get_or_decode(image_cache, &path))
         .and_then(|image| import::surface_from_decoded(image).ok());
@@ -150,6 +151,46 @@ pub(crate) fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCel
     drop(state_ref);
 
     update_export_height_display(window, canvas_settings);
+}
+
+/// Decoded Cairo surfaces for every element whose source is a file,
+/// keyed by element id, as `screenforge_core::render::compose` expects.
+pub(crate) fn element_surfaces(state: &mut EditorState) -> HashMap<Uuid, cairo::ImageSurface> {
+    let EditorState { document, image_cache, .. } = state;
+    let mut surfaces = HashMap::new();
+    for element in &document.elements {
+        let ImageSource::Path(path) = &element.source else { continue };
+        if let Some(image) = get_or_decode(image_cache, path) {
+            if let Ok(surface) = import::surface_from_decoded(image) {
+                surfaces.insert(element.id, surface);
+            }
+        }
+    }
+    surfaces
+}
+
+/// Header bar title: the project's file name (or "Neues Projekt"), and as
+/// subtitle how many screenshots it holds and the export size.
+fn update_window_title(window: &Window, state: &EditorState) {
+    let title = state
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Neues Projekt".to_owned());
+    let count = state.document.elements.len();
+    let subtitle = if count == 0 {
+        String::new()
+    } else {
+        let c = state.document.canvas;
+        let scale = c.export_target_width as f64 / c.export_width.max(1) as f64;
+        let height = (c.export_height as f64 * scale).round().max(1.0);
+        let noun = if count == 1 { "Screenshot" } else { "Screenshots" };
+        format!("{count} {noun} · {} × {height:.0} px", c.export_target_width)
+    };
+    let title_widget = window.window_title();
+    title_widget.set_title(&title);
+    title_widget.set_subtitle(&subtitle);
 }
 
 /// The output height that results from scaling `canvas_settings`'s

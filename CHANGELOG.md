@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-06
+
+### Added
+
+- Background variants: a grid of six alternatives in the background tab,
+  one click applies one. "Neue Varianten" rolls a fresh set, "Stile
+  mischen" draws them from all styles. The thumbnails show the background
+  alone, so the variants stay distinguishable at that size.
+- Background studio ("Mehr Varianten …"): a dialog with nine large
+  previews of the real composition, a style list (or all styles mixed),
+  the mood, and a switch to show or hide the screenshots.
+- Empty state: a fresh window shows how to add screenshots instead of an
+  empty canvas; drag and drop works on it too.
+- Floating canvas toolbar with zoom out, zoom level (opens the zoom
+  menu), zoom in and "Screenshots ausblenden".
+- Shortcuts dialog (Ctrl+?, also in the main menu) and F9 to toggle the
+  sidebar.
+- Spinner in the export button while an export runs.
+- Header bar title shows the project name, the number of screenshots and
+  the export size.
+
+### Changed
+
+- The sidebar is now a set of tabs (Layout, Hintergrund, Stil, Text,
+  Export) on the right side of the window instead of one long scrolling
+  page.
+- Header bar reorganized: an "Add" menu (open images, paste, open
+  project) replaces the open menu; zoom and "hide screenshots" moved to
+  the floating canvas toolbar; save and save-as are now in the main menu.
+- The layout type is a toggle group with icons; the alignment buttons are
+  linked icon buttons.
+- On windows narrower than 760 px the sidebar becomes an overlay and
+  starts hidden.
+- Zooming in or out from "fit to window" continues from the current fit
+  scale instead of jumping from 100 %.
+- `main.rs` is split into modules per topic and per sidebar panel.
+
 ## [0.26.0] - 2026-10-06
 
 ### Added

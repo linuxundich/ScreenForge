@@ -11,5 +11,15 @@
   <gresource prefix="/de/christophlangner/ScreenForge/icons">
     <file alias="hicolor/scalable/apps/de.christophlangner.ScreenForge.svg">../data/icons/hicolor/scalable/apps/de.christophlangner.ScreenForge.svg</file>
     <file alias="hicolor/symbolic/apps/de.christophlangner.ScreenForge-symbolic.svg">../data/icons/hicolor/symbolic/apps/de.christophlangner.ScreenForge-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-left-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-left-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-center-h-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-center-h-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-right-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-right-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-top-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-top-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-center-v-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-center-v-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-align-bottom-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-align-bottom-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-layout-horizontal-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-layout-horizontal-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-layout-vertical-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-layout-vertical-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-layout-grid-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-layout-grid-symbolic.svg</file>
+    <file alias="hicolor/scalable/actions/sf-layout-free-symbolic.svg">../data/icons/hicolor/scalable/actions/sf-layout-free-symbolic.svg</file>
   </gresource>
 </gresources>

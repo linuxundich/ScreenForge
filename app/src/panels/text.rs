@@ -717,16 +717,13 @@ pub(crate) fn register_label_style_controls(window: &Window, canvas: &Canvas, st
         Some("Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"),
     );
 
-    let page = window.sidebar_page();
+    let page = window.text_page();
     let callouts_group = window.callouts_group();
-    let export_group = window.export_group();
     page.remove(&callouts_group);
-    page.remove(&export_group);
     page.add(&look_group);
     page.add(&position_group);
     page.add(&styling_group);
     page.add(&callouts_group);
-    page.add(&export_group);
 
     state.borrow_mut().label_style_sync = Some(sync);
 }

@@ -14,19 +14,21 @@ mockups: generator prototype with six styles, UI variant "A + B").
 - [x] Deterministic variants from one seed (same style or mixed styles)
 - [x] Minimal controls in the current sidebar (style, mood, grain)
 
-## Phase 2 — GUI overhaul
+## Phase 2 — GUI overhaul — mostly done in v0.27.0
 
-- [ ] Split `main.rs` into panel modules with their own templates; editor
-      state as GObject with property bindings instead of `syncing_controls`
-- [ ] Sidebar as tabs (`AdwViewStack` + `AdwInlineViewSwitcher`):
+- [x] Split `main.rs` into modules per topic and sidebar panel (v0.27.0)
+- [ ] Editor state as GObject with property bindings instead of
+      `syncing_controls`; panel templates of their own
+- [ ] `AdwEntryRow` for preset names (still a `GtkEntry` in an alert dialog)
+- [x] Sidebar as tabs (`AdwViewStack` + `AdwInlineViewSwitcher`):
       Layout / Background / Style / Text / Export
-- [ ] New header bar: sidebar toggle, "Add" menu (file, clipboard, Android),
+- [x] New header bar: sidebar toggle, "Add" menu (file, clipboard, Android),
       project title + size, undo/redo, export, main menu (save, shortcuts)
-- [ ] Floating zoom controls on the canvas, `AdwStatusPage` empty state,
+- [x] Floating zoom controls on the canvas, `AdwStatusPage` empty state,
       `AdwSpinner` for export/ADB, `AdwShortcutsDialog`
-- [ ] `AdwToggleGroup`, `AdwButtonRow`, `AdwEntryRow` where they fit
-- [ ] `AdwBreakpoint`: collapse the sidebar on narrow windows
-- [ ] Variant grid (6) in the background tab, "More…" opens the background
+- [x] `AdwToggleGroup` (layout type), `AdwButtonRow` (generate, variants)
+- [x] `AdwBreakpoint`: collapse the sidebar on narrow windows
+- [x] Variant grid (6) in the background tab, "More…" opens the background
       studio dialog with large previews of the real composition
 
 ## Phase 3 — Quick features

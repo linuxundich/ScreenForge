@@ -216,7 +216,9 @@ pub(crate) fn register_drop_target(window: &Window, canvas: &Canvas, state: &Rc<
         }
     ));
 
-    canvas.add_controller(target);
+    // On the overlay rather than the canvas, so drops also land while the
+    // empty-state page covers the canvas.
+    window.canvas_overlay().add_controller(target);
 }
 
 /// `win.paste` (`Ctrl+V`, spec §1: "Screenshot aus der Zwischenablage
