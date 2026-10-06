@@ -50,7 +50,7 @@ Follow-ups from phase 3:
 
 - [x] Redactions: draw them directly on the canvas, not only via
       percent values in the sidebar (v0.31.0)
-- [ ] Redactions: move and resize drawn areas on the canvas
+- [x] Redactions: move and resize drawn areas on the canvas (v0.32.0)
 - [x] Watermark: optional logo image besides the text (v0.31.0)
 
 ## Phase 4 — Translation and packaging — done in v0.29.0

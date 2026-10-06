@@ -45,11 +45,11 @@ Put each screenshot into a generic phone with a punch-hole camera, a tablet or a
 
 ### Point things out, hide what's private
 
-Give each screenshot a label, add callouts with arrows that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share.
+Give each screenshot a label, add callouts with arrows that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share: drag a rectangle over them right on the screenshot, then move or resize it there.
 
 ### The right size for every place
 
-Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story, Open Graph, Mastodon and Bluesky, the Play Store feature graphic or App Store sizes. Your content stays centered and is never cropped. Split a composition into several images with one continuous background for app store panoramas, or export a short animated WebM in which the screenshots fly in. Add a watermark, export as PNG, JPEG, WebP, AVIF or PDF, with a transparent background if you like, or copy the result to the clipboard and drag it straight into a browser or chat.
+Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story, Open Graph, Mastodon and Bluesky, the Play Store feature graphic or App Store sizes. Your content stays centered and is never cropped. Split a composition into several images with one continuous background for app store panoramas, or export a short animated WebM in which the screenshots fly in. Add a watermark with your logo, export the iPhone, iPad and Google Play sizes in one go, export as PNG, JPEG, WebP, AVIF or PDF, with a transparent background if you like, or copy the result to the clipboard and drag it straight into a browser or chat.
 
 <p align="center">
   <img src="docs/screenshots/export.png" alt="The export tab with format presets, transparent background and watermark settings" width="100%">

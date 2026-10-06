@@ -205,6 +205,24 @@ pub(crate) fn register_redaction_controls(window: &Window, canvas: &Canvas, stat
             sync_redactions(&window, &canvas, &state, &panel);
         }
     ));
+    canvas.connect_redaction_changed(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        panel,
+        move |element_id, changed| {
+            let mut list = redactions_of(&state, element_id);
+            if let Some(r) = list.iter_mut().find(|r| r.id == changed.id) {
+                *r = changed;
+            }
+            set_redactions(&window, &canvas, &state, element_id, list);
+            sync_redactions(&window, &canvas, &state, &panel);
+        }
+    ));
     let on_selection: Rc<dyn Fn()> = Rc::new(glib::clone!(
         #[weak]
         window,

@@ -61,6 +61,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.32.0" date="2026-10-06">
+      <description translate="no">
+        <p>Move and resize redaction areas directly on the screenshot.</p>
+      </description>
+    </release>
     <release version="0.31.0" date="2026-10-06">
       <description translate="no">
         <p>Frames and tilt per screenshot, redactions drawn on the canvas, a watermark logo, a one-click App Store set, and a choice of animation for WebM export.</p>

@@ -1,7 +1,7 @@
 project(
   'screenforge',
   'rust',
-  version: '0.31.0',
+  version: '0.32.0',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 1.0',
 )

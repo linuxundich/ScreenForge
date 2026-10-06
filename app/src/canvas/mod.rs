@@ -184,6 +184,13 @@ impl Canvas {
     pub fn connect_redaction_drawn<F: Fn(Uuid, f64, f64, f64, f64) + 'static>(&self, f: F) {
         *self.imp().redaction_callback.borrow_mut() = Some(Box::new(f));
     }
+
+    /// Called at the end of a drag that moved or resized one of a selected
+    /// screenshot's redaction areas on the canvas, with the screenshot's id
+    /// and the changed redaction (same id as before).
+    pub fn connect_redaction_changed<F: Fn(Uuid, screenforge_core::model::Redaction) + 'static>(&self, f: F) {
+        *self.imp().redaction_change_callback.borrow_mut() = Some(Box::new(f));
+    }
 }
 
 impl Default for Canvas {
@@ -205,11 +212,17 @@ mod imp {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
     use screenforge_core::layout::Placement;
-    use screenforge_core::model::{Background, Corner, Document, LayoutMode, Rgba, TextPosition, Transform};
+    use screenforge_core::model::{Background, Corner, Document, LayoutMode, Redaction, Rgba, TextPosition, Transform};
     use screenforge_core::snap::{self, Guide};
     use uuid::Uuid;
 
+    /// Size of a redaction area's resize handle, in widget pixels.
+    const REDACTION_HANDLE: f64 = 10.0;
+
     type ReorderCallback = Box<dyn Fn(usize, usize)>;
+    type RedactionChangeCallback = Box<dyn Fn(Uuid, Redaction)>;
+    /// `(screenshot id, redaction id, rectangle in document space)`.
+    type RedactionArea = (Uuid, Uuid, (f64, f64, f64, f64));
     type ContextMenuCallback = Box<dyn Fn(usize, f64, f64)>;
     type MoveCallback = Box<dyn Fn(Vec<(Uuid, f64, f64)>)>;
     type ResizeCallback = Box<dyn Fn(usize, Transform)>;
@@ -297,6 +310,43 @@ mod imp {
     /// `(index into `last_callout_placements`, drag-start point in document
     /// space, which part was grabbed)`.
     type CalloutDragOrigin = (usize, (f64, f64), CalloutDragKind);
+
+    /// A redaction area being moved (or, grabbed by its corner handle,
+    /// resized) on the canvas. Fractions are "visual": flips already
+    /// applied, so they follow the pointer; see `visual_redaction`.
+    #[derive(Debug, Clone, Copy)]
+    struct RedactionDrag {
+        element_id: Uuid,
+        original: Redaction,
+        start: (f64, f64),
+        /// Fractions per document pixel of the screenshot's screen area.
+        per_doc: (f64, f64),
+        flips: (bool, bool),
+        resize: bool,
+    }
+
+    /// `(x, y, width, height)` of `r` as seen on the canvas: with the
+    /// screenshot flipped, a redaction's fractions mirror. Its own inverse.
+    fn visual_redaction(r: &Redaction, (flip_h, flip_v): (bool, bool)) -> (f64, f64, f64, f64) {
+        let x = if flip_h { 1.0 - r.x - r.width } else { r.x };
+        let y = if flip_v { 1.0 - r.y - r.height } else { r.y };
+        (x, y, r.width, r.height)
+    }
+
+    /// The redaction `drag` makes of its original after the pointer moved
+    /// `delta` document pixels.
+    fn dragged_redaction(drag: &RedactionDrag, delta: (f64, f64)) -> Redaction {
+        let (vx, vy, w, h) = visual_redaction(&drag.original, drag.flips);
+        let (dx, dy) = (delta.0 * drag.per_doc.0, delta.1 * drag.per_doc.1);
+        let (vx, vy, w, h) = if drag.resize {
+            (vx, vy, (w + dx).clamp(0.01, 1.0 - vx), (h + dy).clamp(0.005, 1.0 - vy))
+        } else {
+            ((vx + dx).clamp(0.0, (1.0 - w).max(0.0)), (vy + dy).clamp(0.0, (1.0 - h).max(0.0)), w, h)
+        };
+        let moved = Redaction { x: vx, y: vy, width: w, height: h, ..drag.original };
+        let (x, y, _, _) = visual_redaction(&moved, drag.flips);
+        Redaction { x, y, ..moved }
+    }
 
     /// One callout's hit-testable geometry from the last render, in its own
     /// screenshot's local space (matching `last_label_placements`'
@@ -460,6 +510,8 @@ mod imp {
         redact_current: Cell<Option<(f64, f64)>>,
         #[allow(clippy::type_complexity)]
         pub(super) redaction_callback: RefCell<Option<Box<dyn Fn(Uuid, f64, f64, f64, f64)>>>,
+        redaction_drag: Cell<Option<RedactionDrag>>,
+        pub(super) redaction_change_callback: RefCell<Option<RedactionChangeCallback>>,
     }
 
     impl Default for Canvas {
@@ -504,6 +556,8 @@ mod imp {
                 redact_start: Cell::new(None),
                 redact_current: Cell::new(None),
                 redaction_callback: RefCell::new(None),
+                redaction_drag: Cell::new(None),
+                redaction_change_callback: RefCell::new(None),
             }
         }
     }
@@ -796,6 +850,30 @@ mod imp {
                     ctx.set_source_rgba(0.1, 0.1, 0.12, 0.55);
                     let _ = ctx.fill_preserve();
                     ctx.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+                    ctx.set_line_width(1.5);
+                    let _ = ctx.stroke();
+                }
+
+                // The selected screenshots' redaction areas: dashed
+                // outline and a resize handle in the corner.
+                for (_, _, (x, y, w, h)) in self.redaction_areas() {
+                    let rx = offset_x + (x + content_offset_x) * scale;
+                    let ry = offset_y + (y + content_offset_y) * scale;
+                    let (rw, rh) = (w * scale, h * scale);
+                    ctx.rectangle(rx, ry, rw, rh);
+                    ctx.set_line_width(1.5);
+                    ctx.set_dash(&[6.0, 4.0], 0.0);
+                    ctx.set_source_rgba(0.0, 0.0, 0.0, 0.6);
+                    let _ = ctx.stroke_preserve();
+                    ctx.set_dash(&[6.0, 4.0], 5.0);
+                    ctx.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+                    let _ = ctx.stroke();
+                    ctx.set_dash(&[], 0.0);
+                    let half = REDACTION_HANDLE / 2.0;
+                    ctx.rectangle(rx + rw - half, ry + rh - half, REDACTION_HANDLE, REDACTION_HANDLE);
+                    ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                    let _ = ctx.fill_preserve();
+                    ctx.set_source_rgba(0.29, 0.56, 0.89, 1.0);
                     ctx.set_line_width(1.5);
                     let _ = ctx.stroke();
                 }
@@ -1251,6 +1329,68 @@ mod imp {
             true
         }
 
+        /// Every redaction area of the selected, visible screenshots, as
+        /// `(screenshot id, redaction id, rectangle in document space)`.
+        fn redaction_areas(&self) -> Vec<RedactionArea> {
+            let doc = self.document.borrow();
+            let placements = self.last_placements.borrow();
+            let selected = self.selected.borrow();
+            let mut areas = Vec::new();
+            for (el, p) in doc.elements.iter().filter(|e| e.visible).zip(placements.iter()) {
+                if !selected.contains(&el.id) {
+                    continue;
+                }
+                let area = screenforge_core::frame::screen_area(el.frame, p.width, p.height, &el.corner_radius);
+                let flips = (el.transform.flip_horizontal, el.transform.flip_vertical);
+                for r in &el.redactions {
+                    let (vx, vy, w, h) = visual_redaction(r, flips);
+                    let rect = (p.x + area.x + vx * area.width, p.y + area.y + vy * area.height, w * area.width, h * area.height);
+                    areas.push((el.id, r.id, rect));
+                }
+            }
+            areas
+        }
+
+        /// The redaction drag a press at `(doc_x, doc_y)` starts: on the
+        /// corner handle a resize, inside an area a move. Topmost first.
+        fn redaction_drag_at(&self, doc_x: f64, doc_y: f64) -> Option<RedactionDrag> {
+            let handle = REDACTION_HANDLE / self.last_scale.get().max(0.01);
+            let (element_id, redaction_id, resize) = self.redaction_areas().into_iter().rev().find_map(|(eid, rid, (x, y, w, h))| {
+                if (doc_x - (x + w)).abs() <= handle && (doc_y - (y + h)).abs() <= handle {
+                    Some((eid, rid, true))
+                } else if doc_x >= x && doc_x <= x + w && doc_y >= y && doc_y <= y + h {
+                    Some((eid, rid, false))
+                } else {
+                    None
+                }
+            })?;
+            let doc = self.document.borrow();
+            let placements = self.last_placements.borrow();
+            let (el, p) = doc.elements.iter().filter(|e| e.visible).zip(placements.iter()).find(|(e, _)| e.id == element_id)?;
+            let original = *el.redactions.iter().find(|r| r.id == redaction_id)?;
+            let area = screenforge_core::frame::screen_area(el.frame, p.width, p.height, &el.corner_radius);
+            Some(RedactionDrag {
+                element_id,
+                original,
+                start: (doc_x, doc_y),
+                per_doc: (1.0 / area.width.max(1.0), 1.0 / area.height.max(1.0)),
+                flips: (el.transform.flip_horizontal, el.transform.flip_vertical),
+                resize,
+            })
+        }
+
+        /// Puts `redaction` into the canvas's own document copy, for the
+        /// live preview during a drag.
+        fn set_live_redaction(&self, element_id: Uuid, redaction: Redaction) {
+            if let Some(el) = self.document.borrow_mut().elements.iter_mut().find(|e| e.id == element_id) {
+                if let Some(r) = el.redactions.iter_mut().find(|r| r.id == redaction.id) {
+                    *r = redaction;
+                }
+            }
+            self.content_dirty.set(true);
+            self.obj().queue_draw();
+        }
+
         /// The screenshot under `start` and the rectangle `start`–`end` as
         /// fractions of its source image (inside the device frame, flips
         /// undone). `None` outside every screenshot or for a mere click.
@@ -1290,6 +1430,10 @@ mod imp {
             }
 
             if !shift {
+                if let Some(drag) = self.redaction_drag_at(doc_x, doc_y) {
+                    self.redaction_drag.set(Some(drag));
+                    return;
+                }
                 if let Some(index) = self.callout_target_hit_at(doc_x, doc_y) {
                     let start_fraction = self.last_callout_placements.borrow()[index].target;
                     let placement = self.last_placements.borrow()[self.last_callout_placements.borrow()[index].element_index];
@@ -1389,6 +1533,12 @@ mod imp {
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if let Some(drag) = self.redaction_drag.get() {
+                if let Some((doc_x, doc_y)) = self.widget_to_document(abs_x, abs_y) {
+                    self.set_live_redaction(drag.element_id, dragged_redaction(&drag, (doc_x - drag.start.0, doc_y - drag.start.1)));
+                }
+                return;
+            }
             if self.redact_start.get().is_some() {
                 if let Some(point) = self.widget_to_document(abs_x, abs_y) {
                     self.redact_current.set(Some(point));
@@ -1506,6 +1656,17 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some(drag) = self.redaction_drag.take() {
+                let end = self.widget_to_document(abs_x, abs_y).unwrap_or(drag.start);
+                let changed = dragged_redaction(&drag, (end.0 - drag.start.0, end.1 - drag.start.1));
+                if changed != drag.original {
+                    if let Some(cb) = self.redaction_change_callback.borrow().as_ref() {
+                        cb(drag.element_id, changed);
+                    }
+                }
+                self.obj().queue_draw();
+                return;
+            }
             if let Some(start) = self.redact_start.take() {
                 self.redact_current.set(None);
                 let end = self.widget_to_document(abs_x, abs_y).unwrap_or(start);
@@ -1695,6 +1856,9 @@ mod imp {
             let label_origin = self.label_drag_origin.take();
             let callout_origin = self.callout_drag_origin.take();
             let wallpaper_origin = self.wallpaper_drag_origin.take();
+            if let Some(drag) = self.redaction_drag.take() {
+                self.set_live_redaction(drag.element_id, drag.original);
+            }
             self.marquee_start.set(None);
             self.marquee_current.set(None);
 
@@ -1739,6 +1903,37 @@ mod imp {
             }
             self.drag_hover.set(None);
             self.obj().queue_draw();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use screenforge_core::model::RedactionStyle;
+
+        fn drag(resize: bool, flips: (bool, bool)) -> RedactionDrag {
+            let original = Redaction { x: 0.1, y: 0.2, width: 0.3, height: 0.1, ..Redaction::new(RedactionStyle::Blackout) };
+            RedactionDrag { element_id: Uuid::nil(), original, start: (0.0, 0.0), per_doc: (0.01, 0.01), flips, resize }
+        }
+
+        #[test]
+        fn moving_follows_the_pointer_and_stays_inside() {
+            let r = dragged_redaction(&drag(false, (false, false)), (10.0, 5.0));
+            assert!((r.x - 0.2).abs() < 1e-9 && (r.y - 0.25).abs() < 1e-9 && r.width == 0.3);
+            let r = dragged_redaction(&drag(false, (false, false)), (500.0, 0.0));
+            assert!((r.x - 0.7).abs() < 1e-9);
+        }
+
+        #[test]
+        fn a_flipped_screenshot_moves_its_redaction_the_other_way() {
+            let r = dragged_redaction(&drag(false, (true, false)), (10.0, 0.0));
+            assert!((r.x - 0.0).abs() < 1e-9, "{r:?}");
+        }
+
+        #[test]
+        fn resizing_keeps_the_top_left_corner() {
+            let r = dragged_redaction(&drag(true, (false, false)), (10.0, -50.0));
+            assert!((r.x - 0.1).abs() < 1e-9 && (r.width - 0.4).abs() < 1e-9 && r.height >= 0.005);
         }
     }
 }
