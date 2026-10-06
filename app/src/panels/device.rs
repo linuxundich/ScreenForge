@@ -1,6 +1,7 @@
 //! "Device and Perspective" in the style tab: a generic device frame around
-//! every screenshot, and a perspective tilt — the same for all, or fanned
-//! out so the outer screenshots turn toward the middle.
+//! the screenshots, and a perspective tilt — the same for all, fanned out
+//! so the outer screenshots turn toward the middle, or, with "For All
+//! Screenshots" off, set for the selected screenshots only.
 
 use crate::*;
 
@@ -64,12 +65,19 @@ pub(crate) fn register_device_controls(window: &Window, canvas: &Canvas, state: 
     lean_row.set_subtitle(&gettext("Around the horizontal axis, in degrees"));
     lean_row.set_value(0.0);
     let fan_row = adw::SwitchRow::builder().title(gettext("Fan Out")).subtitle(gettext("The outer screenshots turn toward the middle")).build();
+    let all_row = adw::SwitchRow::builder()
+        .title(gettext("For All Screenshots"))
+        .subtitle(gettext("Off: changes apply to the selected screenshots only"))
+        .active(true)
+        .build();
 
     let group = adw::PreferencesGroup::builder().title(gettext("Device and Perspective")).build();
-    for row in [kind_row.upcast_ref::<gtk4::Widget>(), tone_row.upcast_ref(), turn_row.upcast_ref(), lean_row.upcast_ref(), fan_row.upcast_ref()] {
+    for row in [all_row.upcast_ref::<gtk4::Widget>(), kind_row.upcast_ref(), tone_row.upcast_ref(), turn_row.upcast_ref(), lean_row.upcast_ref(), fan_row.upcast_ref()] {
         group.add(row);
     }
     kind_row.bind_property("selected", &tone_row, "visible").transform_to(|_, selected: u32| Some(selected != 0)).sync_create().build();
+    // Fanning out only makes sense across all screenshots.
+    all_row.bind_property("active", &fan_row, "sensitive").sync_create().build();
     window.style_page().add(&group);
 
     let apply_frame = Rc::new(glib::clone!(
@@ -83,16 +91,23 @@ pub(crate) fn register_device_controls(window: &Window, canvas: &Canvas, state: 
         kind_row,
         #[weak]
         tone_row,
+        #[weak]
+        all_row,
         move || {
-            let new = DeviceFrame {
+            let frame = DeviceFrame {
                 kind: KINDS.get(kind_row.selected() as usize).map(|k| k.0).unwrap_or_default(),
                 tone: TONES.get(tone_row.selected() as usize).map(|t| t.0).unwrap_or_default(),
             };
-            let old: Vec<DeviceFrame> = state.borrow().document.elements.iter().map(|e| e.frame).collect();
-            if old.iter().all(|f| *f == new) {
-                return;
+            let targets = target_ids(&canvas, &state, all_row.is_active());
+            let (old, new) = {
+                let state_ref = state.borrow();
+                let old: Vec<DeviceFrame> = state_ref.document.elements.iter().map(|e| e.frame).collect();
+                let new = state_ref.document.elements.iter().map(|e| if targets.contains(&e.id) { frame } else { e.frame }).collect::<Vec<_>>();
+                (old, new)
+            };
+            if old != new {
+                commit(&window, &canvas, &state, Box::new(SetFrames { old, new }));
             }
-            commit(&window, &canvas, &state, Box::new(SetFrameForAllElements { old, new }));
         }
     ));
     kind_row.connect_selected_notify(glib::clone!(#[strong] apply_frame, move |_| apply_frame()));
@@ -111,12 +126,18 @@ pub(crate) fn register_device_controls(window: &Window, canvas: &Canvas, state: 
         lean_row,
         #[weak]
         fan_row,
+        #[weak]
+        all_row,
         move || {
+            let all = all_row.is_active();
+            let targets = target_ids(&canvas, &state, all);
             let (old, new) = {
                 let state_ref = state.borrow();
                 let doc = &state_ref.document;
                 let old: Vec<(f64, f64)> = doc.elements.iter().map(|e| (e.transform.tilt_x, e.transform.tilt_y)).collect();
-                (old, tilts_for(doc, lean_row.value(), turn_row.value(), fan_row.is_active()))
+                let wanted = tilts_for(doc, lean_row.value(), turn_row.value(), all && fan_row.is_active());
+                let new = doc.elements.iter().zip(wanted).zip(old.iter()).map(|((e, w), o)| if targets.contains(&e.id) { w } else { *o }).collect();
+                (old, new)
             };
             if old != new {
                 commit(&window, &canvas, &state, Box::new(SetTilts { old, new }));
@@ -127,10 +148,28 @@ pub(crate) fn register_device_controls(window: &Window, canvas: &Canvas, state: 
     lean_row.connect_value_notify(glib::clone!(#[strong] apply_tilt, move |_| apply_tilt()));
     fan_row.connect_active_notify(glib::clone!(#[strong] apply_tilt, move |_| apply_tilt()));
 
-    // Reflect the document: the first element's frame, the largest turn,
-    // and "fan" when the screenshots' turns differ.
-    let sync: DocumentSync = Rc::new(move |doc: &Document| {
-        let Some(first) = doc.elements.first() else { return };
+    // Reflect the document: the first (or, for "selected only", the first
+    // selected) element's frame, the largest turn, and "fan" when the
+    // screenshots' turns differ.
+    let show: Rc<dyn Fn(&Document)> = Rc::new(glib::clone!(
+        #[weak]
+        canvas,
+        #[weak]
+        all_row,
+        #[weak]
+        kind_row,
+        #[weak]
+        tone_row,
+        #[weak]
+        turn_row,
+        #[weak]
+        lean_row,
+        #[weak]
+        fan_row,
+        move |doc: &Document| {
+        let selected = canvas.selected_ids();
+        let first = if all_row.is_active() { doc.elements.first() } else { doc.elements.iter().find(|e| selected.contains(&e.id)).or(doc.elements.first()) };
+        let Some(first) = first else { return };
         kind_row.set_selected(KINDS.iter().position(|k| k.0 == first.frame.kind).unwrap_or(0) as u32);
         tone_row.set_selected(TONES.iter().position(|t| t.0 == first.frame.tone).unwrap_or(0) as u32);
         let turns: Vec<f64> = doc.elements.iter().map(|e| e.transform.tilt_y).collect();
@@ -139,12 +178,42 @@ pub(crate) fn register_device_controls(window: &Window, canvas: &Canvas, state: 
         fan_row.set_active(fan);
         turn_row.set_value(turn);
         lean_row.set_value(first.transform.tilt_x);
-    });
+    }));
+    let sync: DocumentSync = show.clone();
     let doc = state.borrow().document.clone();
     state.borrow_mut().syncing_controls = true;
     sync(&doc);
     state.borrow_mut().syncing_controls = false;
     state.borrow_mut().document_syncs.push(sync);
+    // With "selected only", picking another screenshot shows its values.
+    let on_selection: Rc<dyn Fn()> = Rc::new(glib::clone!(
+        #[strong]
+        state,
+        #[weak]
+        all_row,
+        #[strong]
+        show,
+        move || {
+            if all_row.is_active() {
+                return;
+            }
+            let doc = state.borrow().document.clone();
+            state.borrow_mut().syncing_controls = true;
+            show(&doc);
+            state.borrow_mut().syncing_controls = false;
+        }
+    ));
+    state.borrow_mut().selection_syncs.push(on_selection);
+}
+
+/// The ids a change applies to: every screenshot, or only the selected
+/// ones (none selected means nothing changes).
+fn target_ids(canvas: &Canvas, state: &Rc<RefCell<EditorState>>, all: bool) -> std::collections::HashSet<Uuid> {
+    if all {
+        state.borrow().document.elements.iter().map(|e| e.id).collect()
+    } else {
+        canvas.selected_ids()
+    }
 }
 
 #[cfg(test)]

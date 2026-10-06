@@ -13,7 +13,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gtk4::cairo;
-use screenforge_core::model::Document;
+use screenforge_core::model::{AnimationSpeed, AnimationStyle, Document};
 use uuid::Uuid;
 
 use crate::export::ExportError;
@@ -56,7 +56,15 @@ pub fn render_and_write(
     let (background, layers) =
         screenforge_core::render::compose_layers(doc, scale, &surfaces, background_surface.as_ref(), width, height)?;
 
-    let total = START + STAGGER * layers.len().saturating_sub(1) as f64 + DURATION + HOLD;
+    // Tempo scales every timing.
+    let tempo = match doc.canvas.animation.speed {
+        AnimationSpeed::Slow => 1.6,
+        AnimationSpeed::Normal => 1.0,
+        AnimationSpeed::Fast => 0.6,
+    };
+    let (start, stagger, duration, hold) = (START * tempo, STAGGER * tempo, DURATION * tempo, HOLD * tempo.max(1.0));
+    let style = doc.canvas.animation.style;
+    let total = start + stagger * layers.len().saturating_sub(1) as f64 + duration + hold;
     let frames = (total * FPS as f64).ceil() as u64;
 
     let pipeline = gst::Pipeline::new();
@@ -91,12 +99,27 @@ pub fn render_and_write(
             ctx.paint()?;
             ctx.set_operator(cairo::Operator::Over);
             for (i, layer) in layers.iter().enumerate() {
-                let progress = ease_out_cubic((t - START - i as f64 * STAGGER) / DURATION);
+                let progress = ease_out_cubic((t - start - i as f64 * stagger) / duration);
                 if progress <= 0.0 {
                     continue;
                 }
-                ctx.set_source_surface(layer, 0.0, (1.0 - progress) * rise)?;
+                let rest = 1.0 - progress;
+                ctx.save()?;
+                match style {
+                    AnimationStyle::Rise => ctx.translate(0.0, rest * rise),
+                    AnimationStyle::Fade => {}
+                    AnimationStyle::Slide => ctx.translate(-rest * width as f64 * 0.25, 0.0),
+                    AnimationStyle::Zoom => {
+                        let s = 0.85 + 0.15 * progress;
+                        let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
+                        ctx.translate(cx, cy);
+                        ctx.scale(s, s);
+                        ctx.translate(-cx, -cy);
+                    }
+                }
+                ctx.set_source_surface(layer, 0.0, 0.0)?;
                 ctx.paint_with_alpha(progress)?;
+                ctx.restore()?;
             }
         }
         surface.flush();
@@ -138,6 +161,8 @@ mod tests {
         doc.canvas.export_height = 48;
         doc.canvas.export_target_width = 64;
         let path = std::env::temp_dir().join("screenforge-video-test.webm");
+        doc.canvas.animation.style = AnimationStyle::Zoom;
+        doc.canvas.animation.speed = AnimationSpeed::Fast;
         render_and_write(&doc, &HashMap::new(), None, &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         // WebM is EBML: starts with 0x1A45DFA3.

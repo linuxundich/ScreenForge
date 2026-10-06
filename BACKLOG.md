@@ -48,9 +48,10 @@ mockups: generator prototype with six styles, UI variant "A + B").
 
 Follow-ups from phase 3:
 
-- [ ] Redactions: draw and move them directly on the canvas, not only via
-      percent values in the sidebar
-- [ ] Watermark: optional logo image besides the text
+- [x] Redactions: draw them directly on the canvas, not only via
+      percent values in the sidebar (v0.31.0)
+- [ ] Redactions: move and resize drawn areas on the canvas
+- [x] Watermark: optional logo image besides the text (v0.31.0)
 
 ## Phase 4 — Translation and packaging — done in v0.29.0
 
@@ -76,10 +77,12 @@ Follow-ups from phase 4:
 
 Follow-ups from phase 5:
 
-- [ ] Frame and tilt per screenshot (the model supports it; the style
-      tab sets all screenshots at once)
-- [ ] Export several store sizes (e.g. iPhone and iPad) in one go
-- [ ] Animated export: choice of animation, duration and frame rate
+- [x] Frame and tilt per screenshot: "For All Screenshots" switch in the
+      style tab (v0.31.0)
+- [x] Export several store sizes (iPhone 6.9", iPad 13", Google Play) in
+      one go (v0.31.0)
+- [x] Animated export: choice of animation and tempo (v0.31.0)
+- [ ] Animated export: frame rate choice, if anyone needs it
 
 ---
 

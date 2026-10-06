@@ -177,6 +177,11 @@ pub(crate) fn element_surfaces(state: &mut EditorState) -> HashMap<Uuid, cairo::
             }
         }
     }
+    if let Some(ImageSource::Path(path)) = &document.watermark.logo {
+        if let Some(surface) = get_or_decode(image_cache, path).and_then(|image| import::surface_from_decoded(image).ok()) {
+            surfaces.insert(screenforge_core::render::WATERMARK_LOGO_ID, surface);
+        }
+    }
     surfaces
 }
 

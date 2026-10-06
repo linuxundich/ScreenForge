@@ -54,9 +54,27 @@ pub fn compose(
     shadow_cache: &ShadowCache,
     background_cache: &BackgroundCache,
 ) -> Result<(), RenderError> {
+    compose_stretched(doc, target, scale, scale, resolved_images, background_image, shadow_cache, background_cache)
+}
+
+/// [`compose`] with separate horizontal and vertical scale, for exports that
+/// must hit an exact pixel size (app store formats): the canvas's integer
+/// size can be a pixel off the exact aspect, and `scale_y` absorbs that.
+/// Keep the two within a fraction of a percent of each other.
+#[allow(clippy::too_many_arguments)]
+pub fn compose_stretched(
+    doc: &Document,
+    target: &cairo::ImageSurface,
+    scale: f64,
+    scale_y: f64,
+    resolved_images: &HashMap<Uuid, cairo::ImageSurface>,
+    background_image: Option<&cairo::ImageSurface>,
+    shadow_cache: &ShadowCache,
+    background_cache: &BackgroundCache,
+) -> Result<(), RenderError> {
     shadow_cache.begin_frame();
     let ctx = Context::new(target)?;
-    ctx.scale(scale, scale);
+    ctx.scale(scale, scale_y);
 
     let visible: Vec<ScreenshotElement> = doc.elements.iter().filter(|e| e.visible).cloned().collect();
     let placements = compute_layout(doc.layout.mode, &visible, doc.layout.spacing_px, doc.layout.margin_x, doc.layout.margin_y);
@@ -74,7 +92,7 @@ pub fn compose(
     }
 
     draw_elements(&ctx, doc, &visible, &placements, resolved_images, scale, shadow_cache)?;
-    draw_watermark(&ctx, &doc.watermark, width, height)
+    draw_watermark(&ctx, &doc.watermark, width, height, resolved_images.get(&WATERMARK_LOGO_ID))
 }
 
 /// One element at outer size `w`×`h`: device frame (if any), the
@@ -151,8 +169,15 @@ fn draw_tilted_body(ctx: &Context, el: &ScreenshotElement, image: &cairo::ImageS
 
 /// Draws `watermark` into its corner of the `width`×`height` canvas, with
 /// a soft dark halo so light text stays legible on light backgrounds.
-fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64) -> Result<(), RenderError> {
-    if !watermark.enabled || watermark.text.trim().is_empty() {
+/// Key under which callers put the decoded watermark logo into the
+/// `resolved_images` map handed to [`compose`] (no element ever has the
+/// nil id).
+pub const WATERMARK_LOGO_ID: Uuid = Uuid::nil();
+
+fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64, logo: Option<&cairo::ImageSurface>) -> Result<(), RenderError> {
+    let text = watermark.text.trim();
+    let logo = logo.filter(|_| watermark.logo.is_some());
+    if !watermark.enabled || (text.is_empty() && logo.is_none()) {
         return Ok(());
     }
     let unit = width.min(height);
@@ -162,17 +187,41 @@ fn draw_watermark(ctx: &Context, watermark: &Watermark, width: f64, height: f64)
     let mut font = pango::FontDescription::from_string("Sans Bold");
     font.set_absolute_size(font_px * pango::SCALE as f64);
     layout.set_font_description(Some(&font));
-    layout.set_text(watermark.text.trim());
+    layout.set_text(text);
     let (_, logical) = layout.pixel_extents();
-    let (text_w, text_h) = (logical.width() as f64, logical.height() as f64);
-    let x = match watermark.corner {
+    let (text_w, text_h) = if text.is_empty() { (0.0, 0.0) } else { (logical.width() as f64, logical.height() as f64) };
+    // The logo is a bit taller than the text, or larger on its own.
+    let (logo_w, logo_h) = match logo {
+        Some(image) if image.height() > 0 => {
+            let h = if text.is_empty() { font_px * 2.2 } else { font_px * 1.5 };
+            (h * image.width() as f64 / image.height() as f64, h)
+        }
+        _ => (0.0, 0.0),
+    };
+    let gap = if logo_w > 0.0 && text_w > 0.0 { font_px * 0.4 } else { 0.0 };
+    let (block_w, block_h) = (logo_w + gap + text_w, logo_h.max(text_h));
+    let block_x = match watermark.corner {
         WatermarkCorner::TopLeft | WatermarkCorner::BottomLeft => margin,
-        WatermarkCorner::TopRight | WatermarkCorner::BottomRight => width - margin - text_w,
+        WatermarkCorner::TopRight | WatermarkCorner::BottomRight => width - margin - block_w,
     };
-    let y = match watermark.corner {
+    let block_y = match watermark.corner {
         WatermarkCorner::TopLeft | WatermarkCorner::TopRight => margin,
-        WatermarkCorner::BottomLeft | WatermarkCorner::BottomRight => height - margin - text_h,
+        WatermarkCorner::BottomLeft | WatermarkCorner::BottomRight => height - margin - block_h,
     };
+    if let Some(image) = logo {
+        ctx.save()?;
+        ctx.translate(block_x, block_y + (block_h - logo_h) / 2.0);
+        ctx.scale(logo_w / image.width() as f64, logo_h / image.height() as f64);
+        ctx.set_source_surface(image, 0.0, 0.0)?;
+        ctx.source().set_filter(cairo::Filter::Good);
+        ctx.paint_with_alpha(watermark.opacity.clamp(0.0, 1.0))?;
+        ctx.restore()?;
+    }
+    if text.is_empty() {
+        return Ok(());
+    }
+    let x = block_x + logo_w + gap;
+    let y = block_y + (block_h - text_h) / 2.0;
     let alpha = watermark.opacity.clamp(0.0, 1.0);
     // A soft drop shadow, so light text stays legible on light areas:
     // the text rendered into a small padded surface, blurred, painted
@@ -342,7 +391,7 @@ pub fn compose_layers(
             let image = if matches!(doc.background, Background::BlurredScreenshot(_)) { first } else { background_image };
             draw_background(&ctx, &doc.background, width, height, image, &regions, scale, &background_cache)?;
         }
-        draw_watermark(&ctx, &doc.watermark, width, height)?;
+        draw_watermark(&ctx, &doc.watermark, width, height, resolved_images.get(&WATERMARK_LOGO_ID))?;
     }
     let mut layers = Vec::new();
     for i in 0..visible.len() {
@@ -1060,6 +1109,21 @@ mod tests {
         let target = ImageSurface::create(Format::ARgb32, doc.canvas.export_width as i32, doc.canvas.export_height as i32).unwrap();
         compose(doc, &target, 1.0, images, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
         target
+    }
+
+    #[test]
+    fn a_logo_alone_is_a_valid_watermark() {
+        let (mut doc, mut images) = one_screenshot_doc();
+        doc.canvas.aspect = Some((2, 1));
+        crate::layout::fit_canvas_to_content(&mut doc);
+        let plain = render(&doc, &images);
+        doc.watermark = Watermark { enabled: true, logo: Some(ImageSource::Path("logo.png".into())), size: 0.08, ..Watermark::default() };
+        images.insert(WATERMARK_LOGO_ID, solid_surface(40, 20, Rgba::new(0.0, 1.0, 0.0, 1.0)));
+        let marked = render(&doc, &images);
+        let (w, h) = (doc.canvas.export_width as i32, doc.canvas.export_height as i32);
+        let (mut a, mut b) = (plain, marked);
+        let differs = (h * 3 / 4..h).any(|y| (w * 3 / 4..w).any(|x| read_pixel(&mut a, x, y) != read_pixel(&mut b, x, y)));
+        assert!(differs, "logo left the corner unchanged");
     }
 
     #[test]

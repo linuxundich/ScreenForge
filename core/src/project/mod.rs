@@ -92,6 +92,9 @@ fn embed_document_assets(document: &mut Document) -> Vec<(String, Vec<u8>)> {
     if let Background::Image(spec) = &mut document.background {
         embed_image_source(&mut spec.source, "background", &mut assets);
     }
+    if let Some(logo) = &mut document.watermark.logo {
+        embed_image_source(logo, "watermark", &mut assets);
+    }
     assets
 }
 
@@ -185,6 +188,9 @@ fn extract_document_assets<R: Read + Seek>(document: &mut Document, archive: &mu
     }
     if let Background::Image(spec) = &mut document.background {
         extract_image_source(&mut spec.source, archive, extract_dir)?;
+    }
+    if let Some(logo) = &mut document.watermark.logo {
+        extract_image_source(logo, archive, extract_dir)?;
     }
     Ok(())
 }

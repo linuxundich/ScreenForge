@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-06
+
+### Added
+
+- Device and perspective: a "For All Screenshots" switch. Turned off,
+  frame, frame color, turn and lean apply to the selected screenshots
+  only, and the rows show the selected screenshot's values.
+- Redactions: "Draw on Screenshot" — drag a rectangle over the area that
+  should disappear instead of typing percent values.
+- Watermark: an optional logo image, drawn before the text or on its own.
+  Saved into `.screenforge` project files like the screenshots.
+- Export: "Export App Store Set…" writes the composition once each for
+  iPhone 6.9" (1320 × 2868), iPad 13" (2064 × 2752) and Google Play
+  (1080 × 1920) into a folder, split into several images if set.
+- Animated WebM export: choice of animation (rise, fade, slide, zoom) and
+  tempo (slow, normal, fast).
+
 ## [0.30.0] - 2026-10-06
 
 ### Added

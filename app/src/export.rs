@@ -78,6 +78,44 @@ pub fn render_and_write(
     Ok(())
 }
 
+/// The sizes [`render_store_set`] writes: (file name part, width, height)
+/// of one image; with "Split Into" each becomes that many images.
+pub const STORE_SET: [(&str, u32, u32); 3] = [("iphone-6.9", 1320, 2868), ("ipad-13", 2064, 2752), ("google-play", 1080, 1920)];
+
+/// Writes `doc` into `dir` once per [`STORE_SET`] size, named
+/// `{name}-{size}.{ext}` (numbered when split). PDF and WebM fall back to
+/// PNG. Returns how many image files were written.
+pub fn render_store_set(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+    dir: &Path,
+    name: &str,
+) -> Result<u32, ExportError> {
+    let format = match doc.canvas.export_format {
+        ExportFormat::Pdf | ExportFormat::WebM => ExportFormat::Png,
+        other => other,
+    };
+    let extension = match format {
+        ExportFormat::Jpeg => "jpg",
+        ExportFormat::WebP => "webp",
+        ExportFormat::Avif => "avif",
+        _ => "png",
+    };
+    let mut written = 0;
+    for (tag, w, h) in STORE_SET {
+        let mut sized = doc.clone();
+        let slices = sized.canvas.slices.max(1);
+        sized.canvas.aspect = Some((w, h));
+        sized.canvas.export_target_width = w * slices;
+        sized.canvas.export_format = format;
+        screenforge_core::layout::fit_canvas_to_content(&mut sized);
+        render_and_write(&sized, decoded_images, background_image, &dir.join(format!("{name}-{tag}.{extension}")))?;
+        written += slices;
+    }
+    Ok(written)
+}
+
 /// `path` with `-n` appended to the file stem: `shots.png` → `shots-2.png`.
 pub fn numbered_path(path: &Path, n: usize) -> std::path::PathBuf {
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -199,7 +237,15 @@ fn render_surface(
     // freely edited without ever cropping or distorting the content.
     let scale = doc.canvas.export_target_width as f64 / doc.canvas.export_width.max(1) as f64;
     let out_width = doc.canvas.export_target_width.max(1);
-    let out_height = ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32;
+    // With a fixed format the height follows the exact aspect ratio (app
+    // stores reject a pixel off); otherwise the content-fitted canvas.
+    let out_height = match doc.canvas.aspect {
+        Some((aw, ah)) if aw > 0 && ah > 0 => {
+            (out_width as f64 * ah as f64 / (aw * doc.canvas.slices.max(1)) as f64).round().max(1.0) as u32
+        }
+        _ => ((doc.canvas.export_height as f64) * scale).round().max(1.0) as u32,
+    };
+    let scale_y = out_height as f64 / doc.canvas.export_height.max(1) as f64;
 
     let target = cairo::ImageSurface::create(cairo::Format::ARgb32, out_width as i32, out_height as i32)?;
     // A fresh, one-shot cache: export renders this document exactly once,
@@ -208,7 +254,7 @@ fn render_surface(
     // one) — every shadow just misses once and renders at full quality.
     let shadow_cache = screenforge_core::shadow_cache::ShadowCache::new();
     let background_cache = screenforge_core::background_cache::BackgroundCache::new();
-    screenforge_core::render::compose(doc, &target, scale, &surfaces, background_surface.as_ref(), &shadow_cache, &background_cache)?;
+    screenforge_core::render::compose_stretched(doc, &target, scale, scale_y, &surfaces, background_surface.as_ref(), &shadow_cache, &background_cache)?;
 
     Ok(target)
 }
@@ -251,6 +297,27 @@ mod tests {
     /// (background-only) document — enough to catch an encoder call that
     /// panics or a file that never gets written, without needing any real
     /// screenshots decoded.
+    #[test]
+    fn a_store_set_writes_every_size_with_its_aspect() {
+        let dir = std::env::temp_dir().join("screenforge-store-set-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = Document::new();
+        let image = DecodedImage { bytes: vec![255u8; 40 * 80 * 4].into(), width: 40, height: 80 };
+        let element = screenforge_core::model::ScreenshotElement::new(screenforge_core::model::ImageSource::Path("x.png".into()), 40.0, 80.0);
+        let mut images = HashMap::new();
+        images.insert(element.id, image);
+        doc.elements.push(element);
+        let count = render_store_set(&doc, &images, None, &dir, "shots").unwrap();
+        assert_eq!(count, 3);
+        for (tag, w, h) in STORE_SET {
+            let mut file = File::open(dir.join(format!("shots-{tag}.png"))).unwrap();
+            let surface = cairo::ImageSurface::create_from_png(&mut file).unwrap();
+            assert_eq!(surface.width() as u32, w);
+            assert_eq!(surface.height() as u32, h, "{tag}");
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn slices_are_written_as_numbered_files() {
         let mut doc = Document::new();

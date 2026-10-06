@@ -171,6 +171,12 @@ pub(crate) fn export_inputs(
             get_or_decode(image_cache, path).map(|image| (el.id, image.clone()))
         })
         .collect::<HashMap<_, _>>();
+    let mut decoded_images = decoded_images;
+    if let Some(ImageSource::Path(path)) = &document.watermark.logo {
+        if let Some(image) = get_or_decode(image_cache, path) {
+            decoded_images.insert(screenforge_core::render::WATERMARK_LOGO_ID, image.clone());
+        }
+    }
     let background_image = background_image_path(&document.background).and_then(|path| get_or_decode(image_cache, &path)).cloned();
     (document.clone(), decoded_images, background_image)
 }
@@ -247,4 +253,49 @@ pub(crate) fn register_drag_out(window: &Window, state: &Rc<RefCell<EditorState>
         source.set_icon(Some(&gtk4::IconTheme::default().lookup_icon("image-x-generic-symbolic", &[], 32, 1, gtk4::TextDirection::None, gtk4::IconLookupFlags::empty())), 16, 16);
     });
     window.drag_out_button().add_controller(source);
+}
+
+/// `win.export-store-set`: asks for a folder and writes the composition in
+/// every app store size (`export::render_store_set`).
+pub(crate) fn register_export_store_set_action(window: &Window, state: &Rc<RefCell<EditorState>>) {
+    let action = gio::SimpleAction::new("export-store-set", None);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        state,
+        move |_, _| {
+            if state.borrow().document.elements.is_empty() {
+                return;
+            }
+            let window = window.clone();
+            let state = state.clone();
+            glib::spawn_future_local(async move {
+                let dialog = gtk4::FileDialog::builder().title(gettext("Choose a Folder for the App Store Set")).build();
+                let Ok(folder) = dialog.select_folder_future(Some(&window)).await else { return };
+                let Some(dir) = folder.path() else { return };
+                let (doc, decoded_images, background_image) = export_inputs(&state);
+                let name = state
+                    .borrow()
+                    .project_path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "screenforge".to_owned());
+                window.export_button().set_sensitive(false);
+                window.export_button().set_child(Some(&adw::Spinner::new()));
+                let result = gio::spawn_blocking(move || export::render_store_set(&doc, &decoded_images, background_image.as_ref(), &dir, &name))
+                .await;
+                window.export_button().set_sensitive(true);
+                window.export_button().set_label(&gettext("Export"));
+                let toast = match result {
+                    Ok(Ok(count)) => adw::Toast::new(&ngettext("{count} image exported", "{count} images exported", count).replace("{count}", &count.to_string())),
+                    Ok(Err(err)) => adw::Toast::new(&gettext("Export failed: {err}").replace("{err}", &err.to_string())),
+                    Err(_) => adw::Toast::new(&gettext("Export failed: background task was cancelled")),
+                };
+                window.toast_overlay().add_toast(toast);
+            });
+        }
+    ));
+    window.add_action(&action);
 }

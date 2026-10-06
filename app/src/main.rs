@@ -42,13 +42,13 @@ use libadwaita::prelude::*;
 use screenforge_core::command::{
     AddCallout, AddScreenshots, ApplyTemplate, Command, DuplicateScreenshot, EnterFreeLayout, RemoveCallout, RemoveScreenshot,
     RemoveScreenshots, ReorderScreenshot, ReplaceScreenshotSource, SetBackground, SetCallout, SetCornerRadiusForAllElements, SetLabelDefaults,
-    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack, SetRedactions, SetWatermark, SetCanvasFormat, SetTransparentBackground, SetFrameForAllElements, SetTilts,
+    SetLayoutMode, SetMarginX, SetMarginY, SetScreenshotLabel, SetShadowForAllElements, SetSpacing, SetTransform, SetTransforms, UndoStack, SetRedactions, SetWatermark, SetCanvasFormat, SetTransparentBackground, SetFrames, SetTilts, SetAnimation,
 };
 use screenforge_core::model::{
     Background, BackgroundImageFit, Callout, ColorStrategy, CornerRadius, Document, ExportFormat, GeneratedBackground, GeneratorStyle, GradientKind, Mood,
     GradientSpec, HorizontalAnchor, ImageBackgroundSpec, ImageSource, Label, LabelStyle, LayoutMode, Rgba, ScreenshotElement, ShadowParams,
     ShadowPreset, TextAlign, TextBackground, TextPosition, Typography, VerticalAnchor, BlurredScreenshotSpec, Redaction, RedactionStyle,
-    Watermark, WatermarkCorner, DeviceFrame, DeviceKind, FrameTone,
+    Watermark, WatermarkCorner, DeviceFrame, DeviceKind, FrameTone, Animation, AnimationSpeed, AnimationStyle,
 };
 use uuid::Uuid;
 
@@ -162,6 +162,7 @@ fn build_ui(app: &adw::Application) {
     register_redaction_controls(&window, &canvas, &state);
     register_balance_control(&window, &canvas, &state);
     register_copy_image_action(app, &window, &state);
+    register_export_store_set_action(&window, &state);
     register_drag_out(&window, &state);
     register_take_screenshot_action(&window, &canvas, &state);
     register_import_files_action(app, &window, &canvas, &state);

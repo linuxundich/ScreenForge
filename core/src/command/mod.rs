@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::model::{
     Background, Callout, CornerRadius, Document, ImageSource, Label, LabelStyle, LayoutMode, LayoutSettings, ScreenshotElement, Redaction, ShadowParams,
-    Transform, Watermark, DeviceFrame,
+    Transform, Watermark, DeviceFrame, Animation,
 };
 
 /// A single reversible mutation of a [`Document`]. Implementations should
@@ -719,6 +719,22 @@ impl Command for SetCanvasFormat {
 }
 
 #[derive(Debug)]
+pub struct SetAnimation {
+    pub old: Animation,
+    pub new: Animation,
+}
+
+impl Command for SetAnimation {
+    fn apply(&self, doc: &mut Document) {
+        doc.canvas.animation = self.new;
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        doc.canvas.animation = self.old;
+    }
+}
+
+#[derive(Debug)]
 pub struct SetTransparentBackground {
     pub new: bool,
 }
@@ -750,6 +766,28 @@ impl Command for SetFrameForAllElements {
     fn undo(&self, doc: &mut Document) {
         for (element, old) in doc.elements.iter_mut().zip(self.old.iter()) {
             element.frame = *old;
+        }
+    }
+}
+
+/// Sets each screenshot's device frame individually, one per element in
+/// document order (for changing only the selected ones).
+#[derive(Debug)]
+pub struct SetFrames {
+    pub old: Vec<DeviceFrame>,
+    pub new: Vec<DeviceFrame>,
+}
+
+impl Command for SetFrames {
+    fn apply(&self, doc: &mut Document) {
+        for (element, frame) in doc.elements.iter_mut().zip(self.new.iter()) {
+            element.frame = *frame;
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) {
+        for (element, frame) in doc.elements.iter_mut().zip(self.old.iter()) {
+            element.frame = *frame;
         }
     }
 }

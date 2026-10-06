@@ -37,6 +37,20 @@ fn format_index_for(canvas: &screenforge_core::model::CanvasSettings) -> u32 {
     }
 }
 
+const ANIMATION_STYLES: [(AnimationStyle, &str); 4] = [
+    (AnimationStyle::Rise, N_("Rise")),
+    (AnimationStyle::Fade, N_("Fade In")),
+    (AnimationStyle::Slide, N_("Slide In")),
+    (AnimationStyle::Zoom, N_("Zoom In")),
+];
+const ANIMATION_SPEEDS: [(AnimationSpeed, &str); 3] =
+    [(AnimationSpeed::Slow, N_("Slow")), (AnimationSpeed::Normal, N_("Normal")), (AnimationSpeed::Fast, N_("Fast"))];
+
+fn translated_list(labels: impl Iterator<Item = &'static str>) -> gtk4::StringList {
+    let translated: Vec<String> = labels.map(gettext).collect();
+    gtk4::StringList::new(&translated.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
 const CORNERS: [(WatermarkCorner, &str); 4] = [
     (WatermarkCorner::BottomRight, N_("Bottom Right")),
     (WatermarkCorner::BottomLeft, N_("Bottom Left")),
@@ -127,6 +141,49 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
     ));
     let copy_row = adw::ButtonRow::builder().title(gettext("Copy to Clipboard")).start_icon_name("edit-copy-symbolic").action_name("win.copy-image").build();
     window.export_group().add(&copy_row);
+    // Animation (WebM only)
+    let animation_row = adw::ComboRow::builder().title(gettext("Animation")).model(&translated_list(ANIMATION_STYLES.iter().map(|a| a.1))).build();
+    let speed_row = adw::ComboRow::builder().title(gettext("Tempo")).model(&translated_list(ANIMATION_SPEEDS.iter().map(|a| a.1))).build();
+    for row in [&animation_row, &speed_row] {
+        window.export_group().add(row);
+        window
+            .export_format_row()
+            .bind_property("selected", row, "visible")
+            .transform_to(|_, selected: u32| Some(selected == index_for_export_format(ExportFormat::WebM)))
+            .sync_create()
+            .build();
+    }
+    let apply_animation = Rc::new(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[weak]
+        animation_row,
+        #[weak]
+        speed_row,
+        move || {
+            let new = Animation {
+                style: ANIMATION_STYLES.get(animation_row.selected() as usize).map(|a| a.0).unwrap_or_default(),
+                speed: ANIMATION_SPEEDS.get(speed_row.selected() as usize).map(|a| a.0).unwrap_or_default(),
+            };
+            let old = state.borrow().document.canvas.animation;
+            if old != new {
+                commit(&window, &canvas, &state, Box::new(SetAnimation { old, new }));
+            }
+        }
+    ));
+    animation_row.connect_selected_notify(glib::clone!(#[strong] apply_animation, move |_| apply_animation()));
+    speed_row.connect_selected_notify(glib::clone!(#[strong] apply_animation, move |_| apply_animation()));
+
+    let store_set_row = adw::ButtonRow::builder()
+        .title(gettext("Export App Store Set…"))
+        .start_icon_name("folder-symbolic")
+        .action_name("win.export-store-set")
+        .build();
+    window.export_group().add(&store_set_row);
 
     // Watermark
     let wm_enabled = adw::SwitchRow::builder().title(gettext("Show Watermark")).build();
@@ -145,18 +202,27 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
     let wm_color = gtk4::ColorDialogButton::builder().dialog(&gtk4::ColorDialog::new()).valign(gtk4::Align::Center).build();
     let wm_color_row = adw::ActionRow::builder().title(gettext("Color")).build();
     wm_color_row.add_suffix(&wm_color);
+    // The logo lives in the document (an image path); this cell mirrors it
+    // so the other rows can rebuild a complete `Watermark`.
+    let wm_logo: Rc<RefCell<Option<ImageSource>>> = Rc::new(RefCell::new(None));
+    let wm_logo_row = adw::ActionRow::builder().title(gettext("Logo")).subtitle(gettext("None")).build();
+    let wm_logo_choose = gtk4::Button::builder().icon_name("document-open-symbolic").tooltip_text(gettext("Choose Logo…")).valign(gtk4::Align::Center).css_classes(["flat"]).build();
+    let wm_logo_clear = gtk4::Button::builder().icon_name("edit-clear-symbolic").tooltip_text(gettext("Remove Logo")).valign(gtk4::Align::Center).css_classes(["flat"]).build();
+    wm_logo_row.add_suffix(&wm_logo_choose);
+    wm_logo_row.add_suffix(&wm_logo_clear);
     let watermark_group = adw::PreferencesGroup::builder().title(gettext("Watermark")).description(gettext("For example your blog's domain, in a corner of the image")).build();
-    for row in [wm_enabled.upcast_ref::<gtk4::Widget>(), wm_text.upcast_ref(), wm_corner.upcast_ref(), wm_size.upcast_ref(), wm_opacity.upcast_ref(), wm_color_row.upcast_ref()] {
+    for row in [wm_enabled.upcast_ref::<gtk4::Widget>(), wm_text.upcast_ref(), wm_logo_row.upcast_ref(), wm_corner.upcast_ref(), wm_size.upcast_ref(), wm_opacity.upcast_ref(), wm_color_row.upcast_ref()] {
         watermark_group.add(row);
     }
-    for row in [wm_text.upcast_ref::<gtk4::Widget>(), wm_corner.upcast_ref(), wm_size.upcast_ref(), wm_opacity.upcast_ref(), wm_color_row.upcast_ref()] {
+    for row in [wm_text.upcast_ref::<gtk4::Widget>(), wm_logo_row.upcast_ref(), wm_corner.upcast_ref(), wm_size.upcast_ref(), wm_opacity.upcast_ref(), wm_color_row.upcast_ref()] {
         wm_enabled.bind_property("active", row, "sensitive").sync_create().build();
     }
 
     let read_watermark = {
-        let (wm_enabled, wm_text, wm_corner, wm_size, wm_opacity, wm_color) =
-            (wm_enabled.clone(), wm_text.clone(), wm_corner.clone(), wm_size.clone(), wm_opacity.clone(), wm_color.clone());
+        let (wm_enabled, wm_text, wm_corner, wm_size, wm_opacity, wm_color, wm_logo) =
+            (wm_enabled.clone(), wm_text.clone(), wm_corner.clone(), wm_size.clone(), wm_opacity.clone(), wm_color.clone(), wm_logo.clone());
         move || Watermark {
+            logo: wm_logo.borrow().clone(),
             enabled: wm_enabled.is_active(),
             text: wm_text.text().to_string(),
             corner: CORNERS.get(wm_corner.selected() as usize).map(|c| c.0).unwrap_or_default(),
@@ -186,6 +252,46 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
     wm_size.connect_value_notify(glib::clone!(#[strong] apply_watermark, move |_| apply_watermark()));
     wm_opacity.connect_value_notify(glib::clone!(#[strong] apply_watermark, move |_| apply_watermark()));
     wm_color.connect_rgba_notify(glib::clone!(#[strong] apply_watermark, move |_| apply_watermark()));
+    wm_logo_clear.connect_clicked(glib::clone!(
+        #[strong]
+        apply_watermark,
+        #[strong]
+        wm_logo,
+        #[weak]
+        wm_logo_row,
+        move |_| {
+            *wm_logo.borrow_mut() = None;
+            wm_logo_row.set_subtitle(&gettext("None"));
+            apply_watermark();
+        }
+    ));
+    wm_logo_choose.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        apply_watermark,
+        #[strong]
+        wm_logo,
+        #[weak]
+        wm_logo_row,
+        move |_| {
+            let filter = gtk4::FileFilter::new();
+            filter.add_mime_type("image/png");
+            filter.add_mime_type("image/svg+xml");
+            filter.add_mime_type("image/jpeg");
+            filter.add_mime_type("image/webp");
+            filter.set_name(Some(&gettext("Images")));
+            let dialog = gtk4::FileDialog::builder().title(gettext("Choose Logo…")).default_filter(&filter).build();
+            let (window, apply_watermark, wm_logo, wm_logo_row) = (window.clone(), apply_watermark.clone(), wm_logo.clone(), wm_logo_row.clone());
+            glib::spawn_future_local(async move {
+                let Ok(file) = dialog.open_future(Some(&window)).await else { return };
+                let Some(path) = file.path() else { return };
+                wm_logo_row.set_subtitle(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                *wm_logo.borrow_mut() = Some(ImageSource::Path(path));
+                apply_watermark();
+            });
+        }
+    ));
 
     // Order on the page: Format, Export (template), Wasserzeichen.
     let page = window.export_page();
@@ -199,6 +305,8 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
     let sync: Rc<dyn Fn(&Document)> = Rc::new(move |doc: &Document| {
         format_row.set_selected(format_index_for(&doc.canvas));
         slices_row.set_value(doc.canvas.slices.max(1) as f64);
+        animation_row.set_selected(ANIMATION_STYLES.iter().position(|a| a.0 == doc.canvas.animation.style).unwrap_or(0) as u32);
+        speed_row.set_selected(ANIMATION_SPEEDS.iter().position(|a| a.0 == doc.canvas.animation.speed).unwrap_or(1) as u32);
         transparent_row.set_active(doc.canvas.transparent_background);
         let wm = &doc.watermark;
         wm_enabled.set_active(wm.enabled);
@@ -207,6 +315,11 @@ pub(crate) fn register_output_controls(window: &Window, canvas: &Canvas, state: 
         wm_size.set_value(wm.size * 100.0);
         wm_opacity.set_value(wm.opacity * 100.0);
         wm_color.set_rgba(&gdk_rgba_from(&wm.color));
+        *wm_logo.borrow_mut() = wm.logo.clone();
+        wm_logo_row.set_subtitle(&match &wm.logo {
+            Some(source) => background_image_subtitle(source),
+            None => gettext("None"),
+        });
     });
     // Never hold the state borrowed while setting widgets: their change
     // handlers borrow it themselves (and bail out on `syncing_controls`).

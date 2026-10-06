@@ -142,7 +142,9 @@ pub(crate) fn sync_redactions(window: &Window, canvas: &Canvas, state: &Rc<RefCe
 pub(crate) fn register_redaction_controls(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).visible(false).build();
     let add = adw::ButtonRow::builder().title(gettext("Add Area")).start_icon_name("list-add-symbolic").build();
+    let draw = adw::ButtonRow::builder().title(gettext("Draw on Screenshot")).start_icon_name("edit-select-all-symbolic").build();
     let add_list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::None).css_classes(["boxed-list"]).build();
+    add_list.append(&draw);
     add_list.append(&add);
     let content = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(12).build();
     content.append(&list);
@@ -174,6 +176,33 @@ pub(crate) fn register_redaction_controls(window: &Window, canvas: &Canvas, stat
             if let Some(last) = panel.list.last_child().and_downcast::<adw::ExpanderRow>() {
                 last.set_expanded(true);
             }
+        }
+    ));
+    draw.connect_activated(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        move |_| {
+            canvas.set_redact_mode(true);
+            window.toast_overlay().add_toast(adw::Toast::new(&gettext("Drag a rectangle over the area to hide")));
+        }
+    ));
+    canvas.connect_redaction_drawn(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        canvas,
+        #[strong]
+        state,
+        #[strong]
+        panel,
+        move |element_id, x, y, width, height| {
+            let mut list = redactions_of(&state, element_id);
+            let style = list.last().map(|r| r.style).unwrap_or_default();
+            list.push(Redaction { x, y, width, height, ..Redaction::new(style) });
+            set_redactions(&window, &canvas, &state, element_id, list);
+            sync_redactions(&window, &canvas, &state, &panel);
         }
     ));
     let on_selection: Rc<dyn Fn()> = Rc::new(glib::clone!(

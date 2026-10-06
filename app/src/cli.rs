@@ -83,6 +83,11 @@ fn run_inner(args: &[String]) -> Result<(), String> {
         document.elements.push(element);
     }
     ApplyTemplate::capturing(&document, preset.template.clone()).apply(&mut document);
+    if let Some(ImageSource::Path(path)) = &document.watermark.logo {
+        if let Ok(image) = import::decode_image(path) {
+            decoded.insert(screenforge_core::render::WATERMARK_LOGO_ID, image);
+        }
+    }
     document.canvas.export_format = format_for(&output)?;
     if let Some(width) = width {
         document.canvas.export_target_width = width;

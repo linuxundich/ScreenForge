@@ -1117,6 +1117,39 @@ pub struct CanvasSettings {
     /// projects saved before v0.30.0) exports one image.
     #[serde(default = "default_slices")]
     pub slices: u32,
+    /// How the WebM export animates the screenshots in.
+    #[serde(default)]
+    pub animation: Animation,
+}
+
+/// How each screenshot enters in the animated export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnimationStyle {
+    /// Fades in while rising a little.
+    #[default]
+    Rise,
+    /// Only fades in.
+    Fade,
+    /// Slides in from the left.
+    Slide,
+    /// Grows from slightly smaller while fading in.
+    Zoom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnimationSpeed {
+    Slow,
+    #[default]
+    Normal,
+    Fast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Animation {
+    pub style: AnimationStyle,
+    pub speed: AnimationSpeed,
 }
 
 fn default_slices() -> u32 {
@@ -1140,6 +1173,7 @@ impl Default for CanvasSettings {
             aspect: None,
             transparent_background: false,
             slices: 1,
+            animation: Animation::default(),
         }
     }
 }
@@ -1190,6 +1224,11 @@ pub struct Watermark {
     pub size: f64,
     pub color: Rgba,
     pub opacity: f64,
+    /// An image (e.g. the blog's logo) shown in front of the text, or on
+    /// its own when the text is empty. Embedded in the project file like a
+    /// background image. `None` before v0.31.0.
+    #[serde(default)]
+    pub logo: Option<ImageSource>,
 }
 
 impl Default for Watermark {
@@ -1201,6 +1240,7 @@ impl Default for Watermark {
             size: 0.03,
             color: Rgba::new(1.0, 1.0, 1.0, 1.0),
             opacity: 0.8,
+            logo: None,
         }
     }
 }

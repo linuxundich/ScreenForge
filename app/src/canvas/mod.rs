@@ -168,6 +168,22 @@ impl Canvas {
     pub fn connect_wallpaper_move<F: Fn(f64, f64) + 'static>(&self, f: F) {
         self.imp().set_wallpaper_move_callback(f);
     }
+
+    /// While on, the next drag draws a redaction rectangle instead of
+    /// selecting or moving; see [`Self::connect_redaction_drawn`]. Turns
+    /// itself off after one rectangle.
+    pub fn set_redact_mode(&self, on: bool) {
+        self.imp().redact_mode.set(on);
+        self.set_cursor_from_name(if on { Some("crosshair") } else { None });
+    }
+
+    /// Called with the screenshot under the drag's start and the drawn
+    /// rectangle as `Redaction` fractions of that screenshot's source image
+    /// (inside its device frame, flips undone). Not called for a drag that
+    /// starts outside every screenshot or is only a click.
+    pub fn connect_redaction_drawn<F: Fn(Uuid, f64, f64, f64, f64) + 'static>(&self, f: F) {
+        *self.imp().redaction_callback.borrow_mut() = Some(Box::new(f));
+    }
 }
 
 impl Default for Canvas {
@@ -437,6 +453,13 @@ mod imp {
         callout_box_move_callback: RefCell<Option<CalloutBoxMoveCallback>>,
         callout_target_move_callback: RefCell<Option<CalloutTargetMoveCallback>>,
         wallpaper_move_callback: RefCell<Option<WallpaperMoveCallback>>,
+        /// Draw mode for redactions (`Canvas::set_redact_mode`), and the
+        /// rectangle being drawn, in document coordinates.
+        pub(super) redact_mode: Cell<bool>,
+        redact_start: Cell<Option<(f64, f64)>>,
+        redact_current: Cell<Option<(f64, f64)>>,
+        #[allow(clippy::type_complexity)]
+        pub(super) redaction_callback: RefCell<Option<Box<dyn Fn(Uuid, f64, f64, f64, f64)>>>,
     }
 
     impl Default for Canvas {
@@ -477,6 +500,10 @@ mod imp {
                 callout_box_move_callback: RefCell::new(None),
                 callout_target_move_callback: RefCell::new(None),
                 wallpaper_move_callback: RefCell::new(None),
+                redact_mode: Cell::new(false),
+                redact_start: Cell::new(None),
+                redact_current: Cell::new(None),
+                redaction_callback: RefCell::new(None),
             }
         }
     }
@@ -760,6 +787,18 @@ mod imp {
                     }
                 }
                 let _ = ctx.stroke();
+
+                // The redaction being drawn: a dark translucent box.
+                if let (Some((sx0, sy0)), Some((sx1, sy1))) = (self.redact_start.get(), self.redact_current.get()) {
+                    let rx = offset_x + (sx0.min(sx1) + content_offset_x) * scale;
+                    let ry = offset_y + (sy0.min(sy1) + content_offset_y) * scale;
+                    ctx.rectangle(rx, ry, (sx1 - sx0).abs() * scale, (sy1 - sy0).abs() * scale);
+                    ctx.set_source_rgba(0.1, 0.1, 0.12, 0.55);
+                    let _ = ctx.fill_preserve();
+                    ctx.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+                    ctx.set_line_width(1.5);
+                    let _ = ctx.stroke();
+                }
 
                 // The marquee-select rectangle, if a select-drag is in
                 // progress (spec §5) — drawn last so it stays on top of
@@ -1212,9 +1251,43 @@ mod imp {
             true
         }
 
+        /// The screenshot under `start` and the rectangle `start`–`end` as
+        /// fractions of its source image (inside the device frame, flips
+        /// undone). `None` outside every screenshot or for a mere click.
+        fn redaction_fractions(&self, start: (f64, f64), end: (f64, f64)) -> Option<(Uuid, f64, f64, f64, f64)> {
+            let doc = self.document.borrow();
+            let placements = self.last_placements.borrow();
+            let visible: Vec<_> = doc.elements.iter().filter(|e| e.visible).collect();
+            let (el, p) = visible.iter().zip(placements.iter()).rev().find(|(_, p)| {
+                start.0 >= p.x && start.0 <= p.x + p.width && start.1 >= p.y && start.1 <= p.y + p.height
+            })?;
+            let area = screenforge_core::frame::screen_area(el.frame, p.width, p.height, &el.corner_radius);
+            let to_fraction = |(x, y): (f64, f64)| {
+                (((x - p.x - area.x) / area.width).clamp(0.0, 1.0), ((y - p.y - area.y) / area.height).clamp(0.0, 1.0))
+            };
+            let (a, b) = (to_fraction(start), to_fraction(end));
+            let (mut x0, mut x1, mut y0, mut y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
+            if x1 - x0 < 0.01 || y1 - y0 < 0.005 {
+                return None;
+            }
+            if el.transform.flip_horizontal {
+                (x0, x1) = (1.0 - x1, 1.0 - x0);
+            }
+            if el.transform.flip_vertical {
+                (y0, y1) = (1.0 - y1, 1.0 - y0);
+            }
+            Some((el.id, x0, y0, x1 - x0, y1 - y0))
+        }
+
         pub(super) fn on_drag_begin(&self, x: f64, y: f64, shift: bool, alt: bool) {
             self.active_guides.borrow_mut().clear();
             let Some((doc_x, doc_y)) = self.widget_to_document(x, y) else { return };
+
+            if self.redact_mode.get() {
+                self.redact_start.set(Some((doc_x, doc_y)));
+                self.redact_current.set(Some((doc_x, doc_y)));
+                return;
+            }
 
             if !shift {
                 if let Some(index) = self.callout_target_hit_at(doc_x, doc_y) {
@@ -1316,6 +1389,13 @@ mod imp {
         }
 
         pub(super) fn on_drag_update(&self, abs_x: f64, abs_y: f64) {
+            if self.redact_start.get().is_some() {
+                if let Some(point) = self.widget_to_document(abs_x, abs_y) {
+                    self.redact_current.set(Some(point));
+                    self.obj().queue_draw();
+                }
+                return;
+            }
             if let Some(((start_x, start_y), (orig_ox, orig_oy))) = self.wallpaper_drag_origin.get() {
                 // Deliberately never touches `self.document` or
                 // `content_dirty` here — see `WallpaperPreview`'s doc
@@ -1426,6 +1506,19 @@ mod imp {
         }
 
         pub(super) fn on_drag_end(&self, abs_x: f64, abs_y: f64) {
+            if let Some(start) = self.redact_start.take() {
+                self.redact_current.set(None);
+                let end = self.widget_to_document(abs_x, abs_y).unwrap_or(start);
+                let hit = self.redaction_fractions(start, end);
+                self.obj().set_redact_mode(false);
+                self.obj().queue_draw();
+                if let Some((id, x, y, w, h)) = hit {
+                    if let Some(cb) = self.redaction_callback.borrow().as_ref() {
+                        cb(id, x, y, w, h);
+                    }
+                }
+                return;
+            }
             if let Some(((start_x, start_y), (orig_ox, orig_oy))) = self.wallpaper_drag_origin.take() {
                 // The one point in the whole drag that actually commits to
                 // `self.document` (via the callback, which round-trips
