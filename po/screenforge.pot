@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: screenforge\n"
 "Report-Msgid-Bugs-To: https://github.com/linuxundich/ScreenForge/issues\n"
-"POT-Creation-Date: 2026-10-06 21:51+0200\n"
+"POT-Creation-Date: 2026-10-06 22:57+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -801,83 +801,83 @@ msgstr ""
 msgid "Android"
 msgstr ""
 
-#: app/src/dialogs.rs:50 app/src/dialogs.rs:226
+#: app/src/dialogs.rs:50 app/src/dialogs.rs:242
 msgid "General"
 msgstr ""
 
-#: app/src/dialogs.rs:158
+#: app/src/dialogs.rs:174
 msgid "Arranges smartphone screenshots into a single presentation image — a native GNOME app."
 msgstr ""
 
-#: app/src/dialogs.rs:171
+#: app/src/dialogs.rs:187
 msgid "Language"
 msgstr ""
 
-#: app/src/dialogs.rs:173
+#: app/src/dialogs.rs:189
 msgid "GUI Framework"
 msgstr ""
 
-#: app/src/dialogs.rs:177
+#: app/src/dialogs.rs:193
 msgid "gtk4-rs / libadwaita-rs (Rust bindings) https://gtk-rs.org"
 msgstr ""
 
-#: app/src/dialogs.rs:180
+#: app/src/dialogs.rs:196
 msgid "Graphics &amp; Rendering"
 msgstr ""
 
-#: app/src/dialogs.rs:182
+#: app/src/dialogs.rs:198
 msgid "Other Libraries"
 msgstr ""
 
-#: app/src/dialogs.rs:201
+#: app/src/dialogs.rs:217
 msgid "gtk4-rs, libadwaita-rs (Rust bindings)"
 msgstr ""
 
-#: app/src/dialogs.rs:206
+#: app/src/dialogs.rs:222
 msgid "Dual-licensed under MIT or Apache-2.0, at the copyright holder's option."
 msgstr ""
 
-#: app/src/dialogs.rs:228
+#: app/src/dialogs.rs:244
 msgid "Open Images"
 msgstr ""
 
-#: app/src/dialogs.rs:230
+#: app/src/dialogs.rs:246
 msgid "Import from Android"
 msgstr ""
 
-#: app/src/dialogs.rs:231
+#: app/src/dialogs.rs:247
 msgid "Save Project"
 msgstr ""
 
-#: app/src/dialogs.rs:232 app/src/project.rs:34
+#: app/src/dialogs.rs:248 app/src/project.rs:34
 msgid "Save Project As"
 msgstr ""
 
-#: app/src/dialogs.rs:239
+#: app/src/dialogs.rs:255
 msgid "Editing"
 msgstr ""
 
-#: app/src/dialogs.rs:240
+#: app/src/dialogs.rs:256
 msgid "Undo"
 msgstr ""
 
-#: app/src/dialogs.rs:240
+#: app/src/dialogs.rs:256
 msgid "Redo"
 msgstr ""
 
-#: app/src/dialogs.rs:240
+#: app/src/dialogs.rs:256
 msgid "Delete Selection"
 msgstr ""
 
-#: app/src/dialogs.rs:243
+#: app/src/dialogs.rs:259
 msgid "View"
 msgstr ""
 
-#: app/src/dialogs.rs:246
+#: app/src/dialogs.rs:262
 msgid "Original Size"
 msgstr ""
 
-#: app/src/dialogs.rs:249
+#: app/src/dialogs.rs:265
 msgid "Toggle Sidebar"
 msgstr ""
 
@@ -893,7 +893,7 @@ msgstr ""
 msgid "Replace Screenshot…"
 msgstr ""
 
-#: app/src/editing.rs:408 app/src/presets.rs:167
+#: app/src/editing.rs:408 app/src/presets.rs:170
 msgid "Delete"
 msgstr ""
 
@@ -960,90 +960,106 @@ msgstr ""
 msgid "Choose"
 msgstr ""
 
-#: app/src/panels/callouts.rs:53
+#: app/src/panels/callouts.rs:54
 msgid "Callout"
 msgstr ""
 
-#: app/src/panels/callouts.rs:64
+#: app/src/panels/callouts.rs:65
 msgid "Delete Callout"
 msgstr ""
 
-#: app/src/panels/callouts.rs:93 app/src/panels/text.rs:265
+#: app/src/panels/callouts.rs:93
+msgid "Accent"
+msgstr ""
+
+#: app/src/panels/callouts.rs:95
+msgid "Look"
+msgstr ""
+
+#: app/src/panels/callouts.rs:102 app/src/panels/text.rs:260
+msgid "Automatic Size"
+msgstr ""
+
+#: app/src/panels/callouts.rs:103 app/src/panels/text.rs:261
+msgid "Grows and shrinks with the screenshot"
+msgstr ""
+
+#: app/src/panels/callouts.rs:109 app/src/panels/text.rs:299
 msgid "Wrap Automatically"
 msgstr ""
 
-#: app/src/panels/callouts.rs:97 app/src/panels/text.rs:267
+#: app/src/panels/callouts.rs:113 app/src/panels/text.rs:301
 msgid "Line Spacing"
 msgstr ""
 
-#: app/src/panels/callouts.rs:98 app/src/panels/text.rs:268
+#: app/src/panels/callouts.rs:114 app/src/panels/text.rs:302
 msgid "Factor of the font size, 1.0 = normal"
 msgstr ""
 
-#: app/src/panels/callouts.rs:102 app/src/panels/text.rs:245
+#: app/src/panels/callouts.rs:118 app/src/panels/text.rs:279
 msgid "Font"
 msgstr ""
 
-#: app/src/panels/callouts.rs:109 app/src/panels/text.rs:249
+#: app/src/panels/callouts.rs:125 app/src/panels/text.rs:283
 msgid "Text Alignment"
 msgstr ""
 
-#: app/src/panels/callouts.rs:109 app/src/panels/text.rs:249
+#: app/src/panels/callouts.rs:125 app/src/panels/text.rs:283
 msgid "For text with several lines"
 msgstr ""
 
-#: app/src/panels/callouts.rs:110 app/src/panels/redactions.rs:60
-#: app/src/panels/text.rs:221 app/src/panels/text.rs:250
+#: app/src/panels/callouts.rs:126 app/src/panels/redactions.rs:60
+#: app/src/panels/text.rs:234 app/src/panels/text.rs:284
 msgid "Left"
 msgstr ""
 
-#: app/src/panels/callouts.rs:110 app/src/panels/text.rs:221
-#: app/src/panels/text.rs:223 app/src/panels/text.rs:250
+#: app/src/panels/callouts.rs:126 app/src/panels/text.rs:234
+#: app/src/panels/text.rs:238 app/src/panels/text.rs:284
 msgid "Center"
 msgstr ""
 
-#: app/src/panels/callouts.rs:110 app/src/panels/text.rs:221
-#: app/src/panels/text.rs:250
+#: app/src/panels/callouts.rs:126 app/src/panels/text.rs:234
+#: app/src/panels/text.rs:284
 msgid "Right"
 msgstr ""
 
-#: app/src/panels/callouts.rs:119 app/src/panels/text.rs:235
+#: app/src/panels/callouts.rs:135 app/src/panels/text.rs:269
 msgid "No Background"
 msgstr ""
 
-#: app/src/panels/callouts.rs:119 app/src/panels/text.rs:235
+#: app/src/panels/callouts.rs:135 app/src/panels/text.rs:269
 msgid "Gradient"
 msgstr ""
 
-#: app/src/panels/callouts.rs:129 app/src/panels/text.rs:236
+#: app/src/panels/callouts.rs:145 app/src/panels/text.rs:270
 msgid "Background Color"
 msgstr ""
 
-#: app/src/panels/callouts.rs:143 app/src/panels/text.rs:240
+#: app/src/panels/callouts.rs:159 app/src/panels/text.rs:274
 msgid "Background Color 2"
 msgstr ""
 
-#: app/src/panels/callouts.rs:156 app/src/panels/text.rs:251
+#: app/src/panels/callouts.rs:172 app/src/panels/text.rs:285
 msgid "Text Color"
 msgstr ""
 
-#: app/src/panels/callouts.rs:166 app/src/panels/text.rs:262
+#: app/src/panels/callouts.rs:182 app/src/panels/text.rs:296
 msgid "Horizontal Padding"
 msgstr ""
 
-#: app/src/panels/callouts.rs:169 app/src/panels/text.rs:264
+#: app/src/panels/callouts.rs:185 app/src/panels/text.rs:298
 msgid "Vertical Padding"
 msgstr ""
 
-#: app/src/panels/callouts.rs:191
+#: app/src/panels/callouts.rs:207
 msgid "Arrow Color"
 msgstr ""
 
-#: app/src/panels/callouts.rs:198
+#: app/src/panels/callouts.rs:214
 msgid "Arrow Width"
 msgstr ""
 
-#: app/src/panels/callouts.rs:201
+#: app/src/panels/callouts.rs:217
 msgid "Dot Size"
 msgstr ""
 
@@ -1261,12 +1277,12 @@ msgstr ""
 msgid "Show Watermark"
 msgstr ""
 
-#: app/src/panels/output.rs:192 app/src/panels/text.rs:218
-#: app/src/panels/text.rs:612
+#: app/src/panels/output.rs:192 app/src/panels/text.rs:231
+#: app/src/panels/text.rs:724
 msgid "Position"
 msgstr ""
 
-#: app/src/panels/output.rs:196
+#: app/src/panels/output.rs:196 app/src/panels/text.rs:264
 msgid "Size"
 msgstr ""
 
@@ -1323,7 +1339,7 @@ msgstr ""
 msgid "Remove Area"
 msgstr ""
 
-#: app/src/panels/redactions.rs:61 app/src/panels/text.rs:223
+#: app/src/panels/redactions.rs:61 app/src/panels/text.rs:237
 msgid "Top"
 msgstr ""
 
@@ -1351,47 +1367,75 @@ msgstr ""
 msgid "Drag a rectangle over the area to hide"
 msgstr ""
 
-#: app/src/panels/text.rs:219
-msgid "Automatic"
+#: app/src/panels/text.rs:42
+msgid "Capsule"
 msgstr ""
 
-#: app/src/panels/text.rs:219
-msgid "Manual (X/Y)"
+#: app/src/panels/text.rs:43
+msgid "Caption"
 msgstr ""
 
-#: app/src/panels/text.rs:223
-msgid "Bottom"
-msgstr ""
-
-#: app/src/panels/text.rs:227
-msgid "Edge Distance"
-msgstr ""
-
-#: app/src/panels/text.rs:228
-msgid "To the screenshot's edge, in pixels"
-msgstr ""
-
-#: app/src/panels/text.rs:230
-msgid "X Position"
+#: app/src/panels/text.rs:44
+msgid "Headline"
 msgstr ""
 
 #: app/src/panels/text.rs:232
+msgid "Automatic"
+msgstr ""
+
+#: app/src/panels/text.rs:232
+msgid "Manual (X/Y)"
+msgstr ""
+
+#: app/src/panels/text.rs:239
+msgid "Bottom"
+msgstr ""
+
+#: app/src/panels/text.rs:240
+msgid "Above the Screenshot"
+msgstr ""
+
+#: app/src/panels/text.rs:241
+msgid "Below the Screenshot"
+msgstr ""
+
+#: app/src/panels/text.rs:246
+msgid "Edge Distance"
+msgstr ""
+
+#: app/src/panels/text.rs:247
+msgid "To the screenshot's edge, in pixels"
+msgstr ""
+
+#: app/src/panels/text.rs:249
+msgid "X Position"
+msgstr ""
+
+#: app/src/panels/text.rs:251
 msgid "Y Position"
 msgstr ""
 
-#: app/src/panels/text.rs:621
+#: app/src/panels/text.rs:256
+msgid "Starting point; everything below stays adjustable"
+msgstr ""
+
+#: app/src/panels/text.rs:265
+msgid "In percent of the automatic size"
+msgstr ""
+
+#: app/src/panels/text.rs:733
 msgid "Font &amp; Color"
 msgstr ""
 
-#: app/src/panels/text.rs:634
+#: app/src/panels/text.rs:749
 msgid "Appearance"
 msgstr ""
 
-#: app/src/panels/text.rs:667
+#: app/src/panels/text.rs:782
 msgid "Starting values for newly created projects — existing projects are not changed"
 msgstr ""
 
-#: app/src/panels/text.rs:717
+#: app/src/panels/text.rs:832
 msgid "Shared by all labels of this project — not set per screenshot"
 msgstr ""
 
@@ -1399,7 +1443,7 @@ msgstr ""
 msgid "Choose Background"
 msgstr ""
 
-#: app/src/panels/variants.rs:198 app/src/presets.rs:116
+#: app/src/panels/variants.rs:198 app/src/presets.rs:119
 msgid "Cancel"
 msgstr ""
 
@@ -1419,35 +1463,35 @@ msgstr ""
 msgid "Preset applied"
 msgstr ""
 
-#: app/src/presets.rs:104
+#: app/src/presets.rs:107
 msgid "Name"
 msgstr ""
 
-#: app/src/presets.rs:150
+#: app/src/presets.rs:153
 msgid "No presets saved yet"
 msgstr ""
 
-#: app/src/presets.rs:156
+#: app/src/presets.rs:159
 msgid "Click to apply"
 msgstr ""
 
-#: app/src/presets.rs:161
+#: app/src/presets.rs:164
 msgid "Rename"
 msgstr ""
 
-#: app/src/presets.rs:215
+#: app/src/presets.rs:218
 msgid "Rename Preset"
 msgstr ""
 
-#: app/src/presets.rs:282
+#: app/src/presets.rs:285
 msgid "Save Current Settings as Preset…"
 msgstr ""
 
-#: app/src/presets.rs:308
+#: app/src/presets.rs:311
 msgid "Save Preset"
 msgstr ""
 
-#: app/src/presets.rs:319
+#: app/src/presets.rs:322
 msgid "This project's layout, background, shadow, corner radius, device frame, watermark and label settings"
 msgstr ""
 

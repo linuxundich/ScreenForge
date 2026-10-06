@@ -81,6 +81,9 @@ pub(crate) fn load_global_label_defaults() -> screenforge_core::model::LabelStyl
         return screenforge_core::model::LabelStyle::default();
     }
     match screenforge_core::template::deserialize_label_style(&json) {
+        // An untouched default from before the built-in label types: use
+        // the new default look instead.
+        Ok(style) if style == screenforge_core::model::LabelStyle::legacy_default() => screenforge_core::model::LabelStyle::default(),
         Ok(style) => style,
         Err(err) => {
             eprintln!("ScreenForge: could not read the default label style, falling back to the built-in one: {err}");

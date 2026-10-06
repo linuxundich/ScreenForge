@@ -184,7 +184,7 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
         max_y = max_y.max(placement.y + placement.height);
 
         if el.label.enabled && !el.label.content.is_empty() {
-            let resolved_label = el.label.resolve(&doc.label_defaults);
+            let resolved_label = el.label.resolve(&doc.label_defaults, placement.width);
             if let Ok((bx, by, bw, bh)) = crate::render::measure_text_box(&resolved_label, placement.width, placement.height) {
                 min_x = min_x.min(placement.x + bx);
                 min_y = min_y.min(placement.y + by);
@@ -196,7 +196,7 @@ pub fn fit_canvas_to_content(doc: &mut Document) {
         for callout in &el.callouts {
             if callout.enabled && !callout.text.content.is_empty() {
                 if let Ok((bx, by, bw, bh)) =
-                    crate::render::measure_text_box(&callout.text, placement.width, placement.height)
+                    crate::render::measure_text_box(&callout.resolved(placement.width).text, placement.width, placement.height)
                 {
                     min_x = min_x.min(placement.x + bx);
                     min_y = min_y.min(placement.y + by);

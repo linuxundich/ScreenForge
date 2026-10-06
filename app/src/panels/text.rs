@@ -1,4 +1,5 @@
 use crate::*;
+use screenforge_core::model::LabelKind;
 
 pub(crate) fn horizontal_anchor_for_index(index: u32) -> HorizontalAnchor {
     match index {
@@ -20,6 +21,8 @@ pub(crate) fn vertical_anchor_for_index(index: u32) -> VerticalAnchor {
     match index {
         0 => VerticalAnchor::Top,
         2 => VerticalAnchor::Bottom,
+        3 => VerticalAnchor::Above,
+        4 => VerticalAnchor::Below,
         _ => VerticalAnchor::Center,
     }
 }
@@ -29,8 +32,18 @@ pub(crate) fn index_for_vertical_anchor(anchor: VerticalAnchor) -> u32 {
         VerticalAnchor::Top => 0,
         VerticalAnchor::Center => 1,
         VerticalAnchor::Bottom => 2,
+        VerticalAnchor::Above => 3,
+        VerticalAnchor::Below => 4,
     }
 }
+
+/// The label types offered in the "Type" row, in row order.
+const LABEL_KINDS: [(LabelKind, &str); 4] = [
+    (LabelKind::Pill, N_("Capsule")),
+    (LabelKind::Caption, N_("Caption")),
+    (LabelKind::Headline, N_("Headline")),
+    (LabelKind::Custom, N_("Custom")),
+];
 
 pub(crate) fn text_align_for_index(index: u32) -> TextAlign {
     match index {
@@ -214,13 +227,27 @@ pub(crate) fn build_label_style_groups(
     scope_description: Option<&str>,
 ) -> (adw::PreferencesGroup, adw::PreferencesGroup, adw::PreferencesGroup, LabelStyleSync) {
     let defaults = get();
+    // Set while a type change or the size switch refills every row from
+    // the new style, so those rows don't commit again on the way.
+    let quiet = Rc::new(Cell::new(false));
+    let is_syncing: Rc<dyn Fn() -> bool> = {
+        let outer = is_syncing.clone();
+        let quiet = quiet.clone();
+        Rc::new(move || outer() || quiet.get())
+    };
 
             let position_mode_row = adw::ComboRow::builder().title(gettext("Position")).build();
             position_mode_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Automatic"), &gettext("Manual (X/Y)")])));
             let horizontal_row = adw::ComboRow::builder().title(gettext("Horizontal")).build();
             horizontal_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Left"), &gettext("Center"), &gettext("Right")])));
             let vertical_row = adw::ComboRow::builder().title(gettext("Vertical")).build();
-            vertical_row.set_model(Some(&gtk4::StringList::new(&[&gettext("Top"), &gettext("Center"), &gettext("Bottom")])));
+            vertical_row.set_model(Some(&gtk4::StringList::new(&[
+                &gettext("Top"),
+                &gettext("Center"),
+                &gettext("Bottom"),
+                &gettext("Above the Screenshot"),
+                &gettext("Below the Screenshot"),
+            ])));
             // Negative allowed — lets the shared default itself push every
             // label above/left of its screenshot's own edge.
             let padding_row = adw::SpinRow::with_range(-500.0, 500.0, 4.0);
@@ -230,6 +257,21 @@ pub(crate) fn build_label_style_groups(
             x_row.set_title(&gettext("X Position"));
             let y_row = adw::SpinRow::with_range(-4000.0, 8000.0, 4.0);
             y_row.set_title(&gettext("Y Position"));
+
+            let kind_labels: Vec<String> = LABEL_KINDS.iter().map(|(_, l)| gettext(*l)).collect();
+            let kind_row = adw::ComboRow::builder()
+                .title(gettext("Type"))
+                .subtitle(gettext("Starting point; everything below stays adjustable"))
+                .model(&gtk4::StringList::new(&kind_labels.iter().map(String::as_str).collect::<Vec<_>>()))
+                .build();
+            let auto_size_row = adw::SwitchRow::builder()
+                .title(gettext("Automatic Size"))
+                .subtitle(gettext("Grows and shrinks with the screenshot"))
+                .build();
+            let size_scale_row = adw::SpinRow::with_range(25.0, 300.0, 5.0);
+            size_scale_row.set_title(&gettext("Size"));
+            size_scale_row.set_subtitle(&gettext("In percent of the automatic size"));
+            auto_size_row.bind_property("active", &size_scale_row, "visible").sync_create().build();
 
             let background_row = adw::ComboRow::builder().title(gettext("Background")).build();
             background_row.set_model(Some(&gtk4::StringList::new(&[&gettext("No Background"), &gettext("Solid Color"), &gettext("Gradient")])));
@@ -307,7 +349,13 @@ pub(crate) fn build_label_style_groups(
                 let shadow_angle_row = shadow_angle_row.clone();
                 let shadow_distance_row = shadow_distance_row.clone();
                 let shadow_blur_row = shadow_blur_row.clone();
+                let kind_row = kind_row.clone();
+                let auto_size_row = auto_size_row.clone();
+                let size_scale_row = size_scale_row.clone();
                 Rc::new(move |defaults: &LabelStyle| {
+                    kind_row.set_selected(LABEL_KINDS.iter().position(|(k, _)| *k == defaults.kind).unwrap_or(3) as u32);
+                    auto_size_row.set_active(defaults.auto_size);
+                    size_scale_row.set_value(defaults.size_scale * 100.0);
                     let is_absolute = matches!(defaults.position, TextPosition::Absolute { .. });
                     position_mode_row.set_selected(if is_absolute { 1 } else { 0 });
                     horizontal_row.set_visible(!is_absolute);
@@ -411,6 +459,10 @@ pub(crate) fn build_label_style_groups(
                 wrap_row,
                 #[weak]
                 line_spacing_row,
+                #[weak]
+                auto_size_row,
+                #[weak]
+                size_scale_row,
                 move || {
                     if is_syncing() {
                         return;
@@ -438,6 +490,10 @@ pub(crate) fn build_label_style_groups(
                     };
                     let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
                     let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
+                    // With automatic size the stored size only sets the
+                    // proportions; the font button's size is not used.
+                    let auto_size = auto_size_row.is_active();
+                    let font_size = if auto_size { old.typography.font_size } else { font_size };
                     // The shadow *preset*/geometry rows have their own
                     // dedicated handlers below (mirroring the per-label
                     // shadow split), so this closure carries the shadow
@@ -462,6 +518,9 @@ pub(crate) fn build_label_style_groups(
                         padding_x: padding_x_row.value(),
                         padding_y: padding_y_row.value(),
                         shadow,
+                        kind: old.kind,
+                        auto_size,
+                        size_scale: size_scale_row.value() / 100.0,
                     };
                     if old == new {
                         return;
@@ -523,6 +582,81 @@ pub(crate) fn build_label_style_groups(
             padding_y_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
             wrap_row.connect_active_notify(glib::clone!(#[strong] apply, move |_| apply()));
             line_spacing_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            size_scale_row.connect_value_notify(glib::clone!(#[strong] apply, move |_| apply()));
+            auto_size_row.connect_active_notify(glib::clone!(
+                #[strong]
+                quiet,
+                #[strong]
+                populate,
+                #[strong]
+                get,
+                #[strong]
+                commit,
+                #[strong]
+                is_syncing,
+                move |row| {
+                    if is_syncing() {
+                        return;
+                    }
+                    let old = get();
+                    let mut new = old.clone();
+                    new.auto_size = row.is_active();
+                    // Switching off freezes the size the label has on a
+                    // typical phone screenshot (1080 px wide), so the pixel
+                    // values shown are real ones from then on.
+                    if !new.auto_size {
+                        let auto = LabelStyle { auto_size: true, ..old.clone() };
+                        let frozen = Label { enabled: true, content: String::new() }.resolve(&auto, 1080.0);
+                        new = LabelStyle {
+                            position: frozen.position,
+                            typography: frozen.typography,
+                            corner_radius: frozen.corner_radius,
+                            padding_x: frozen.padding_x,
+                            padding_y: frozen.padding_y,
+                            shadow: frozen.shadow,
+                            auto_size: false,
+                            ..old.clone()
+                        };
+                    }
+                    if old != new {
+                        commit(old, new);
+                        quiet.set(true);
+                        populate(&get());
+                        quiet.set(false);
+                    }
+                }
+            ));
+            kind_row.connect_selected_notify(glib::clone!(
+                #[strong]
+                quiet,
+                #[strong]
+                populate,
+                #[strong]
+                get,
+                #[strong]
+                commit,
+                #[strong]
+                is_syncing,
+                move |row| {
+                    if is_syncing() {
+                        return;
+                    }
+                    let Some((kind, _)) = LABEL_KINDS.get(row.selected() as usize) else { return };
+                    let old = get();
+                    if *kind == old.kind {
+                        return;
+                    }
+                    let new = if *kind == LabelKind::Custom {
+                        LabelStyle { kind: LabelKind::Custom, ..old.clone() }
+                    } else {
+                        LabelStyle { size_scale: old.size_scale, ..LabelStyle::for_kind(*kind) }
+                    };
+                    commit(old, new);
+                    quiet.set(true);
+                    populate(&get());
+                    quiet.set(false);
+                }
+            ));
 
             // Shadow preset/geometry: same preset-preserves-angle split as
             // every other shadow control in this app
@@ -622,6 +756,9 @@ pub(crate) fn build_label_style_groups(
             if let Some(description) = scope_description {
                 look_group.set_description(Some(description));
             }
+            look_group.add(&kind_row);
+            look_group.add(&auto_size_row);
+            look_group.add(&size_scale_row);
             look_group.add(&font_row);
             look_group.add(&alignment_row);
             look_group.add(&color_row);

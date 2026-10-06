@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-06
+
+### Added
+
+- Three label types to start from: Capsule (dark translucent pill on the
+  screenshot), Caption (light chip below the screenshot) and Headline
+  (large text above the screenshot, as on app store images). Everything
+  stays adjustable afterward.
+- Automatic size for labels and callouts: text, padding, radius, edge
+  distance and shadow grow and shrink with the screenshot's width, with a
+  size percentage for fine-tuning. On by default; switching it off
+  freezes the size of a typical phone screenshot.
+- Labels can sit above or below the screenshot; the canvas grows to fit.
+- Callout looks: Light, Dark and Accent.
+
+### Changed
+
+- Callouts got a new design: pill bubble with a soft shadow, a gently
+  curved line with a light halo, and a ringed target dot instead of an
+  arrowhead.
+- New projects start with the Capsule label; an untouched old default
+  label style is replaced by it.
+
+### Fixed
+
+- Dragging callouts, labels and screenshots was slow, worst with tilted
+  screenshots (around 300 ms per frame). The preview now keeps every
+  screenshot, including the perspective warp, as a ready bitmap at
+  preview resolution, which brings a redraw down to roughly 10–20 ms.
+  Exports still draw at full sharpness.
+
 ## [0.32.1] - 2026-10-06
 
 ### Changed

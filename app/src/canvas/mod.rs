@@ -521,7 +521,7 @@ mod imp {
                 resolved_images: RefCell::new(HashMap::new()),
                 background_image: RefCell::new(None),
                 cached: RefCell::new(None),
-                shadow_cache: screenforge_core::shadow_cache::ShadowCache::new(),
+                shadow_cache: screenforge_core::shadow_cache::ShadowCache::for_preview(),
                 background_cache: screenforge_core::background_cache::BackgroundCache::new(),
                 content_dirty: Cell::new(true),
                 drag_active: Cell::new(false),
@@ -1050,7 +1050,7 @@ mod imp {
                     if !el.label.enabled || el.label.content.is_empty() {
                         return None;
                     }
-                    let resolved = el.label.resolve(&doc.label_defaults);
+                    let resolved = el.label.resolve(&doc.label_defaults, placement.width);
                     screenforge_core::render::measure_text_box(&resolved, placement.width, placement.height).ok()
                 })
                 .collect();
@@ -1066,7 +1066,7 @@ mod imp {
                 .enumerate()
                 .flat_map(|(element_index, (el, placement))| {
                     el.callouts.iter().filter(|c| c.enabled && !c.text.content.is_empty()).filter_map(move |callout| {
-                        let box_rect = screenforge_core::render::measure_text_box(&callout.text, placement.width, placement.height).ok()?;
+                        let box_rect = screenforge_core::render::measure_text_box(&callout.resolved(placement.width).text, placement.width, placement.height).ok()?;
                         let target = (callout.target_x.clamp(0.0, 1.0) * placement.width, callout.target_y.clamp(0.0, 1.0) * placement.height);
                         Some(CalloutPlacement { element_index, callout_id: callout.id, box_rect, target })
                     })

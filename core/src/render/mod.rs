@@ -124,44 +124,123 @@ fn draw_element_body(ctx: &Context, el: &ScreenshotElement, image: &cairo::Image
 /// A tilted element: drawn flat into a bitmap at device resolution, warped
 /// onto its perspective quad (`crate::warp`), with a shadow cast from the
 /// warped shape itself.
-fn draw_tilted_body(ctx: &Context, el: &ScreenshotElement, image: &cairo::ImageSurface, w: f64, h: f64, scale: f64) -> Result<(), RenderError> {
+/// Hash of everything that changes how an element's body looks at bitmap
+/// scale `s` (and, for a tilted one, its shadow).
+fn body_cache_key(el: &ScreenshotElement, image: &cairo::ImageSurface, w: f64, h: f64, s: f64, tilted: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (image.to_raw_none() as usize, image.width(), image.height(), tilted).hash(&mut hasher);
+    format!(
+        "{:?}",
+        (el.id, w.to_bits(), h.to_bits(), s.to_bits(), el.transform.tilt_x.to_bits(), el.transform.tilt_y.to_bits(), el.transform.flip_horizontal, el.transform.flip_vertical)
+    )
+    .hash(&mut hasher);
+    format!("{:?}", (&el.frame, &el.corner_radius, &el.redactions)).hash(&mut hasher);
+    if tilted {
+        format!("{:?}", el.shadow).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// A flat element's body from the preview cache: drawn once at the
+/// preview's resolution, then only copied.
+fn draw_cached_flat_body(
+    ctx: &Context,
+    el: &ScreenshotElement,
+    image: &cairo::ImageSurface,
+    w: f64,
+    h: f64,
+    scale: f64,
+    cache: &ShadowCache,
+) -> Result<(), RenderError> {
+    let s = scale.max(0.01);
+    let body = cache.get_or_warp(body_cache_key(el, image, w, h, s, false), || {
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, (w * s).ceil().max(1.0) as i32, (h * s).ceil().max(1.0) as i32)?;
+        {
+            let fctx = Context::new(&surface)?;
+            fctx.scale(s, s);
+            draw_element_body(&fctx, el, image, w, h)?;
+        }
+        Ok(crate::shadow_cache::WarpedBody { surface, offset: (0.0, 0.0), shadow: None })
+    })?;
+    ctx.save()?;
+    ctx.scale(1.0 / s, 1.0 / s);
+    ctx.set_source_surface(&body.surface, 0.0, 0.0)?;
+    ctx.paint()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+fn draw_tilted_body(
+    ctx: &Context,
+    el: &ScreenshotElement,
+    image: &cairo::ImageSurface,
+    w: f64,
+    h: f64,
+    scale: f64,
+    cache: &ShadowCache,
+) -> Result<(), RenderError> {
     // Twice the device resolution (supersampling, so the warp's bilinear
     // sampling doesn't soften text), capped so a huge export can't ask for
     // a gigantic intermediate bitmap.
     let s = (scale.max(0.01) * 2.0).min(6144.0 / w.max(h));
-    let mut flat = cairo::ImageSurface::create(cairo::Format::ARgb32, (w * s).ceil().max(1.0) as i32, (h * s).ceil().max(1.0) as i32)?;
-    {
-        let fctx = Context::new(&flat)?;
-        fctx.scale(s, s);
-        draw_element_body(&fctx, el, image, w, h)?;
-    }
-    let quad = crate::warp::tilted_quad(w, h, el.transform.tilt_x, el.transform.tilt_y).map(|(x, y)| (x * s, y * s));
-    let (warped, ox, oy) = crate::warp::warp(&mut flat, &quad)?;
-
-    ctx.save()?;
-    ctx.scale(1.0 / s, 1.0 / s);
-    let shadow = &el.shadow;
-    if shadow.enabled && shadow.opacity > 0.0 {
-        let blur = shadow.blur * s;
-        let pad = (blur * 3.0 + 2.0).ceil();
-        let mut shadow_surface =
-            cairo::ImageSurface::create(cairo::Format::ARgb32, warped.width() + 2 * pad as i32, warped.height() + 2 * pad as i32)?;
+    let key = body_cache_key(el, image, w, h, s, true);
+    let body = cache.get_or_warp(key, || {
+        let mut flat = cairo::ImageSurface::create(cairo::Format::ARgb32, (w * s).ceil().max(1.0) as i32, (h * s).ceil().max(1.0) as i32)?;
         {
-            let sctx = Context::new(&shadow_surface)?;
-            let c = shadow.color;
-            sctx.set_source_rgba(c.r, c.g, c.b, c.a * shadow.opacity);
-            sctx.mask_surface(&warped, pad, pad)?;
+            let fctx = Context::new(&flat)?;
+            fctx.scale(s, s);
+            draw_element_body(&fctx, el, image, w, h)?;
         }
-        if blur > 0.0 {
-            let (sw, sh, stride) = (shadow_surface.width(), shadow_surface.height(), shadow_surface.stride());
-            let mut data = shadow_surface.data()?;
-            crate::blur::box_blur(&mut data, sw, sh, stride, blur / 2.0);
-        }
-        ctx.set_source_surface(&shadow_surface, ox - pad + shadow.offset_x * s, oy - pad + shadow.offset_y * s)?;
+        let quad = crate::warp::tilted_quad(w, h, el.transform.tilt_x, el.transform.tilt_y).map(|(x, y)| (x * s, y * s));
+        let (warped, ox, oy) = crate::warp::warp(&mut flat, &quad)?;
+        let shadow = &el.shadow;
+        let shadow = if shadow.enabled && shadow.opacity > 0.0 {
+            let blur = shadow.blur * s;
+            let pad = (blur * 3.0 + 2.0).ceil();
+            let mut shadow_surface =
+                cairo::ImageSurface::create(cairo::Format::ARgb32, warped.width() + 2 * pad as i32, warped.height() + 2 * pad as i32)?;
+            {
+                let sctx = Context::new(&shadow_surface)?;
+                let c = shadow.color;
+                sctx.set_source_rgba(c.r, c.g, c.b, c.a * shadow.opacity);
+                sctx.mask_surface(&warped, pad, pad)?;
+            }
+            if blur > 0.0 {
+                let (sw, sh, stride) = (shadow_surface.width(), shadow_surface.height(), shadow_surface.stride());
+                let mut data = shadow_surface.data()?;
+                crate::blur::box_blur(&mut data, sw, sh, stride, blur / 2.0);
+            }
+            Some((shadow_surface, pad))
+        } else {
+            None
+        };
+        // Down to device resolution once, here, so each redraw only
+        // copies pixels instead of filtering the supersampled bitmap.
+        let half = |src: &cairo::ImageSurface| -> Result<cairo::ImageSurface, RenderError> {
+            let out = cairo::ImageSurface::create(cairo::Format::ARgb32, (src.width() + 1) / 2, (src.height() + 1) / 2)?;
+            let octx = Context::new(&out)?;
+            octx.scale(0.5, 0.5);
+            octx.set_source_surface(src, 0.0, 0.0)?;
+            octx.source().set_filter(cairo::Filter::Good);
+            octx.paint()?;
+            drop(octx);
+            Ok(out)
+        };
+        let shadow = shadow.map(|(surface, pad)| half(&surface).map(|h| (h, pad / 2.0))).transpose()?;
+        Ok(crate::shadow_cache::WarpedBody { surface: half(&warped)?, offset: (ox / 2.0, oy / 2.0), shadow })
+    })?;
+
+    // The cached bitmaps are at half the supersampled scale.
+    let d = s / 2.0;
+    let (ox, oy) = body.offset;
+    ctx.save()?;
+    ctx.scale(1.0 / d, 1.0 / d);
+    if let Some((shadow_surface, pad)) = &body.shadow {
+        ctx.set_source_surface(shadow_surface, ox - pad + el.shadow.offset_x * d, oy - pad + el.shadow.offset_y * d)?;
         ctx.paint()?;
     }
-    ctx.set_source_surface(&warped, ox, oy)?;
-    ctx.source().set_filter(cairo::Filter::Good);
+    ctx.set_source_surface(&body.surface, ox, oy)?;
     ctx.paint()?;
     ctx.restore()?;
     Ok(())
@@ -470,13 +549,17 @@ fn draw_elements(
 
         let (w, h) = (placement.width, placement.height);
         if el.transform.tilt_x.abs() > 0.01 || el.transform.tilt_y.abs() > 0.01 {
-            draw_tilted_body(ctx, el, image, w, h, scale)?;
+            draw_tilted_body(ctx, el, image, w, h, scale, shadow_cache)?;
         } else {
             if el.shadow.enabled {
                 let radius = crate::frame::outer_radius(el.frame, w, &el.corner_radius);
                 draw_shadow(ctx, w, h, &radius, &el.shadow, scale, shadow_cache)?;
             }
-            draw_element_body(ctx, el, image, w, h)?;
+            if shadow_cache.caches_flat_bodies() {
+                draw_cached_flat_body(ctx, el, image, w, h, scale, shadow_cache)?;
+            } else {
+                draw_element_body(ctx, el, image, w, h)?;
+            }
         }
 
         // Drawn screenshot-relative, still inside this element's own
@@ -485,7 +568,7 @@ fn draw_elements(
         // commonly sits outside the screenshot's own rounded-rect bounds
         // (e.g. a caption below it) and must not be clipped away.
         if el.label.enabled && !el.label.content.is_empty() {
-            let resolved_label = el.label.resolve(&doc.label_defaults);
+            let resolved_label = el.label.resolve(&doc.label_defaults, placement.width);
             draw_text_element(ctx, &resolved_label, placement.width, placement.height, scale, shadow_cache)?;
         }
 
@@ -495,7 +578,7 @@ fn draw_elements(
         // of where the label itself sits.
         for callout in &el.callouts {
             if callout.enabled && !callout.text.content.is_empty() {
-                draw_callout(ctx, callout, placement.width, placement.height, scale, shadow_cache)?;
+                draw_callout(ctx, &callout.resolved(placement.width), placement.width, placement.height, scale, shadow_cache)?;
             }
         }
 
@@ -506,47 +589,52 @@ fn draw_elements(
     Ok(())
 }
 
-/// Draws one [`Callout`] — its text bubble (via `draw_text_element`) plus a
-/// straight arrow from the bubble's edge to `callout.target_x/target_y`
-/// (a fraction of `ref_w`×`ref_h`). The arrow starts at whichever point on
-/// the bubble's own rectangle faces the target, rather than its center, so
-/// the line never gets drawn underneath the text itself.
+/// Draws one [`Callout`]: a gently curved line from the bubble's edge to
+/// the target (`callout.target_x/target_y`, fractions of `ref_w`×`ref_h`)
+/// with a light halo so it stays visible on any screenshot, a target marker
+/// (soft ring, white rim, solid dot), and the text bubble on top.
 fn draw_callout(ctx: &Context, callout: &Callout, ref_w: f64, ref_h: f64, scale: f64, cache: &ShadowCache) -> Result<(), RenderError> {
     let (box_x, box_y, box_w, box_h) = measure_text_box(&callout.text, ref_w, ref_h)?;
     let target = (callout.target_x.clamp(0.0, 1.0) * ref_w, callout.target_y.clamp(0.0, 1.0) * ref_h);
     let start = box_edge_toward((box_x, box_y, box_w, box_h), target);
-
     let c = callout.arrow_color;
-    ctx.set_source_rgba(c.r, c.g, c.b, c.a);
-    ctx.set_line_width(callout.arrow_width.max(0.1));
+    let width = callout.arrow_width.max(0.1);
+    let halo = (width * 0.6).max(1.0);
+
+    // Quadratic curve bending to one side by a fraction of its length.
+    let (dx, dy) = (target.0 - start.0, target.1 - start.1);
+    let control = ((start.0 + target.0) / 2.0 - dy * 0.18, (start.1 + target.1) / 2.0 + dx * 0.18);
+    let curve = |ctx: &Context| {
+        ctx.move_to(start.0, start.1);
+        let (c1, c2) = (
+            (start.0 + 2.0 / 3.0 * (control.0 - start.0), start.1 + 2.0 / 3.0 * (control.1 - start.1)),
+            (target.0 + 2.0 / 3.0 * (control.0 - target.0), target.1 + 2.0 / 3.0 * (control.1 - target.1)),
+        );
+        ctx.curve_to(c1.0, c1.1, c2.0, c2.1, target.0, target.1);
+    };
     ctx.set_line_cap(cairo::LineCap::Round);
-    ctx.move_to(start.0, start.1);
-    ctx.line_to(target.0, target.1);
-    ctx.stroke()?;
-    draw_arrowhead(ctx, start, target, (callout.arrow_width * 3.0).max(4.0));
-
-    // A small filled marker at the exact target point, on top of the line
-    // (which runs to the same point, so it ends up hidden under the dot) —
-    // makes the thing the callout is actually pointing at unambiguous, the
-    // way an on-screen annotation tool's marker dot does. Reuses the
-    // arrow's own color for the fill rather than adding a separate one,
-    // since the dot and arrow read as one "pointer" unit; `dot_radius` is
-    // the fill's own radius only. Ringed with a white border whose width
-    // is the arrow's own line width rather than a separate setting (spec:
-    // "der Rand um den Punkt soll sich aus der Linienstärke des Pfeils
-    // ergeben") — keeps the dot legible against a same-colored background
-    // the way the arrow's white-free line alone wouldn't be.
-    if callout.dot_radius > 0.0 {
+    if dx.hypot(dy) > 0.5 {
+        curve(ctx);
+        ctx.set_source_rgba(1.0, 1.0, 1.0, 0.85 * c.a);
+        ctx.set_line_width(width + 2.0 * halo);
+        ctx.stroke()?;
+        curve(ctx);
         ctx.set_source_rgba(c.r, c.g, c.b, c.a);
-        ctx.arc(target.0, target.1, callout.dot_radius, 0.0, 2.0 * PI);
-        ctx.fill()?;
+        ctx.set_line_width(width);
+        ctx.stroke()?;
+    }
 
-        if callout.arrow_width > 0.0 {
-            ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-            ctx.set_line_width(callout.arrow_width);
-            ctx.arc(target.0, target.1, callout.dot_radius + callout.arrow_width / 2.0, 0.0, 2.0 * PI);
-            ctx.stroke()?;
-        }
+    if callout.dot_radius > 0.0 {
+        let r = callout.dot_radius;
+        ctx.arc(target.0, target.1, r * 2.1, 0.0, 2.0 * PI);
+        ctx.set_source_rgba(c.r, c.g, c.b, c.a * 0.22);
+        ctx.fill()?;
+        ctx.arc(target.0, target.1, r + halo, 0.0, 2.0 * PI);
+        ctx.set_source_rgba(1.0, 1.0, 1.0, c.a);
+        ctx.fill()?;
+        ctx.arc(target.0, target.1, r, 0.0, 2.0 * PI);
+        ctx.set_source_rgba(c.r, c.g, c.b, c.a);
+        ctx.fill()?;
     }
 
     draw_text_element(ctx, &callout.text, ref_w, ref_h, scale, cache)
@@ -568,22 +656,6 @@ fn box_edge_toward(box_rect: (f64, f64, f64, f64), target: (f64, f64)) -> (f64, 
     let t_y = if dy != 0.0 { (box_h / 2.0) / dy.abs() } else { f64::INFINITY };
     let t = t_x.min(t_y);
     (cx + dx * t, cy + dy * t)
-}
-
-/// Fills a small triangular arrowhead at `to`, oriented along the
-/// `from`→`to` direction — drawn as a separate filled path rather than a
-/// stroke join, so its size doesn't depend on `arrow_width`'s own line-cap
-/// rendering.
-fn draw_arrowhead(ctx: &Context, from: (f64, f64), to: (f64, f64), size: f64) {
-    let angle = (to.1 - from.1).atan2(to.0 - from.0);
-    const SPREAD: f64 = 0.45;
-    let p1 = (to.0 - size * (angle - SPREAD).cos(), to.1 - size * (angle - SPREAD).sin());
-    let p2 = (to.0 - size * (angle + SPREAD).cos(), to.1 - size * (angle + SPREAD).sin());
-    ctx.move_to(to.0, to.1);
-    ctx.line_to(p1.0, p1.1);
-    ctx.line_to(p2.0, p2.1);
-    ctx.close_path();
-    let _ = ctx.fill();
 }
 
 /// Builds the Pango layout for `text` — font, alignment, line spacing,
@@ -1043,6 +1115,9 @@ mod tests {
             padding_x: text.padding_x,
             padding_y: text.padding_y,
             shadow: text.shadow,
+            kind: crate::model::LabelKind::Custom,
+            auto_size: false,
+            size_scale: 1.0,
         };
         (style, Label { enabled: text.enabled, content: text.content })
     }
@@ -1109,6 +1184,35 @@ mod tests {
         let target = ImageSurface::create(Format::ARgb32, doc.canvas.export_width as i32, doc.canvas.export_height as i32).unwrap();
         compose(doc, &target, 1.0, images, None, &ShadowCache::new(), &BackgroundCache::new()).unwrap();
         target
+    }
+
+    /// Frame times for redrawing three tilted full-size screenshots, as
+    /// during a callout drag. `cargo test --release -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench_redraw_with_tilted_screenshots() {
+        let mut doc = Document::new();
+        let mut images = HashMap::new();
+        for _ in 0..3 {
+            let mut el = ScreenshotElement::new(ImageSource::Path(PathBuf::from("x.png")), 1080.0, 2400.0);
+            el.transform.tilt_y = std::env::var("BENCH_TILT").ok().and_then(|v| v.parse().ok()).unwrap_or(12.0);
+            images.insert(el.id, solid_surface(1080, 2400, Rgba::new(0.3, 0.5, 0.8, 1.0)));
+            doc.elements.push(el);
+        }
+        crate::layout::fit_canvas_to_content(&mut doc);
+        let scale = 0.35;
+        let target = ImageSurface::create(Format::ARgb32, (doc.canvas.export_width as f64 * scale) as i32, (doc.canvas.export_height as f64 * scale) as i32).unwrap();
+        let shadows = ShadowCache::for_preview();
+        let backgrounds = BackgroundCache::new();
+        for (name, reuse) in [("without cache", false), ("with cache", true)] {
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                let fresh = ShadowCache::for_preview();
+                let cache = if reuse { &shadows } else { &fresh };
+                compose(&doc, &target, scale, &images, None, cache, &backgrounds).unwrap();
+            }
+            eprintln!("{name}: {:.1} ms per frame", start.elapsed().as_secs_f64() * 100.0);
+        }
     }
 
     #[test]

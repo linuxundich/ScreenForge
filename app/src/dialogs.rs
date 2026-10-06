@@ -100,6 +100,13 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
+<p>Version 0.33.0</p>
+<ul>
+<li>Label types: capsule, caption and headline</li>
+<li>Labels and callouts size themselves to the screenshot</li>
+<li>Redesigned callouts with Light, Dark and Accent looks</li>
+<li>Much smoother dragging of callouts, labels and screenshots</li>
+</ul>
 <p>Version 0.32.1</p>
 <ul>
 <li>New app icon: three phones in a forge fire</li>

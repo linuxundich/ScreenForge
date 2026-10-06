@@ -1,4 +1,5 @@
 use crate::*;
+use screenforge_core::model::CalloutLook;
 
 /// The single currently-selected screenshot's own id, or `None` when 0 or
 /// several are selected — the same "exactly one" rule
@@ -88,6 +89,21 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
     content_scroller.set_child(Some(&content_view));
     content_box.append(&content_scroller);
     row.add_row(&content_box);
+
+    let look_labels = [gettext("Light"), gettext("Dark"), gettext("Accent"), gettext("Custom")];
+    let look_row = adw::ComboRow::builder()
+        .title(gettext("Look"))
+        .model(&gtk4::StringList::new(&look_labels.iter().map(String::as_str).collect::<Vec<_>>()))
+        .build();
+    look_row.set_selected(callout.look().and_then(|l| CalloutLook::ALL.iter().position(|x| *x == l)).unwrap_or(3) as u32);
+    row.add_row(&look_row);
+
+    let auto_size_row = adw::SwitchRow::builder()
+        .title(gettext("Automatic Size"))
+        .subtitle(gettext("Grows and shrinks with the screenshot"))
+        .active(callout.auto_size)
+        .build();
+    row.add_row(&auto_size_row);
 
     let wrap_row = adw::SwitchRow::new();
     wrap_row.set_title(&gettext("Wrap Automatically"));
@@ -242,6 +258,8 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
         arrow_width_row,
         #[weak]
         dot_radius_row,
+        #[weak]
+        auto_size_row,
         move || {
             if state.borrow().syncing_controls {
                 return;
@@ -259,7 +277,11 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
             let font_desc = font_button.font_desc().unwrap_or_else(pango::FontDescription::new);
             let (font_family, font_size, weight, italic) = typography_from_font_desc(&font_desc);
             new.text.typography.font_family = font_family;
-            new.text.typography.font_size = font_size;
+            new.auto_size = auto_size_row.is_active();
+            // With automatic size the stored size only sets proportions.
+            if !new.auto_size {
+                new.text.typography.font_size = font_size;
+            }
             new.text.typography.weight = weight;
             new.text.typography.italic = italic;
             new.text.typography.alignment = text_align_for_index(alignment_row.selected());
@@ -293,6 +315,44 @@ pub(crate) fn build_callout_row(window: &Window, canvas: &Canvas, state: &Rc<Ref
         }
     );
 
+    auto_size_row.connect_active_notify(glib::clone!(
+        #[strong]
+        apply,
+        move |_| apply()
+    ));
+    // A look sets bubble, text and line colors in one undo step: the
+    // buttons are updated quietly, then `apply` reads them once.
+    look_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply,
+        #[strong]
+        state,
+        #[weak]
+        background_type_row,
+        #[weak]
+        background_color_button,
+        #[weak]
+        color_button,
+        #[weak]
+        arrow_color_button,
+        move |row| {
+            if state.borrow().syncing_controls {
+                return;
+            }
+            let Some(look) = CalloutLook::ALL.get(row.selected() as usize) else { return };
+            let mut probe = Callout::new_for_width(0.0);
+            probe.apply_look(*look);
+            state.borrow_mut().syncing_controls = true;
+            background_type_row.set_selected(1);
+            if let TextBackground::Solid(c) = probe.text.background {
+                background_color_button.set_rgba(&gdk_rgba_from(&c));
+            }
+            color_button.set_rgba(&gdk_rgba_from(&probe.text.typography.color));
+            arrow_color_button.set_rgba(&gdk_rgba_from(&probe.arrow_color));
+            state.borrow_mut().syncing_controls = false;
+            apply();
+        }
+    ));
     enabled_switch.connect_active_notify(glib::clone!(
         #[strong]
         apply,

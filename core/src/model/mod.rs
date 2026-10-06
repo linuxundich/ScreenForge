@@ -269,6 +269,10 @@ pub enum VerticalAnchor {
     Top,
     Center,
     Bottom,
+    /// Outside the reference rect, above its top edge (`padding` is the gap).
+    Above,
+    /// Outside the reference rect, below its bottom edge.
+    Below,
 }
 
 /// Where a [`TextElement`]'s box (its background + padding + text) is
@@ -307,6 +311,8 @@ impl TextPosition {
                     VerticalAnchor::Top => padding,
                     VerticalAnchor::Center => (ref_h - box_h) / 2.0,
                     VerticalAnchor::Bottom => ref_h - box_h - padding,
+                    VerticalAnchor::Above => -box_h - padding,
+                    VerticalAnchor::Below => ref_h + padding,
                 };
                 (x, y)
             }
@@ -448,8 +454,11 @@ impl Label {
     /// visible label and otherwise know nothing about `Label` at all, so
     /// the rest of the rendering pipeline needs no changes if `LabelStyle`
     /// itself ever grows a new field.
-    pub fn resolve(&self, defaults: &LabelStyle) -> TextElement {
-        TextElement {
+    ///
+    /// `ref_w` is the screenshot's width: with `defaults.auto_size` the
+    /// whole label scales to it (see [`LabelStyle::auto_factor`]).
+    pub fn resolve(&self, defaults: &LabelStyle, ref_w: f64) -> TextElement {
+        let text = TextElement {
             enabled: self.enabled,
             content: self.content.clone(),
             position: defaults.position,
@@ -459,7 +468,8 @@ impl Label {
             padding_x: defaults.padding_x,
             padding_y: defaults.padding_y,
             shadow: defaults.shadow,
-        }
+        };
+        text.scaled(defaults.auto_factor(ref_w))
     }
 }
 
@@ -485,14 +495,68 @@ pub struct LabelStyle {
     pub padding_x: f64,
     pub padding_y: f64,
     pub shadow: ShadowParams,
+    /// Which of the built-in looks this style started from; sets how big
+    /// the text is relative to the screenshot when `auto_size` is on.
+    #[serde(default)]
+    pub kind: LabelKind,
+    /// Scale the whole label (text, padding, radius, edge distance,
+    /// shadow) with its screenshot's width instead of using the pixel
+    /// values as they are. The stored values then only set proportions.
+    #[serde(default = "default_true")]
+    pub auto_size: bool,
+    /// Extra factor on the automatic size, `1.0` = as designed.
+    #[serde(default = "default_one")]
+    pub size_scale: f64,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_one() -> f64 {
+    1.0
+}
+
+/// The built-in label looks. Choosing one fills a [`LabelStyle`] with its
+/// values ([`LabelStyle::for_kind`]); everything stays editable afterward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LabelKind {
+    /// A dark, translucent capsule on the lower part of the screenshot.
+    Pill,
+    /// A light chip with a soft shadow below the screenshot.
+    Caption,
+    /// A large headline above the screenshot, no box.
+    Headline,
+    /// A style from before the built-in looks existed.
+    #[default]
+    Custom,
+}
+
+impl LabelKind {
+    /// Font size as a fraction of the screenshot's width.
+    pub fn width_ratio(self) -> f64 {
+        match self {
+            LabelKind::Pill | LabelKind::Custom => 0.05,
+            LabelKind::Caption => 0.055,
+            LabelKind::Headline => 0.085,
+        }
+    }
+}
+
+/// Nominal font size the built-in looks are designed at; with
+/// `auto_size` everything is scaled from there.
+pub const LABEL_DESIGN_SIZE: f64 = 32.0;
+
 impl LabelStyle {
-    /// The out-of-the-box global label look — deliberately built from the
-    /// same values `TextElement::label_default` always used, so a
-    /// brand-new document's labels look exactly as they did before this
-    /// global/override split existed.
+    /// The out-of-the-box label look: the capsule.
     pub fn label_default() -> Self {
+        Self::for_kind(LabelKind::Pill)
+    }
+
+    /// The look from before built-in kinds existed: a white box with black
+    /// text, fixed pixel sizes. Used to recognise an untouched old default.
+    pub fn legacy_default() -> Self {
         let d = TextElement::label_default();
         LabelStyle {
             position: d.position,
@@ -502,7 +566,65 @@ impl LabelStyle {
             padding_x: d.padding_x,
             padding_y: d.padding_y,
             shadow: d.shadow,
+            kind: LabelKind::Custom,
+            auto_size: true,
+            size_scale: 1.0,
         }
+    }
+
+    /// The built-in look `kind`, designed at [`LABEL_DESIGN_SIZE`].
+    pub fn for_kind(kind: LabelKind) -> Self {
+        let base = Typography { font_size: LABEL_DESIGN_SIZE, ..Typography::label_default() };
+        let soft = ShadowParams { enabled: true, offset_x: 0.0, offset_y: 6.0, blur: 24.0, opacity: 0.28, color: Rgba::BLACK };
+        match kind {
+            LabelKind::Pill | LabelKind::Custom => LabelStyle {
+                position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Bottom, padding: 40.0 },
+                typography: Typography { weight: 600, color: Rgba::WHITE, ..base },
+                background: TextBackground::Solid(Rgba::new(0.09, 0.08, 0.12, 0.78)),
+                corner_radius: CornerRadius::uniform(999.0),
+                padding_x: 26.0,
+                padding_y: 13.0,
+                shadow: soft,
+                kind: LabelKind::Pill,
+                auto_size: true,
+                size_scale: 1.0,
+            },
+            LabelKind::Caption => LabelStyle {
+                position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Below, padding: 28.0 },
+                typography: Typography { weight: 700, color: Rgba::new(0.14, 0.12, 0.19, 1.0), ..base },
+                background: TextBackground::Solid(Rgba::WHITE),
+                corner_radius: CornerRadius::uniform(16.0),
+                padding_x: 24.0,
+                padding_y: 14.0,
+                shadow: ShadowParams { offset_y: 8.0, blur: 28.0, opacity: 0.22, ..soft },
+                kind,
+                auto_size: true,
+                size_scale: 1.0,
+            },
+            LabelKind::Headline => LabelStyle {
+                position: TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Above, padding: 36.0 },
+                typography: Typography { weight: 800, color: Rgba::WHITE, line_spacing: 1.05, wrap: true, letter_spacing: -0.5, ..base },
+                background: TextBackground::None,
+                corner_radius: CornerRadius::none(),
+                padding_x: 0.0,
+                padding_y: 0.0,
+                shadow: ShadowParams::none(),
+                kind,
+                auto_size: true,
+                size_scale: 1.0,
+            },
+        }
+    }
+
+    /// How much to scale this style for a screenshot `ref_w` wide: `1.0`
+    /// without `auto_size`, otherwise so the font ends up at
+    /// `kind.width_ratio() × ref_w × size_scale`.
+    pub fn auto_factor(&self, ref_w: f64) -> f64 {
+        if !self.auto_size || ref_w <= 0.0 {
+            return 1.0;
+        }
+        let wanted = ref_w * self.kind.width_ratio() * self.size_scale.clamp(0.25, 4.0);
+        wanted / self.typography.font_size.max(1.0)
     }
 }
 
@@ -515,6 +637,29 @@ impl Default for LabelStyle {
 impl TextElement {
     fn default_padding() -> f64 {
         8.0
+    }
+
+    /// This text with every size multiplied by `factor`: font, letter
+    /// spacing, padding, corner radius, the edge distance of a semantic
+    /// position and the shadow. A manual (X/Y) position stays as it is.
+    pub fn scaled(mut self, factor: f64) -> Self {
+        if (factor - 1.0).abs() < 1e-9 {
+            return self;
+        }
+        self.typography.font_size *= factor;
+        self.typography.letter_spacing *= factor;
+        self.padding_x *= factor;
+        self.padding_y *= factor;
+        let r = &mut self.corner_radius;
+        (r.top_left, r.top_right, r.bottom_right, r.bottom_left) =
+            (r.top_left * factor, r.top_right * factor, r.bottom_right * factor, r.bottom_left * factor);
+        if let TextPosition::Semantic { padding, .. } = &mut self.position {
+            *padding *= factor;
+        }
+        self.shadow.offset_x *= factor;
+        self.shadow.offset_y *= factor;
+        self.shadow.blur *= factor;
+        self
     }
 
     pub fn label_default() -> Self {
@@ -601,36 +746,102 @@ pub struct Callout {
     /// general scale as `arrow_width`'s own default.
     #[serde(default = "Callout::default_dot_radius")]
     pub dot_radius: f64,
+    /// Scale bubble, line and dot with the screenshot's width (see
+    /// [`Callout::resolved`]); the stored values then only set proportions.
+    #[serde(default = "default_true")]
+    pub auto_size: bool,
 }
+
+/// The built-in callout looks, matching the label kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalloutLook {
+    /// White bubble, dark text and line.
+    Light,
+    /// Dark translucent bubble like the capsule label, white text.
+    Dark,
+    /// Blue bubble and line, white text.
+    Accent,
+}
+
+impl CalloutLook {
+    pub const ALL: [CalloutLook; 3] = [CalloutLook::Light, CalloutLook::Dark, CalloutLook::Accent];
+}
+
+/// Callout font size as a fraction of the screenshot's width.
+pub const CALLOUT_WIDTH_RATIO: f64 = 0.048;
 
 impl Callout {
     fn default_dot_radius() -> f64 {
         5.0
     }
 
+    /// Sets the colors of `look`, keeping text, position and target.
+    pub fn apply_look(&mut self, look: CalloutLook) {
+        let dark = Rgba::new(0.14, 0.12, 0.19, 1.0);
+        let blue = Rgba::new(0.21, 0.52, 0.89, 1.0);
+        let (bg, fg, line) = match look {
+            CalloutLook::Light => (Rgba::WHITE, dark, dark),
+            CalloutLook::Dark => (Rgba::new(0.09, 0.08, 0.12, 0.85), Rgba::WHITE, dark),
+            CalloutLook::Accent => (blue, Rgba::WHITE, blue),
+        };
+        self.text.background = TextBackground::Solid(bg);
+        self.text.typography.color = fg;
+        self.arrow_color = line;
+    }
+
+    /// Which built-in look this callout's colors match, if any.
+    pub fn look(&self) -> Option<CalloutLook> {
+        CalloutLook::ALL.into_iter().find(|look| {
+            let mut probe = self.clone();
+            probe.apply_look(*look);
+            probe.text.background == self.text.background && probe.text.typography.color == self.text.typography.color && probe.arrow_color == self.arrow_color
+        })
+    }
+
+    /// This callout as drawn on a screenshot `ref_w` wide: with
+    /// `auto_size`, bubble, line width and dot scaled so the text is
+    /// [`CALLOUT_WIDTH_RATIO`] of the width.
+    pub fn resolved(&self, ref_w: f64) -> Callout {
+        if !self.auto_size || ref_w <= 0.0 {
+            return self.clone();
+        }
+        let factor = ref_w * CALLOUT_WIDTH_RATIO / self.text.typography.font_size.max(1.0);
+        Callout {
+            text: self.text.clone().scaled(factor),
+            arrow_width: self.arrow_width * factor,
+            dot_radius: self.dot_radius * factor,
+            ..self.clone()
+        }
+    }
+
     /// A new callout pointing at its screenshot's own center, with a text
     /// bubble placed near the top-left corner — a sensible, always-visible
     /// starting point the user then drags into place, rather than
     /// something requiring a dialog to configure before it can be seen.
-    pub fn new_for_width(width: f64) -> Self {
-        let mut text = TextElement::label_default_for_width(width);
-        text.enabled = true;
-        text.content = "Feature".to_string();
-        let padding = match text.position {
-            TextPosition::Semantic { padding, .. } => padding,
-            TextPosition::Absolute { .. } => 16.0,
-        };
-        text.position = TextPosition::Semantic { horizontal: HorizontalAnchor::Left, vertical: VerticalAnchor::Top, padding };
-        Self {
+    pub fn new_for_width(_width: f64) -> Self {
+        let mut callout = Self {
             id: Uuid::new_v4(),
             enabled: true,
-            text,
+            text: TextElement {
+                enabled: true,
+                content: "Feature".to_string(),
+                position: TextPosition::Semantic { horizontal: HorizontalAnchor::Left, vertical: VerticalAnchor::Top, padding: 48.0 },
+                typography: Typography { font_size: LABEL_DESIGN_SIZE, weight: 600, ..Typography::label_default() },
+                background: TextBackground::Solid(Rgba::WHITE),
+                corner_radius: CornerRadius::uniform(999.0),
+                padding_x: 24.0,
+                padding_y: 12.0,
+                shadow: ShadowParams { enabled: true, offset_x: 0.0, offset_y: 6.0, blur: 24.0, opacity: 0.28, color: Rgba::BLACK },
+            },
             target_x: 0.5,
             target_y: 0.5,
             arrow_color: Rgba::BLACK,
-            arrow_width: (width * 0.004).clamp(1.5, 6.0),
-            dot_radius: (width * 0.006).clamp(3.0, 8.0),
-        }
+            arrow_width: 5.0,
+            dot_radius: 9.0,
+            auto_size: true,
+        };
+        callout.apply_look(CalloutLook::Light);
+        callout
     }
 }
 
@@ -1479,7 +1690,7 @@ mod tests {
     fn resolve_combines_the_labels_own_text_with_the_shared_defaults() {
         let defaults = LabelStyle { padding_x: 42.0, ..LabelStyle::label_default() };
         let label = Label { enabled: true, content: "Hi".to_string() };
-        let resolved = label.resolve(&defaults);
+        let resolved = label.resolve(&defaults, 0.0);
         assert!(resolved.enabled);
         assert_eq!(resolved.content, "Hi");
         assert_eq!(resolved.padding_x, 42.0);
@@ -1498,14 +1709,47 @@ mod tests {
         let mut defaults = LabelStyle::label_default();
         let a = Label { enabled: true, content: "A".to_string() };
         let b = Label { enabled: true, content: "B".to_string() };
-        assert_eq!(a.resolve(&defaults).typography.color, defaults.typography.color);
-        assert_eq!(b.resolve(&defaults).typography.color, defaults.typography.color);
+        assert_eq!(a.resolve(&defaults, 0.0).typography.color, defaults.typography.color);
+        assert_eq!(b.resolve(&defaults, 0.0).typography.color, defaults.typography.color);
 
         defaults.typography.color = Rgba::new(1.0, 0.0, 0.0, 1.0);
-        assert_eq!(a.resolve(&defaults).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
-        assert_eq!(b.resolve(&defaults).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(a.resolve(&defaults, 0.0).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(b.resolve(&defaults, 0.0).typography.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
         // Only the content differs between the two.
-        assert_eq!(a.resolve(&defaults).content, "A");
-        assert_eq!(b.resolve(&defaults).content, "B");
+        assert_eq!(a.resolve(&defaults, 0.0).content, "A");
+        assert_eq!(b.resolve(&defaults, 0.0).content, "B");
+    }
+
+    #[test]
+    fn automatic_label_size_follows_the_screenshot_width() {
+        let style = LabelStyle::for_kind(LabelKind::Pill);
+        let label = Label { enabled: true, content: "Hi".into() };
+        let small = label.resolve(&style, 540.0);
+        let large = label.resolve(&style, 1080.0);
+        assert!((large.typography.font_size - 2.0 * small.typography.font_size).abs() < 1e-9);
+        assert!((large.typography.font_size - 1080.0 * LabelKind::Pill.width_ratio()).abs() < 1e-9);
+        assert!((large.padding_x / small.padding_x - 2.0).abs() < 1e-9);
+        let fixed = LabelStyle { auto_size: false, ..style };
+        assert_eq!(label.resolve(&fixed, 1080.0).typography.font_size, LABEL_DESIGN_SIZE);
+    }
+
+    #[test]
+    fn above_and_below_place_the_box_outside_the_screenshot() {
+        let above = TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Above, padding: 10.0 };
+        let below = TextPosition::Semantic { horizontal: HorizontalAnchor::Center, vertical: VerticalAnchor::Below, padding: 10.0 };
+        assert_eq!(above.resolve_box_origin(100.0, 200.0, 40.0, 20.0), (30.0, -30.0));
+        assert_eq!(below.resolve_box_origin(100.0, 200.0, 40.0, 20.0), (30.0, 210.0));
+    }
+
+    #[test]
+    fn callout_looks_round_trip_and_auto_size_scales_the_line() {
+        let mut callout = Callout::new_for_width(1000.0);
+        for look in CalloutLook::ALL {
+            callout.apply_look(look);
+            assert_eq!(callout.look(), Some(look));
+        }
+        let resolved = callout.resolved(1000.0);
+        assert!((resolved.text.typography.font_size - 1000.0 * CALLOUT_WIDTH_RATIO).abs() < 1e-9);
+        assert!(resolved.arrow_width > callout.arrow_width);
     }
 }

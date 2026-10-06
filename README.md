@@ -45,7 +45,7 @@ Put each screenshot into a generic phone with a punch-hole camera, a tablet or a
 
 ### Point things out, hide what's private
 
-Give each screenshot a label, add callouts with arrows that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share: drag a rectangle over them right on the screenshot, then move or resize it there.
+Give each screenshot a label (a capsule on it, a caption below or a headline above, always sized to the screenshot), add callouts that point at a detail, and black out, pixelate or blur e-mail addresses and other private bits before you share: drag a rectangle over them right on the screenshot, then move or resize it there.
 
 ### The right size for every place
 

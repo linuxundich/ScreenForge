@@ -61,6 +61,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.33.0" date="2026-10-06">
+      <description translate="no">
+        <p>Three label types (capsule, caption, headline) that size themselves to the screenshot, redesigned callouts, and much smoother dragging.</p>
+      </description>
+    </release>
     <release version="0.32.1" date="2026-10-06">
       <description translate="no">
         <p>A new app icon: three phones in a forge fire.</p>

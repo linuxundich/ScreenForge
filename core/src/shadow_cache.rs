@@ -95,19 +95,75 @@ const MAX_ENTRIES: usize = 64;
 /// A shadow bitmap cache, plus a monotonic "frame" counter used for LRU
 /// eviction. `begin_frame` should be called once per `render::compose`
 /// pass.
+/// A tilted screenshot after the perspective warp (see
+/// `render::draw_tilted_body`): the warped bitmap, its offset, and its
+/// blurred shadow with that bitmap's padding, all at supersampled scale.
+pub struct WarpedBody {
+    pub surface: cairo::ImageSurface,
+    pub offset: (f64, f64),
+    pub shadow: Option<(cairo::ImageSurface, f64)>,
+}
+
+struct WarpEntry {
+    body: Rc<WarpedBody>,
+    last_used: u64,
+}
+
+/// Preview-sized bitmaps of a few MB each; enough for every screenshot of
+/// a large project.
+const MAX_WARP_ENTRIES: usize = 32;
+
 pub struct ShadowCache {
     entries: RefCell<HashMap<ShadowCacheKey, CacheEntry>>,
+    /// Warped tilted screenshots, keyed by a hash of everything that
+    /// changes their pixels. Moving a callout or label, or another
+    /// screenshot, reuses them instead of warping again every frame.
+    warped: RefCell<HashMap<u64, WarpEntry>>,
+    /// Whether flat screenshots are cached too, as device-resolution
+    /// bitmaps (see [`ShadowCache::for_preview`]).
+    cache_flat_bodies: bool,
     frame: Cell<u64>,
 }
 
 impl ShadowCache {
     pub fn new() -> Self {
-        Self { entries: RefCell::new(HashMap::new()), frame: Cell::new(0) }
+        Self { entries: RefCell::new(HashMap::new()), warped: RefCell::new(HashMap::new()), cache_flat_bodies: false, frame: Cell::new(0) }
+    }
+
+    /// A cache for the interactive preview: also keeps every screenshot,
+    /// already scaled to the preview's resolution, so dragging a callout,
+    /// label or another screenshot only copies pixels. Exports use
+    /// [`ShadowCache::new`], which draws flat screenshots directly at full
+    /// sharpness.
+    pub fn for_preview() -> Self {
+        Self { cache_flat_bodies: true, ..Self::new() }
+    }
+
+    pub fn caches_flat_bodies(&self) -> bool {
+        self.cache_flat_bodies
     }
 
     pub fn begin_frame(&self) {
         self.frame.set(self.frame.get() + 1);
         self.evict_to_cap();
+    }
+
+    /// The warped body for `key`, rendering it with `render` on a miss.
+    pub fn get_or_warp(&self, key: u64, render: impl FnOnce() -> Result<WarpedBody, RenderError>) -> Result<Rc<WarpedBody>, RenderError> {
+        let now = self.frame.get();
+        if let Some(entry) = self.warped.borrow_mut().get_mut(&key) {
+            entry.last_used = now;
+            return Ok(entry.body.clone());
+        }
+        let body = Rc::new(render()?);
+        let mut warped = self.warped.borrow_mut();
+        if warped.len() >= MAX_WARP_ENTRIES {
+            if let Some(oldest) = warped.iter().min_by_key(|(_, e)| e.last_used).map(|(k, _)| *k) {
+                warped.remove(&oldest);
+            }
+        }
+        warped.insert(key, WarpEntry { body: body.clone(), last_used: now });
+        Ok(body)
     }
 
     fn evict_to_cap(&self) {

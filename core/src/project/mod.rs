@@ -581,7 +581,7 @@ mod tests {
         // carried forward — the label now resolves purely against the
         // project's shared `label_defaults`, same as any other field that
         // used to live on the label itself.
-        let resolved = doc.elements[0].label.resolve(&doc.label_defaults);
+        let resolved = doc.elements[0].label.resolve(&doc.label_defaults, 0.0);
         assert_eq!(resolved.padding_x, doc.label_defaults.padding_x);
         assert_eq!(resolved.padding_y, doc.label_defaults.padding_y);
         std::fs::remove_file(&path).ok();
@@ -642,7 +642,7 @@ mod tests {
         // Every old style field is gone — the label now resolves purely
         // from the project's shared `label_defaults`, not from anything
         // that used to live on this specific label.
-        let resolved = label.resolve(&doc.label_defaults);
+        let resolved = label.resolve(&doc.label_defaults, 0.0);
         assert_eq!(resolved.content, "Old Style");
         assert_eq!(resolved.typography, doc.label_defaults.typography);
         assert_eq!(resolved.position, doc.label_defaults.position);
