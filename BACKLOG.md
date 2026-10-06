@@ -3,16 +3,16 @@
 Overhaul plan decided on 2026-10-06 (analysis, competitor comparison and
 mockups: generator prototype with six styles, UI variant "A + B").
 
-## Phase 1 — New background generator (core)
+## Phase 1 — New background generator (core) — done in v0.26.0
 
-- [ ] Style enum: Layers, Arcs, Ribbons, Planes, Lines, Mist, plus the old
+- [x] Style enum: Layers, Arcs, Ribbons, Planes, Lines, Mist, plus the old
       generator kept as "Waves (classic)" so existing projects render unchanged
-- [ ] OKLCH palette model with moods (vivid, light, dark), "from screenshots"
+- [x] OKLCH palette model with moods (vivid, light, dark), "from screenshots"
       hue, complementary accent
-- [ ] Smooth Bézier curves, soft shadows from one light direction, gradients
+- [x] Smooth Bézier curves, soft shadows from one light direction, gradients
       inside every shape, film grain
-- [ ] Deterministic variants from one seed (same style or mixed styles)
-- [ ] Minimal controls in the current sidebar (style, mood, grain)
+- [x] Deterministic variants from one seed (same style or mixed styles)
+- [x] Minimal controls in the current sidebar (style, mood, grain)
 
 ## Phase 2 — GUI overhaul
 
