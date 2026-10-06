@@ -72,7 +72,7 @@ glib::wrapper! {
 
 impl Default for EditorModel {
     fn default() -> Self {
-        glib::Object::builder().property("is-empty", true).property("title", gettext("New Project")).build()
+        glib::Object::builder().property("is-empty", true).property("title", gettext("New Scene")).build()
     }
 }
 
@@ -80,12 +80,7 @@ impl EditorModel {
     /// Refreshes the document-derived properties from `state`. Called from
     /// `refresh_canvas`, which every edit goes through.
     pub(crate) fn update_from(&self, state: &EditorState) {
-        let title = state
-            .project_path
-            .as_ref()
-            .and_then(|p| p.file_stem())
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_else(|| gettext("New Project"));
+        let title = state.scene.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| gettext("New Scene"));
         let count = state.document.elements.len();
         let subtitle = if count == 0 {
             String::new()

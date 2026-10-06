@@ -307,6 +307,22 @@ impl Window {
         self.imp().window_title.get().clone()
     }
 
+    pub fn primary_menu_button(&self) -> gtk4::MenuButton {
+        self.imp().primary_menu_button.get().clone()
+    }
+
+    pub fn scene_title_button(&self) -> gtk4::MenuButton {
+        self.imp().scene_title_button.get().clone()
+    }
+
+    pub fn navigation_view(&self) -> adw::NavigationView {
+        self.imp().navigation_view.get().clone()
+    }
+
+    pub fn editor_page(&self) -> adw::NavigationPage {
+        self.imp().editor_page.get().clone()
+    }
+
     pub fn sidebar_stack(&self) -> adw::ViewStack {
         self.imp().sidebar_stack.get().clone()
     }
@@ -553,6 +569,14 @@ mod imp {
         pub presets_menu_button: TemplateChild<gtk4::MenuButton>,
         #[template_child]
         pub window_title: TemplateChild<adw::WindowTitle>,
+        #[template_child]
+        pub scene_title_button: TemplateChild<gtk4::MenuButton>,
+        #[template_child]
+        pub primary_menu_button: TemplateChild<gtk4::MenuButton>,
+        #[template_child]
+        pub navigation_view: TemplateChild<adw::NavigationView>,
+        #[template_child]
+        pub editor_page: TemplateChild<adw::NavigationPage>,
         #[template_child]
         pub sidebar_stack: TemplateChild<adw::ViewStack>,
         #[template_child]

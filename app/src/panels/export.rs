@@ -233,13 +233,7 @@ pub(crate) fn register_drag_out(window: &Window, state: &Rc<RefCell<EditorState>
             let (doc, decoded_images, background_image) = export_inputs(&state);
             let dir = glib::user_cache_dir().join("screenforge").join("drag");
             std::fs::create_dir_all(&dir).ok()?;
-            let name = state
-                .borrow()
-                .project_path
-                .as_ref()
-                .and_then(|p| p.file_stem())
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "screenforge".to_owned());
+            let name = file_stem_for_scene(&state.borrow());
             let path = dir.join(format!("{name}.png"));
             if let Err(err) = export::render_png(&doc, &decoded_images, background_image.as_ref(), &path) {
                 eprintln!("ScreenForge: drag-out render failed: {err}");
@@ -275,13 +269,7 @@ pub(crate) fn register_export_store_set_action(window: &Window, state: &Rc<RefCe
                 let Ok(folder) = dialog.select_folder_future(Some(&window)).await else { return };
                 let Some(dir) = folder.path() else { return };
                 let (doc, decoded_images, background_image) = export_inputs(&state);
-                let name = state
-                    .borrow()
-                    .project_path
-                    .as_ref()
-                    .and_then(|p| p.file_stem())
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "screenforge".to_owned());
+                let name = file_stem_for_scene(&state.borrow());
                 window.export_button().set_sensitive(false);
                 window.export_button().set_child(Some(&adw::Spinner::new()));
                 let result = gio::spawn_blocking(move || export::render_store_set(&doc, &decoded_images, background_image.as_ref(), &dir, &name))

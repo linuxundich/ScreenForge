@@ -57,7 +57,7 @@ Keep the canvas fitted to the content or pick a format: 16:9, square, 4:5, story
 
 ### At home on GNOME
 
-Adaptive layout, a tabbed sidebar, keyboard shortcuts and undo for every edit. Open images from the file manager, take a desktop screenshot through the system dialog, or import from an Android device over adb, with a clean status bar showing 12:00 and a full battery. Save projects as single `.screenforge` files and reuse your look as presets, also from the command line: `screenforge --preset Blog --output shots.png *.png`. English and German included.
+Adaptive layout, a tabbed sidebar, keyboard shortcuts and undo for every edit. Open images from the file manager, take a desktop screenshot through the system dialog, or import from an Android device over adb, with a clean status bar showing 12:00 and a full battery. Every composition is kept as a scene with all its settings: the start screen shows them as preview cards to reopen, rename, duplicate or delete, and they save themselves. Export a scene as a `.screenforge` file to share it, and reuse your look as presets, also from the command line: `screenforge --preset Blog --output shots.png *.png`. English and German included.
 
 ## Install
 

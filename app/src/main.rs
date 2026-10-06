@@ -12,6 +12,7 @@ mod editing;
 mod panels;
 mod presets;
 mod project;
+mod scenes;
 mod sources;
 mod video;
 mod state;
@@ -23,6 +24,7 @@ use editing::*;
 use panels::*;
 use presets::*;
 use project::*;
+use scenes::*;
 use sources::*;
 use state::*;
 
@@ -142,7 +144,7 @@ fn build_ui(app: &adw::Application) {
     register_callout_drag(&window, &canvas, &state);
     register_export_controls(&window, &state);
     register_export_action(app, &window, &state);
-    register_project_actions(app, &window, &canvas, &state);
+    register_scenes(app, &window, &canvas, &state);
     register_undo_redo_actions(app, &window, &canvas, &state);
     register_zoom_actions(app, &window, &canvas);
     register_reorder(&window, &canvas, &state);
@@ -211,7 +213,11 @@ fn register_css() {
          .variant-thumb { padding: 0; border-radius: 8px; }
          .variant-picture { border-radius: 8px; }
          flowboxchild:selected .variant-picture { outline: 3px solid var(--accent-bg-color); outline-offset: 2px; }
-         flowboxchild:selected { background: none; }",
+         flowboxchild:selected { background: none; }
+         flowboxchild.scene-cell, flowboxchild.scene-cell:hover { background: none; }
+         .scene-card { background-color: var(--view-bg-color); }
+         .scene-card:hover { outline: 2px solid alpha(var(--accent-bg-color), 0.6); outline-offset: -2px; }
+         .scene-card-menu { background-color: alpha(var(--view-bg-color), 0.88); box-shadow: 0 1px 3px alpha(black, 0.25); }",
     );
     gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }

@@ -219,6 +219,25 @@ pub fn render_png(
     Ok(())
 }
 
+/// A small PNG of `doc`, `width` pixels wide at most, for the scene
+/// overview. Renders the whole composition as one picture, also for
+/// panoramas split into several images.
+pub fn render_preview_png(
+    doc: &Document,
+    decoded_images: &HashMap<Uuid, DecodedImage>,
+    background_image: Option<&DecodedImage>,
+    width: u32,
+) -> Result<Vec<u8>, ExportError> {
+    let mut preview = doc.clone();
+    preview.canvas.export_target_width = width.min(preview.canvas.export_width.max(1)).max(1);
+    preview.canvas.slices = 1;
+    preview.canvas.aspect = None;
+    let surface = render_surface(&preview, decoded_images, background_image)?;
+    let mut png = Vec::new();
+    surface.write_to_png(&mut png)?;
+    Ok(png)
+}
+
 fn render_surface(
     doc: &Document,
     decoded_images: &HashMap<Uuid, DecodedImage>,

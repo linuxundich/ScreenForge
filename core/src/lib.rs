@@ -8,6 +8,7 @@ pub mod command;
 pub mod frame;
 pub mod generator;
 pub mod layout;
+pub mod library;
 pub mod model;
 pub mod palette;
 pub mod project;

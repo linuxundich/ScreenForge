@@ -84,6 +84,12 @@ Follow-ups from phase 5:
 - [x] Animated export: choice of animation and tempo (v0.31.0)
 - [ ] Animated export: frame rate choice, if anyone needs it
 
+## Scenes — done in v0.34.0
+
+- [x] Scene library with previews, autosave, overview as start screen,
+      rename, duplicate, delete with undo, import/export files
+- [ ] Offer once to import existing `.screenforge` files into the library
+
 ---
 
 Already done from earlier idea lists: alignment tool and eyedropper

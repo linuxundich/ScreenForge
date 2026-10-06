@@ -54,6 +54,9 @@ GNOME 51 runtime. Inside the sandbox, Android import calls the host's
     variants, effects, text, callouts, redactions, output, export).
   - `editor_model.rs`: the window's UI-facing state as a GObject that
     widgets bind to.
+  - `scenes.rs`: the scene overview, autosave and scene actions, on top
+    of `screenforge_core::library` (one folder per scene under
+    `$XDG_DATA_HOME/screenforge/scenes`).
   - `sources.rs` (import, adb, portal screenshot, open with), `project.rs`,
     `presets.rs`, `dialogs.rs`, `editing.rs` (canvas actions), `i18n.rs`.
 - `app/src/cli.rs`: the command line (`--preset`, `--list-presets`);

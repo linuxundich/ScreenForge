@@ -18,4 +18,5 @@ app/src/panels/text.rs
 app/src/panels/variants.rs
 app/src/presets.rs
 app/src/project.rs
+app/src/scenes.rs
 app/src/sources.rs

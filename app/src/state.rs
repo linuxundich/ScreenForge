@@ -19,9 +19,16 @@ pub(crate) struct EditorState {
     /// up here, decoding on first use — self-healing, and it's also why a
     /// duplicate that shares a source path costs no extra decode.
     pub(crate) image_cache: HashMap<PathBuf, DecodedImage>,
-    /// Where this project was last saved to or loaded from, if anywhere.
-    /// `win.save` reuses it; `win.save-as` always prompts and updates it.
-    pub(crate) project_path: Option<PathBuf>,
+    /// The scene this document is saved into (`scenes.rs`); `None` until a
+    /// new composition gets its first screenshot.
+    pub(crate) scene: Option<screenforge_core::library::SceneMeta>,
+    /// Hash of the document as last written to the scene, so autosave
+    /// skips writes that would change nothing.
+    pub(crate) saved_hash: Option<u64>,
+    /// A background save is running; `save_again` asks for another one
+    /// once it is done, because the document changed meanwhile.
+    pub(crate) saving: bool,
+    pub(crate) save_again: bool,
     /// GTK-independent undo/redo history (spec §17), kept in `app` rather
     /// than inside `Document` itself — see `core::command` for why.
     pub(crate) undo_stack: UndoStack,
@@ -92,7 +99,10 @@ impl EditorState {
         Self {
             document,
             image_cache: HashMap::new(),
-            project_path: None,
+            scene: None,
+            saved_hash: None,
+            saving: false,
+            save_again: false,
             undo_stack: UndoStack::new(),
             syncing_controls: false,
             gradient_auto_seed: 0,
@@ -162,6 +172,7 @@ pub(crate) fn refresh_canvas(window: &Window, canvas: &Canvas, state: &Rc<RefCel
     drop(state_ref);
 
     update_export_height_display(window, canvas_settings);
+    schedule_autosave(window, state);
 }
 
 /// Decoded Cairo surfaces for every element whose source is a file,

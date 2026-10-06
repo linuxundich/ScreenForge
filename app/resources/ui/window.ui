@@ -16,6 +16,16 @@
       </object>
     </child>
     <property name="content">
+      <!-- Toasts above both pages; the scene overview (built in scenes.rs)
+           becomes the navigation root, the editor is pushed on top. -->
+      <object class="AdwToastOverlay" id="toast_overlay">
+        <property name="child">
+          <object class="AdwNavigationView" id="navigation_view">
+            <child>
+              <object class="AdwNavigationPage" id="editor_page">
+                <property name="title" translatable="yes">ScreenForge</property>
+                <property name="tag">editor</property>
+                <property name="child">
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar">
@@ -49,8 +59,18 @@
               </object>
             </child>
             <property name="title-widget">
-              <object class="AdwWindowTitle" id="window_title">
-                <property name="title" translatable="yes">ScreenForge</property>
+              <!-- The scene's name; the popover (scenes.rs) renames,
+                   duplicates, exports and deletes it. -->
+              <object class="GtkMenuButton" id="scene_title_button">
+                <property name="tooltip-text" translatable="yes">Scene</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+                <property name="child">
+                  <object class="AdwWindowTitle" id="window_title">
+                    <property name="title" translatable="yes">ScreenForge</property>
+                  </object>
+                </property>
               </object>
             </property>
             <!-- "end" children are packed right to left: menu, export,
@@ -90,8 +110,6 @@
           </object>
         </child>
         <property name="content">
-          <object class="AdwToastOverlay" id="toast_overlay">
-            <property name="child">
               <object class="AdwOverlaySplitView" id="split_view">
                 <property name="sidebar-position">end</property>
                 <property name="sidebar-width-fraction">0.3</property>
@@ -1099,8 +1117,8 @@
                             </child>
                             <child>
                               <object class="GtkButton">
-                                <property name="label" translatable="yes">Open Project…</property>
-                                <property name="action-name">win.open-project</property>
+                                <property name="label" translatable="yes">Scenes</property>
+                                <property name="action-name">win.show-scenes</property>
                                 <style>
                                   <class name="pill"/>
                                 </style>
@@ -1175,7 +1193,11 @@
                   </object>
                 </property>
               </object>
-            </property>
+        </property>
+      </object>
+                </property>
+              </object>
+            </child>
           </object>
         </property>
       </object>
@@ -1198,8 +1220,8 @@
     </section>
     <section>
       <item>
-        <attribute name="label" translatable="yes">Open Project…</attribute>
-        <attribute name="action">win.open-project</attribute>
+        <attribute name="label" translatable="yes">Import File…</attribute>
+        <attribute name="action">win.import-scene</attribute>
       </item>
     </section>
   </menu>
@@ -1228,16 +1250,26 @@
   <menu id="primary_menu">
     <section>
       <item>
-        <attribute name="label" translatable="yes">Open Project…</attribute>
-        <attribute name="action">win.open-project</attribute>
+        <attribute name="label" translatable="yes">New Scene</attribute>
+        <attribute name="action">win.new-scene</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">Save</attribute>
-        <attribute name="action">win.save</attribute>
+        <attribute name="label" translatable="yes">Scenes</attribute>
+        <attribute name="action">win.show-scenes</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">Save As…</attribute>
-        <attribute name="action">win.save-as</attribute>
+        <attribute name="label" translatable="yes">Duplicate Scene</attribute>
+        <attribute name="action">win.duplicate-scene</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Import File…</attribute>
+        <attribute name="action">win.import-scene</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Export as File…</attribute>
+        <attribute name="action">win.export-scene</attribute>
       </item>
     </section>
     <section>

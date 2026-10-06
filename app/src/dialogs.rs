@@ -100,6 +100,12 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
+<p>Version 0.34.0</p>
+<ul>
+<li>Scenes: compositions save themselves with all their settings</li>
+<li>Start screen with preview cards to reopen, rename, duplicate and delete scenes</li>
+<li>Export and import scenes as .screenforge files</li>
+</ul>
 <p>Version 0.33.0</p>
 <ul>
 <li>Label types: capsule, caption and headline</li>
@@ -244,15 +250,24 @@ pub(crate) fn register_shortcuts_action(app: &adw::Application) {
         app,
         move |_, _| {
             let dialog = adw::ShortcutsDialog::new();
-            let sections: [(&str, &[(&str, &str)]); 3] = [
+            let sections: [(&str, &[(&str, &str)]); 4] = [
+                (
+                    &gettext("Scenes"),
+                    &[
+                        (&gettext("New Scene"), "<Ctrl>n"),
+                        (&gettext("Back to Scenes"), "<Alt>Left"),
+                        (&gettext("Duplicate Scene"), "<Ctrl>d"),
+                        (&gettext("Save Now"), "<Ctrl>s"),
+                        (&gettext("Import File"), "<Ctrl>i"),
+                        (&gettext("Export as File"), "<Ctrl><Shift>s"),
+                    ],
+                ),
                 (
                     &gettext("General"),
                     &[
                         (&gettext("Open Images"), "<Ctrl>o"),
                         (&gettext("Paste from Clipboard"), "<Ctrl>v"),
                         (&gettext("Import from Android"), "<Ctrl><Shift>a"),
-                        (&gettext("Save Project"), "<Ctrl>s"),
-                        (&gettext("Save Project As"), "<Ctrl><Shift>s"),
                         (&gettext("Export"), "<Ctrl>e"),
                         (&gettext("Preferences"), "<Ctrl>comma"),
                         (&gettext("Keyboard Shortcuts"), "<Ctrl>question"),

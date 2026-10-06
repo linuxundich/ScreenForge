@@ -1,57 +1,5 @@
 use crate::*;
 
-/// Where a zip-format project's embedded images get extracted to before
-/// `screenforge_core::project::load` hands back a `Document` — a single
-/// fixed directory (sibling of `import::save_pasted_image`'s own cache
-/// dir), cleared and recreated here at the start of every load rather than
-/// given a fresh unique name each time, so at most one project's worth of
-/// extracted assets ever sits on disk regardless of how many projects get
-/// opened over a session. Re-saving a zip-loaded project needs no special
-/// handling as a result: its elements are ordinary `Path`s into this
-/// directory by the time `save` sees them, read exactly like any other
-/// imported file.
-pub(crate) fn prepare_project_asset_extract_dir() -> PathBuf {
-    let dir = glib::user_cache_dir().join("screenforge").join("project-assets");
-    std::fs::remove_dir_all(&dir).ok();
-    dir
-}
-
-pub(crate) fn save_project_to(window: &Window, state: &Rc<RefCell<EditorState>>, path: &std::path::Path) {
-    let doc = state.borrow().document.clone();
-    let toast = match screenforge_core::project::save(&doc, path) {
-        Ok(()) => adw::Toast::new(&gettext("Project saved")),
-        Err(err) => adw::Toast::new(&gettext("Saving failed: {err}").replace("{err}", &err.to_string())),
-    };
-    window.toast_overlay().add_toast(toast);
-}
-
-async fn save_project_as(window: &Window, state: &Rc<RefCell<EditorState>>) {
-    let filter = gtk4::FileFilter::new();
-    filter.add_pattern("*.screenforge");
-    filter.set_name(Some(&gettext("ScreenForge Projects")));
-
-    let dialog = gtk4::FileDialog::builder()
-        .title(gettext("Save Project As"))
-        .accept_label(gettext("Save"))
-        .initial_name("komposition.screenforge")
-        .default_filter(&filter)
-        .build();
-
-    let file = match dialog.save_future(Some(window)).await {
-        Ok(file) => file,
-        Err(err) => {
-            if !err.matches(gtk4::DialogError::Dismissed) {
-                eprintln!("ScreenForge: save-as dialog failed: {err}");
-            }
-            return;
-        }
-    };
-    let Some(path) = file.path() else { return };
-
-    save_project_to(window, state, &path);
-    state.borrow_mut().project_path = Some(path);
-}
-
 /// Re-reads every sidebar control from `state.document` — used after loading
 /// a project so the sidebar reflects what was actually loaded rather than
 /// whatever the user had set before. The shadow/corner-radius rows re-apply
@@ -102,128 +50,27 @@ pub(crate) fn sync_controls_from_document(window: &Window, canvas: &Canvas, stat
     state.borrow_mut().syncing_controls = false;
 }
 
-/// `win.save`, `win.save-as` and `win.open-project` — the `.screenforge`
-/// project file, distinct from `win.open`'s image import (spec §16/§18).
-/// Missing source images on load are reported per-element via a toast, not
-/// as a load failure (spec §4: local editing must keep working offline even
-/// when referenced files have moved or been deleted).
-pub(crate) fn register_project_actions(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
-    let save_action = gio::SimpleAction::new("save", None);
-    save_action.connect_activate(glib::clone!(
-        #[weak]
-        window,
-        #[strong]
-        state,
-        move |_, _| {
-            let window = window.clone();
-            let state = state.clone();
-            glib::spawn_future_local(async move {
-                let existing = state.borrow().project_path.clone();
-                match existing {
-                    Some(path) => save_project_to(&window, &state, &path),
-                    None => save_project_as(&window, &state).await,
-                }
-            });
-        }
-    ));
-    window.add_action(&save_action);
-    app.set_accels_for_action("win.save", &["<Ctrl>s"]);
-
-    let save_as_action = gio::SimpleAction::new("save-as", None);
-    save_as_action.connect_activate(glib::clone!(
-        #[weak]
-        window,
-        #[strong]
-        state,
-        move |_, _| {
-            let window = window.clone();
-            let state = state.clone();
-            glib::spawn_future_local(async move {
-                save_project_as(&window, &state).await;
-            });
-        }
-    ));
-    window.add_action(&save_as_action);
-    app.set_accels_for_action("win.save-as", &["<Ctrl><Shift>s"]);
-
-    let open_project_action = gio::SimpleAction::new("open-project", None);
-    open_project_action.connect_activate(glib::clone!(
-        #[weak]
-        window,
-        #[weak]
-        canvas,
-        #[strong]
-        state,
-        move |_, _| {
-            let window = window.clone();
-            let canvas = canvas.clone();
-            let state = state.clone();
-            glib::spawn_future_local(async move {
-                let filter = gtk4::FileFilter::new();
-                filter.add_pattern("*.screenforge");
-                filter.set_name(Some(&gettext("ScreenForge Projects")));
-
-                let dialog = gtk4::FileDialog::builder()
-                    .title(gettext("Open Project"))
-                    .accept_label(gettext("Open"))
-                    .default_filter(&filter)
-                    .build();
-
-                let file = match dialog.open_future(Some(&window)).await {
-                    Ok(file) => file,
-                    Err(err) => {
-                        if !err.matches(gtk4::DialogError::Dismissed) {
-                            eprintln!("ScreenForge: open-project dialog failed: {err}");
-                        }
-                        return;
-                    }
-                };
-                let Some(path) = file.path() else { return };
-
-                open_project_file(&window, &canvas, &state, path);
-            });
-        }
-    ));
-    window.add_action(&open_project_action);
-}
-
-/// Loads the `.screenforge` project at `path` into the window, replacing
-/// the current document and its undo history.
-pub(crate) fn open_project_file(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, path: PathBuf) {
-    match screenforge_core::project::load(&path, &prepare_project_asset_extract_dir()) {
-        Ok(doc) => {
-            let mut image_cache = HashMap::new();
-            let mut missing = 0u32;
-            for element in &doc.elements {
-                let ImageSource::Path(source_path) = &element.source else { continue };
-                if get_or_decode(&mut image_cache, source_path).is_none() {
-                    missing += 1;
-                }
-            }
-
-            {
-                let mut state_ref = state.borrow_mut();
-                state_ref.document = doc;
-                state_ref.image_cache = image_cache;
-                state_ref.project_path = Some(path);
-                // A freshly loaded project starts with a clean
-                // undo history — undoing past "load" into the
-                // previous document would be surprising.
-                state_ref.undo_stack = UndoStack::new();
-            }
-            refresh_canvas(window, canvas, state);
-            sync_controls_from_document(window, canvas, state);
-            update_undo_redo_sensitivity(window, state);
-
-            let toast = if missing > 0 {
-                adw::Toast::new(&ngettext("Project loaded ({missing} image missing)", "Project loaded ({missing} images missing)", missing).replace("{missing}", &missing.to_string()))
-            } else {
-                adw::Toast::new(&gettext("Project loaded"))
-            };
-            window.toast_overlay().add_toast(toast);
-        }
-        Err(err) => {
-            window.toast_overlay().add_toast(adw::Toast::new(&gettext("The project could not be loaded: {err}").replace("{err}", &err.to_string())));
+/// Puts `doc` into the editor in place of the current document: decodes
+/// its images, starts a fresh undo history and refreshes every control.
+/// Returns how many images could not be found.
+pub(crate) fn install_document(window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>, doc: Document) -> u32 {
+    let mut image_cache = HashMap::new();
+    let mut missing = 0u32;
+    for element in &doc.elements {
+        let ImageSource::Path(source_path) = &element.source else { continue };
+        if get_or_decode(&mut image_cache, source_path).is_none() {
+            missing += 1;
         }
     }
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.document = doc;
+        state_ref.image_cache = image_cache;
+        // Undoing past a load into the previous document would be surprising.
+        state_ref.undo_stack = UndoStack::new();
+    }
+    refresh_canvas(window, canvas, state);
+    sync_controls_from_document(window, canvas, state);
+    update_undo_redo_sensitivity(window, state);
+    missing
 }

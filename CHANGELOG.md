@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-06
+
+### Added
+
+- Scenes: every composition is kept in the app's scene library with all
+  its settings, a preview picture and its last change. The scene overview
+  is the start screen: a grid of preview cards, sortable by last change or
+  name, searchable, with a selection mode for several scenes at once.
+- Scenes save themselves a second after each change and when the window
+  closes; Ctrl+S saves right away.
+- Card menu and editor title menu: open, rename, duplicate, apply a
+  scene's look to the open scene, export as `.screenforge` file, delete
+  with undo.
+- Import `.screenforge` files as scenes (Ctrl+I, or open them from the
+  file manager).
+
+### Changed
+
+- "Save" and "Save As" are gone from the main menu; "Export as File…"
+  (Shift+Ctrl+S) writes a scene out to share it. The window title is the
+  scene's name.
+
+### Fixed
+
+- Closing the window no longer loses an unsaved composition.
+
 ## [0.33.0] - 2026-10-06
 
 ### Added

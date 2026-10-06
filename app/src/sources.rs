@@ -366,7 +366,7 @@ async fn take_portal_screenshot(window: &Window, canvas: &Canvas, state: &Rc<Ref
 
 /// `app.import-files` (string array of paths): what "Öffnen mit" from the
 /// file manager ends up calling — images are imported, a `.screenforge`
-/// file is opened as the project.
+/// file is imported as a scene and opened.
 pub(crate) fn register_import_files_action(app: &adw::Application, window: &Window, canvas: &Canvas, state: &Rc<RefCell<EditorState>>) {
     let action = gio::SimpleAction::new("import-files", Some(glib::VariantTy::STRING_ARRAY));
     action.connect_activate(glib::clone!(
@@ -380,8 +380,8 @@ pub(crate) fn register_import_files_action(app: &adw::Application, window: &Wind
             let Some(paths) = parameter.and_then(|p| p.get::<Vec<String>>()) else { return };
             let (projects, images): (Vec<PathBuf>, Vec<PathBuf>) =
                 paths.into_iter().map(PathBuf::from).partition(|p| p.extension().is_some_and(|e| e == "screenforge"));
-            if let Some(project) = projects.into_iter().next() {
-                open_project_file(&window, &canvas, &state, project);
+            if !projects.is_empty() {
+                import_scene_files(&window, &canvas, &state, projects);
             }
             if !images.is_empty() {
                 import_paths(&window, &canvas, &state, images);
