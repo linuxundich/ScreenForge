@@ -100,6 +100,10 @@ pub(crate) fn register_settings_action(app: &adw::Application) {
 /// `AdwAboutDialog::set_release_notes`, whose accepted markup is the same
 /// restricted subset AppStream release-notes use: `<p>`/`<ul>`/`<li>` only.
 pub(crate) const RELEASE_NOTES: &str = "\
+<p>Version 0.32.1</p>
+<ul>
+<li>New app icon: three phones in a forge fire</li>
+</ul>
 <p>Version 0.32.0</p>
 <ul>
 <li>Move and resize redaction areas directly on the screenshot</li>

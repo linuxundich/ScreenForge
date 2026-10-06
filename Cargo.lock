@@ -1664,7 +1664,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "screenforge"
-version = "0.32.0"
+version = "0.32.1"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "screenforge-core"
-version = "0.32.0"
+version = "0.32.1"
 dependencies = [
  "cairo-rs",
  "pango",

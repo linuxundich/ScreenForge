@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-10-06
+
+### Changed
+
+- New app icon: three Android phones, fanned out like the app's fan
+  layout, standing in a forge fire that also burns in their screens. Drawn
+  to the GNOME app icon guidelines with the GNOME palette, with a matching
+  symbolic icon. Replaces the phone on an anvil.
+
 ## [0.32.0] - 2026-10-06
 
 ### Added

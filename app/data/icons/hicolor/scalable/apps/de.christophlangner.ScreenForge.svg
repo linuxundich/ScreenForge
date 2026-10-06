@@ -1,72 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- ScreenForge: three Android phones, fanned out like the app's fan layout,
+     standing in a forge fire; the fire burns in their screens too.
+     Colors from the GNOME palette. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="phoneBody" x1="42" y1="16" x2="86" y2="80" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#57545f"/>
-      <stop offset="1" stop-color="#211e28"/>
-    </linearGradient>
-    <linearGradient id="screenSky" x1="49" y1="23" x2="79" y2="57" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#8fd0f8"/>
-      <stop offset="1" stop-color="#1a5fb4"/>
-    </linearGradient>
-    <linearGradient id="hammerHandle" x1="95" y1="68" x2="127" y2="82" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#a06e40"/>
-      <stop offset="1" stop-color="#5c3b20"/>
-    </linearGradient>
-    <clipPath id="screenClip">
-      <rect x="49" y="23" width="30" height="34" rx="4"/>
-    </clipPath>
-    <clipPath id="anvilBodyClip">
-      <rect x="22" y="78" width="78" height="16" rx="5"/>
-    </clipPath>
-    <clipPath id="anvilFootClip">
-      <rect x="40" y="104" width="48" height="13" rx="4"/>
-    </clipPath>
+    <linearGradient id="inside" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#241f31"/><stop offset=".5" stop-color="#a51d2d"/><stop offset="1" stop-color="#ff7800"/></linearGradient>
   </defs>
-
-  <!-- anvil: flat top face (lit from above) + flat darker front face on every mass -->
-  <g>
-    <path d="m 22 82 -10 4 10 4 z" fill="#413e47"/>
-    <g clip-path="url(#anvilBodyClip)">
-      <rect x="22" y="78" width="78" height="16" fill="#47444d"/>
-      <rect x="22" y="78" width="78" height="6" fill="#98959f"/>
-    </g>
-    <path d="M 50 94 L 92 94 L 83 104 L 59 104 Z" fill="#3c3942"/>
-    <g clip-path="url(#anvilFootClip)">
-      <rect x="40" y="104" width="48" height="13" fill="#3a3740"/>
-      <rect x="40" y="104" width="48" height="4" fill="#7c7982"/>
-    </g>
-    <ellipse cx="64" cy="80" rx="17" ry="2.4" fill="#000000" opacity="0.16"/>
-  </g>
-
-  <!-- phone -->
-  <g>
-    <rect x="42" y="16" width="44" height="64" rx="10" fill="url(#phoneBody)"/>
-    <rect x="59" y="19.5" width="10" height="2.2" rx="1.1" fill="#141219"/>
-    <g clip-path="url(#screenClip)">
-      <rect x="49" y="23" width="30" height="34" fill="url(#screenSky)"/>
-      <path d="M 51 55 L 59 41 L 65 49 L 71 39 L 79 55 L 79 57 L 49 57 Z" fill="#14528f"/>
-      <circle cx="72.5" cy="30.5" r="3.6" fill="#f6f5f4"/>
-    </g>
-    <g fill="none" stroke="#f6f5f4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M 49 29 L 49 23 L 55 23"/>
-      <path d="M 73 23 L 79 23 L 79 29"/>
-      <path d="M 49 51 L 49 57 L 55 57"/>
-      <path d="M 73 57 L 79 57 L 79 51"/>
-    </g>
-  </g>
-
-  <!-- sparks -->
-  <g fill-rule="evenodd">
-    <path d="M 71 79 L 74.5 84 L 71 89 L 67.5 84 Z" fill="#ff9430"/>
-    <path d="M 79 89 L 81 92.5 L 79 96 L 77 92.5 Z" fill="#ffd166"/>
-    <path d="M 66 65 L 67.6 67.6 L 66 70.2 L 64.4 67.6 Z" fill="#ffd166"/>
-  </g>
-
-  <!-- hammer -->
-  <g transform="rotate(-45 85 75)">
-    <rect x="95" y="71.5" width="32" height="7" rx="3.5" fill="url(#hammerHandle)"/>
-    <rect x="75" y="68.5" width="20" height="13" rx="3" fill="#2c2933"/>
-    <rect x="75" y="68.5" width="20" height="4.5" rx="2.25" fill="#8f8c96"/>
-  </g>
+  <!-- left and right phones, fanned out and set back a little -->
+<g transform="translate(36 70) rotate(-16)">
+<defs><clipPath id="s0"><rect x="-15.1" y="-31.1" width="30.2" height="62.2" rx="4.3"/></clipPath></defs>
+<rect x="-18" y="-31" width="36" height="68" rx="7.2" fill="#000" opacity=".25"/>
+<rect x="-18" y="-34" width="36" height="68" rx="7.2" fill="#5e5c64"/>
+<rect x="-16.5" y="-32.5" width="33" height="65" rx="5.7" fill="#241f31"/>
+<g clip-path="url(#s0)">
+<rect x="-15.1" y="-31.1" width="30.2" height="62.2" fill="url(#inside)"/>
+<rect x="-15.1" y="-31.1" width="30.2" height="10.6" fill="#2ec27e"/>
+<rect x="-11.5" y="-24.8" width="12.1" height="1.7" rx="1" fill="#fff"/>
+<path d="M -15.1 31.1 L -15.1 18.7 C -12.7 12.4 -11.5 7.5 -10.6 0 C -7.6 6.2 -6 12.4 -5.4 17.4 C -4.5 7.5 -2.4 1.2 -1.5 -7.5 C 2.4 0 4.2 7.5 3.6 16.2 C 6 11.2 7.3 6.2 7.9 0 C 10.9 6.2 12.7 12.4 15.1 14.9 L 15.1 31.1 Z" fill="#ff7800"/>
+<path d="M -12.7 31.1 C -12.7 23.7 -10.9 19.9 -9.7 13.7 C -7.9 18.7 -6.7 23.7 -6.7 31.1 Z M -4.2 31.1 C -4.2 19.9 -2.4 14.9 -1.2 7.5 C 1.2 14.9 2.4 21.2 1.8 31.1 Z M 5.4 31.1 C 5.4 23.7 7.3 19.9 8.5 14.9 C 10.3 19.9 11.5 24.9 11.5 31.1 Z" fill="#f6d32d"/>
+</g>
+<circle cx="0" cy="-27.7" r="1.3" fill="#241f31"/>
+<rect x="-18" y="-34" width="36" height="68" rx="7.2" fill="#241f31" opacity="0.2"/>
+</g>
+<g transform="translate(92 70) rotate(16)">
+<defs><clipPath id="s1"><rect x="-15.1" y="-31.1" width="30.2" height="62.2" rx="4.3"/></clipPath></defs>
+<rect x="-18" y="-31" width="36" height="68" rx="7.2" fill="#000" opacity=".25"/>
+<rect x="-18" y="-34" width="36" height="68" rx="7.2" fill="#5e5c64"/>
+<rect x="-16.5" y="-32.5" width="33" height="65" rx="5.7" fill="#241f31"/>
+<g clip-path="url(#s1)">
+<rect x="-15.1" y="-31.1" width="30.2" height="62.2" fill="url(#inside)"/>
+<rect x="-15.1" y="-31.1" width="30.2" height="10.6" fill="#2ec27e"/>
+<rect x="-11.5" y="-24.8" width="12.1" height="1.7" rx="1" fill="#fff"/>
+<path d="M -15.1 31.1 L -15.1 18.7 C -12.7 12.4 -11.5 7.5 -10.6 0 C -7.6 6.2 -6 12.4 -5.4 17.4 C -4.5 7.5 -2.4 1.2 -1.5 -7.5 C 2.4 0 4.2 7.5 3.6 16.2 C 6 11.2 7.3 6.2 7.9 0 C 10.9 6.2 12.7 12.4 15.1 14.9 L 15.1 31.1 Z" fill="#ff7800"/>
+<path d="M -12.7 31.1 C -12.7 23.7 -10.9 19.9 -9.7 13.7 C -7.9 18.7 -6.7 23.7 -6.7 31.1 Z M -4.2 31.1 C -4.2 19.9 -2.4 14.9 -1.2 7.5 C 1.2 14.9 2.4 21.2 1.8 31.1 Z M 5.4 31.1 C 5.4 23.7 7.3 19.9 8.5 14.9 C 10.3 19.9 11.5 24.9 11.5 31.1 Z" fill="#f6d32d"/>
+</g>
+<circle cx="0" cy="-27.7" r="1.3" fill="#241f31"/>
+<rect x="-18" y="-34" width="36" height="68" rx="7.2" fill="#241f31" opacity="0.2"/>
+</g>
+  <!-- front phone -->
+<g transform="translate(64 62) rotate(0)">
+<defs><clipPath id="s2"><rect x="-16.8" y="-34.8" width="33.6" height="69.6" rx="4.8"/></clipPath></defs>
+<rect x="-20" y="-35" width="40" height="76" rx="8" fill="#000" opacity=".25"/>
+<rect x="-20" y="-38" width="40" height="76" rx="8" fill="#5e5c64"/>
+<rect x="-18.5" y="-36.5" width="37" height="73" rx="6.5" fill="#241f31"/>
+<g clip-path="url(#s2)">
+<rect x="-16.8" y="-34.8" width="33.6" height="69.6" fill="url(#inside)"/>
+<rect x="-16.8" y="-34.8" width="33.6" height="11.8" fill="#2ec27e"/>
+<rect x="-12.8" y="-27.7" width="13.4" height="1.9" rx="1" fill="#fff"/>
+<path d="M -16.8 34.8 L -16.8 20.9 C -14.1 13.9 -12.8 8.4 -11.8 0 C -8.4 7 -6.7 13.9 -6 19.5 C -5 8.4 -2.7 1.4 -1.7 -8.4 C 2.7 0 4.7 8.4 4 18.1 C 6.7 12.5 8.1 7 8.7 0 C 12.1 7 14.1 13.9 16.8 16.7 L 16.8 34.8 Z" fill="#ff7800"/>
+<path d="M -14.1 34.8 C -14.1 26.4 -12.1 22.3 -10.8 15.3 C -8.7 20.9 -7.4 26.4 -7.4 34.8 Z M -4.7 34.8 C -4.7 22.3 -2.7 16.7 -1.3 8.4 C 1.3 16.7 2.7 23.7 2 34.8 Z M 6 34.8 C 6 26.4 8.1 22.3 9.4 16.7 C 11.4 22.3 12.8 27.8 12.8 34.8 Z" fill="#f6d32d"/>
+</g>
+<circle cx="0" cy="-31" r="1.4" fill="#241f31"/>
+</g>
+  <!-- the forge fire they stand in -->
+<path d="M 6 122 C 8.3 107.6 15.3 102.2 17.6 91.4 C 24.6 100.4 29.2 104 31.5 109.4 C 36.2 100.4 40.8 93.2 43.1 86 C 52.4 96.8 54.7 104 54.7 111.2 C 61.7 102.2 64 95 66.3 87.8 C 75.6 96.8 77.9 104 75.6 110.5 C 82.6 100.4 87.2 93.2 89.5 86 C 98.8 96.8 101.1 105.8 98.8 111.2 C 105.8 104 110.4 98.6 112.7 91.4 C 119.7 102.2 122 107.6 122 122 Z" fill="#e66100"/><path d="M 13 122 C 15.3 113.4 19.9 109 23.4 100.4 C 29.2 109 33.8 113.4 36.2 115.5 C 43.1 109 47.8 104.7 50.1 99.3 C 59.4 106.9 61.7 111.2 64 115.5 C 68.6 109 73.3 103.6 77.9 100.4 C 84.9 106.9 87.2 111.2 89.5 115.5 C 96.5 109 101.1 104.7 105.8 100.4 C 110.4 109 115 113.4 115 122 Z" fill="#ffa348"/><path d="M 21.1 122 C 21.1 117.1 26.8 115.1 29.2 112.2 C 31.6 115.1 37.3 117.1 37.3 122 Z" fill="#f6d32d"/><path d="M 40.8 122 C 40.8 115.9 47.3 113.4 50.1 109.8 C 52.9 113.4 59.4 115.9 59.4 122 Z" fill="#f6d32d"/><path d="M 62.8 122 C 62.8 116.8 68.5 114.7 71 111.6 C 73.4 114.7 79.1 116.8 79.1 122 Z" fill="#f6d32d"/><path d="M 82.6 122 C 82.6 115.9 89.1 113.4 91.8 109.8 C 94.6 113.4 101.1 115.9 101.1 122 Z" fill="#f6d32d"/><path d="M 102.3 122 C 102.3 118.3 106.3 116.9 108.1 114.7 C 109.8 116.9 113.9 118.3 113.9 122 Z" fill="#f6d32d"/>
 </svg>
