@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-10-07
+
+### Fixed
+
+- The classic waves background had visible corners on large canvases: each
+  wave was a polygon of 24 points. It is a smooth curve now. Scenes with
+  classic waves look slightly softer at the wave edges; nothing else moves.
+
 ## [0.34.0] - 2026-10-06
 
 ### Added

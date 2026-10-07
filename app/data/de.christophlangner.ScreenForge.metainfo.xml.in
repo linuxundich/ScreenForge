@@ -61,6 +61,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.34.1" date="2026-10-07">
+      <description translate="no">
+        <p>The classic waves background is drawn as smooth curves instead of showing corners.</p>
+      </description>
+    </release>
     <release version="0.34.0" date="2026-10-06">
       <description translate="no">
         <p>Scenes: every composition saves itself with all its settings and shows up as a preview card on the new start screen, ready to reopen, rename, duplicate or delete.</p>

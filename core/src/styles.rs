@@ -105,7 +105,7 @@ fn linear(p0: (f64, f64), p1: (f64, f64), stops: &[(f64, Rgba)]) -> LinearGradie
 /// Appends a smooth curve through `points` to the current path
 /// (Catmull-Rom with the end points repeated, as cubic Béziers), starting
 /// with `move_to` when `start` is set and `line_to` otherwise.
-fn smooth(ctx: &Context, points: &[(f64, f64)], start: bool) {
+pub(crate) fn smooth(ctx: &Context, points: &[(f64, f64)], start: bool) {
     let Some(&first) = points.first() else { return };
     if start {
         ctx.move_to(first.0, first.1);

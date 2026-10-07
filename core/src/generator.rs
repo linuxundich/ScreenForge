@@ -446,7 +446,9 @@ fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, pale
 
     let amplitude = max_radius * 0.05 * (0.3 + bg.flow.clamp(0.0, 1.0) * 0.7);
     let freq = 1.0 + (bg.variation.clamp(0.0, 1.0) * 3.0).round();
-    let segments = 24;
+    // Enough points for a smooth curve through them (`styles::smooth`); the
+    // old 24-point polygon showed visible corners on large canvases.
+    let segments = 120;
 
     let contrast = bg.contrast.clamp(0.0, 1.0);
     let (oklab_stops, mean_l) = oklab_palette(palette);
@@ -483,9 +485,7 @@ fn draw_wave_layers(ctx: &Context, rng: &mut Rng, bg: &GeneratedBackground, pale
 
         ctx.new_path();
         ctx.move_to(focus.0, focus.1);
-        for &(x, y) in &points {
-            ctx.line_to(x, y);
-        }
+        crate::styles::smooth(ctx, &points, false);
         ctx.close_path();
 
         let color = layer_color(&oklab_stops, mean_l, t, contrast);
