@@ -51,8 +51,8 @@ GNOME 51 runtime. Inside the sandbox, Android import calls the host's
 - The generated backgrounds come from
   [Prospekt](https://github.com/linuxundich/prospekt), a separate library
   (git dependency, pinned to a tag) that the wallpaper app Kulisse uses
-  too. `core/src/generator.rs` only wraps it: ScreenForge always draws the
-  classic waves smooth. `core/src/palette.rs` keeps the two
+  too. `core/src/generator.rs` only wraps it: ScreenForge renders at least
+  algorithm version 2, so the classic waves are always smooth. `core/src/palette.rs` keeps the two
   screenshot-based color suggestions and re-exports the rest.
 - `app/` (`screenforge`): the GTK 4 + libadwaita application.
   - `main.rs` builds the window and wires the modules together.

@@ -1435,8 +1435,8 @@ dependencies = [
 
 [[package]]
 name = "prospekt"
-version = "0.1.0"
-source = "git+https://github.com/linuxundich/prospekt?tag=v0.1.0#af87de8b31bcfabc0aa47af04a74934ac422d3e3"
+version = "0.2.0"
+source = "git+https://github.com/linuxundich/prospekt?tag=v0.2.0#a6851b152af8a0845d7877e6c960fb62e02b9425"
 dependencies = [
  "cairo-rs",
  "serde",
