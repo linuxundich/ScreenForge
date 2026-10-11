@@ -459,6 +459,7 @@ mod tests {
             style: crate::model::GeneratorStyle::Ribbons,
             mood: crate::model::Mood::Dark,
             grain: 0.42,
+            smooth_waves: true,
         };
         doc.background = Background::Generated(generated.clone());
 

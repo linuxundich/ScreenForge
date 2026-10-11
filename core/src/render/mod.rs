@@ -30,6 +30,8 @@ pub enum RenderError {
     MissingImage(Uuid),
     #[error("missing decoded background image")]
     MissingBackgroundImage,
+    #[error(transparent)]
+    Background(#[from] prospekt::RenderError),
 }
 
 /// Renders `doc` onto `target`, at `scale` (1.0 = document pixels map 1:1 to
@@ -1317,7 +1319,7 @@ mod tests {
 
         assert_eq!(target.width(), 200);
         assert_eq!(target.height(), 100);
-        assert!(cache.is_cached());
+        // Whether the bitmap got cached is Prospekt's own test.
         let painted = (0..100)
             .flat_map(|y| (0..200).map(move |x| (x, y)))
             .any(|(x, y)| read_pixel(&mut target, x, y).3 > 0.0);

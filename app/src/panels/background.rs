@@ -487,6 +487,7 @@ pub(crate) fn register_generator_controls(window: &Window, canvas: &Canvas, stat
                 variation: current.variation,
                 contrast: window.generator_contrast_row().value() / 100.0,
                 softness: current.softness,
+                smooth_waves: true,
             };
             if current == new {
                 return;
@@ -679,6 +680,7 @@ pub(crate) fn generate_background(window: &Window, canvas: &Canvas, state: &Rc<R
         variation,
         contrast: window.generator_contrast_row().value() / 100.0,
         softness,
+        smooth_waves: true,
     };
 
     let old = state_ref.document.background.clone();

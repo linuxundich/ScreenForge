@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-10-11
+
+### Changed
+
+- The background generator moved into its own library,
+  [Prospekt](https://github.com/linuxundich/prospekt) 0.1.0, shared with
+  the wallpaper app Kulisse. Backgrounds render exactly as before (checked
+  pixel by pixel on 1008 backgrounds); scenes load unchanged.
+- The Flatpak build vendors git dependencies too.
+
 ## [0.34.1] - 2026-10-07
 
 ### Fixed

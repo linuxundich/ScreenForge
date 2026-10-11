@@ -1434,6 +1434,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prospekt"
+version = "0.1.0"
+source = "git+https://github.com/linuxundich/prospekt?tag=v0.1.0#af87de8b31bcfabc0aa47af04a74934ac422d3e3"
+dependencies = [
+ "cairo-rs",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "pulp"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1664,7 +1674,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "screenforge"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -1688,11 +1698,12 @@ dependencies = [
 
 [[package]]
 name = "screenforge-core"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "cairo-rs",
  "pango",
  "pangocairo",
+ "prospekt",
  "serde",
  "serde_json",
  "thiserror",

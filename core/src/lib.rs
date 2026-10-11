@@ -2,8 +2,6 @@
 //! rendering. No GTK/GDK/Adwaita dependency is allowed in this crate — that
 //! boundary is what keeps the model and layout engine unit-testable.
 
-pub mod background_cache;
-pub mod blur;
 pub mod command;
 pub mod frame;
 pub mod generator;
@@ -13,9 +11,10 @@ pub mod model;
 pub mod palette;
 pub mod project;
 pub mod render;
-pub mod rng;
 pub mod shadow_cache;
 pub mod snap;
-mod styles;
 pub mod warp;
 pub mod template;
+
+// Shared with Kulisse through Prospekt; re-exported under their old paths.
+pub use prospekt::{background_cache, blur, rng};

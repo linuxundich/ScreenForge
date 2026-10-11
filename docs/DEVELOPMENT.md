@@ -39,15 +39,21 @@ build-aux/flatpak/build.sh --run     # ... and start it
 build-aux/flatpak/build.sh --bundle  # ... and write screenforge.flatpak
 ```
 
-The build runs offline: the script vendors all crates first. It uses the
+The build runs offline: the script vendors all crates first, Prospekt's git tag included. It uses the
 GNOME 51 runtime. Inside the sandbox, Android import calls the host's
 `adb` through `flatpak-spawn --host`.
 
 ## Project layout
 
 - `core/` (`screenforge-core`): document model, layout engine, the Cairo
-  renderer shared by preview and export, background generator, undo
-  stack, `.screenforge` project files. No GTK dependency, unit-tested.
+  renderer shared by preview and export, undo stack, `.screenforge`
+  project files. No GTK dependency, unit-tested.
+- The generated backgrounds come from
+  [Prospekt](https://github.com/linuxundich/prospekt), a separate library
+  (git dependency, pinned to a tag) that the wallpaper app Kulisse uses
+  too. `core/src/generator.rs` only wraps it: ScreenForge always draws the
+  classic waves smooth. `core/src/palette.rs` keeps the two
+  screenshot-based color suggestions and re-exports the rest.
 - `app/` (`screenforge`): the GTK 4 + libadwaita application.
   - `main.rs` builds the window and wires the modules together.
   - `panels/`: one module per sidebar tab and topic (layout, background,

@@ -37,16 +37,11 @@ flatpak install --user --noninteractive --or-update flathub \
 
 mkdir -p "$cache"
 echo "Vendoring Rust dependencies …"
-cargo vendor --locked --quiet --manifest-path "$root/Cargo.toml" "$cache/vendor" >/dev/null
-# Only crates.io sources in Cargo.lock, so this fixed source replacement
-# is all the offline build needs.
-cat > "$cache/cargo-vendor-config.toml" <<'TOML'
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "/run/build/screenforge/vendor"
-TOML
+# cargo vendor prints the source replacement for every source in Cargo.lock
+# (crates.io and the prospekt git tag); only the vendor path is changed to
+# where the sandboxed build finds it.
+cargo vendor --locked --manifest-path "$root/Cargo.toml" "$cache/vendor" 2>/dev/null > "$cache/cargo-vendor-config.toml"
+sed -i 's|^directory = .*|directory = "/run/build/screenforge/vendor"|' "$cache/cargo-vendor-config.toml"
 
 cd "$here"
 flatpak-builder --user --install --force-clean --ccache \
