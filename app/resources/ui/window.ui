@@ -504,6 +504,7 @@
                                           <item translatable="yes">Planes</item>
                                           <item translatable="yes">Lines</item>
                                           <item translatable="yes">Mist</item>
+                                          <item translatable="yes">Contours</item>
                                           <item translatable="yes">Waves (Classic)</item>
                                         </items>
                                       </object>

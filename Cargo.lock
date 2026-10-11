@@ -1435,8 +1435,8 @@ dependencies = [
 
 [[package]]
 name = "prospekt"
-version = "0.2.0"
-source = "git+https://github.com/linuxundich/prospekt?tag=v0.2.0#a6851b152af8a0845d7877e6c960fb62e02b9425"
+version = "0.3.0"
+source = "git+https://github.com/linuxundich/prospekt?tag=v0.3.0#cf89f79609a2936f403d32cf7f296b5ceb8e7031"
 dependencies = [
  "cairo-rs",
  "serde",
@@ -1674,7 +1674,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "screenforge"
-version = "0.34.2"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "screenforge-core"
-version = "0.34.2"
+version = "0.35.0"
 dependencies = [
  "cairo-rs",
  "pango",

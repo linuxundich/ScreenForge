@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-11
+
+### Added
+
+- Background style Contours: paper-cut layers of a relief map
+  (Prospekt 0.3.0).
+
+### Changed
+
+- Mixed variants include the new style. Existing backgrounds render
+  exactly as before.
+
 ## [0.34.2] - 2026-10-11
 
 ### Changed

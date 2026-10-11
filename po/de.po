@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: screenforge\n"
 "Report-Msgid-Bugs-To: https://github.com/linuxundich/ScreenForge/issues\n"
-"POT-Creation-Date: 2026-10-06 23:46+0200\n"
+"POT-Creation-Date: 2026-10-11 15:49+0200\n"
 "PO-Revision-Date: 2026-10-06 19:00+0200\n"
 "Last-Translator: Christoph Langner\n"
 "Language-Team: German\n"
@@ -47,8 +47,8 @@ msgid "Horizontal, vertical, grid or free layouts, with shadows and rounded corn
 msgstr "Horizontale, vertikale, Raster- oder freie Anordnung, mit Schatten und abgerundeten Ecken"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:14
-msgid "Generated abstract backgrounds in six styles, with variants to choose from"
-msgstr "Generierte abstrakte Hintergründe in sechs Stilen, mit Varianten zur Auswahl"
+msgid "Generated abstract backgrounds in seven styles, with variants to choose from"
+msgstr "Generierte abstrakte Hintergründe in sieben Stilen, mit Varianten zur Auswahl"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:15
 msgid "Generic phone, tablet and browser frames, and a 3D tilt"
@@ -118,7 +118,7 @@ msgstr "Szene"
 msgid "Main Menu"
 msgstr "Hauptmenü"
 
-#: app/resources/ui/window.ui:89 app/resources/ui/window.ui:1008
+#: app/resources/ui/window.ui:89 app/resources/ui/window.ui:1009
 msgid "Export"
 msgstr "Exportieren"
 
@@ -250,17 +250,17 @@ msgstr "Generiert"
 msgid "Screenshot (Blurred)"
 msgstr "Screenshot (unscharf)"
 
-#: app/resources/ui/window.ui:345 app/resources/ui/window.ui:569
+#: app/resources/ui/window.ui:345 app/resources/ui/window.ui:570
 msgid "Color 1"
 msgstr "Farbe 1"
 
 #: app/resources/ui/window.ui:358 app/resources/ui/window.ui:379
-#: app/resources/ui/window.ui:583 app/resources/ui/window.ui:604
-#: app/resources/ui/window.ui:625 app/resources/ui/window.ui:646
+#: app/resources/ui/window.ui:584 app/resources/ui/window.ui:605
+#: app/resources/ui/window.ui:626 app/resources/ui/window.ui:647
 msgid "Pick a color from a screenshot"
 msgstr "Farbe aus einem Screenshot übernehmen"
 
-#: app/resources/ui/window.ui:365 app/resources/ui/window.ui:590
+#: app/resources/ui/window.ui:365 app/resources/ui/window.ui:591
 msgid "Color 2"
 msgstr "Farbe 2"
 
@@ -304,7 +304,7 @@ msgstr "Passung"
 msgid "Fill (crop)"
 msgstr "Ausfüllen (zuschneiden)"
 
-#: app/resources/ui/window.ui:435 app/resources/ui/window.ui:1152
+#: app/resources/ui/window.ui:435 app/resources/ui/window.ui:1153
 msgid "Fit"
 msgstr "Einpassen"
 
@@ -340,7 +340,7 @@ msgstr "Helligkeit"
 msgid "In percent — negative darkens, positive lightens"
 msgstr "In Prozent — negativ abdunkeln, positiv aufhellen"
 
-#: app/resources/ui/window.ui:496 app/resources/ui/window.ui:815
+#: app/resources/ui/window.ui:496 app/resources/ui/window.ui:816
 msgid "Style"
 msgstr "Stil"
 
@@ -369,351 +369,355 @@ msgid "Mist"
 msgstr "Nebel"
 
 #: app/resources/ui/window.ui:507
+msgid "Contours"
+msgstr "Höhenlinien"
+
+#: app/resources/ui/window.ui:508
 msgid "Waves (Classic)"
 msgstr "Wellen (klassisch)"
 
-#: app/resources/ui/window.ui:515
+#: app/resources/ui/window.ui:516
 msgid "Colors"
 msgstr "Farben"
 
-#: app/resources/ui/window.ui:520
+#: app/resources/ui/window.ui:521
 msgid "Manual"
 msgstr "Manuell"
 
-#: app/resources/ui/window.ui:521
+#: app/resources/ui/window.ui:522
 msgid "From Screenshots"
 msgstr "Von Screenshots"
 
-#: app/resources/ui/window.ui:522
+#: app/resources/ui/window.ui:523
 msgid "Black and White"
 msgstr "Schwarz-Weiß"
 
-#: app/resources/ui/window.ui:523
+#: app/resources/ui/window.ui:524
 msgid "Random"
 msgstr "Zufällig"
 
-#: app/resources/ui/window.ui:553
+#: app/resources/ui/window.ui:554
 msgid "Mood"
 msgstr "Stimmung"
 
-#: app/resources/ui/window.ui:554
+#: app/resources/ui/window.ui:555
 msgid "Lightness of the generated colors"
 msgstr "Helligkeit der erzeugten Farben"
 
-#: app/resources/ui/window.ui:559
+#: app/resources/ui/window.ui:560
 msgid "Vivid"
 msgstr "Kräftig"
 
-#: app/resources/ui/window.ui:560
+#: app/resources/ui/window.ui:561
 msgid "Light"
 msgstr "Hell"
 
-#: app/resources/ui/window.ui:561
+#: app/resources/ui/window.ui:562
 msgid "Dark"
 msgstr "Dunkel"
 
-#: app/resources/ui/window.ui:611
+#: app/resources/ui/window.ui:612
 msgid "Color 3"
 msgstr "Farbe 3"
 
-#: app/resources/ui/window.ui:632
+#: app/resources/ui/window.ui:633
 msgid "Color 4"
 msgstr "Farbe 4"
 
-#: app/resources/ui/window.ui:653
+#: app/resources/ui/window.ui:654
 msgid "Adapt to Screenshots"
 msgstr "An Screenshots anpassen"
 
-#: app/resources/ui/window.ui:654
+#: app/resources/ui/window.ui:655
 msgid "Colors and placement take the screenshots into account"
 msgstr "Farben und Platzierung berücksichtigen die Screenshots"
 
-#: app/resources/ui/window.ui:660
+#: app/resources/ui/window.ui:661
 msgid "Inverted Contrast"
 msgstr "Invertierter Kontrast"
 
-#: app/resources/ui/window.ui:661
+#: app/resources/ui/window.ui:662
 msgid "In percent — only for \"From Screenshots\": higher looks more opposed/complementary instead of similar"
 msgstr "In Prozent — nur bei \"Von Screenshots\": höher wirkt stärker gegensätzlich/komplementär statt ähnlich"
 
-#: app/resources/ui/window.ui:677
+#: app/resources/ui/window.ui:678
 msgid "Focus"
 msgstr "Fokus"
 
-#: app/resources/ui/window.ui:678
+#: app/resources/ui/window.ui:679
 msgid "In percent — 0 % wave bands, 100 % corner arcs"
 msgstr "In Prozent — 0 % Wellenbänder, 100 % Eckbögen"
 
-#: app/resources/ui/window.ui:694
+#: app/resources/ui/window.ui:695
 msgid "Scale"
 msgstr "Skalierung"
 
-#: app/resources/ui/window.ui:695
+#: app/resources/ui/window.ui:696
 msgid "In percent — enlarges or shrinks the pattern"
 msgstr "In Prozent — vergrößert oder verkleinert das Muster"
 
-#: app/resources/ui/window.ui:711
+#: app/resources/ui/window.ui:712
 msgid "Contrast"
 msgstr "Kontrast"
 
-#: app/resources/ui/window.ui:727
+#: app/resources/ui/window.ui:728
 msgid "Grain"
 msgstr "Körnung"
 
-#: app/resources/ui/window.ui:728
+#: app/resources/ui/window.ui:729
 msgid "In percent — fine noise against color banding"
 msgstr "In Prozent — feines Rauschen gegen Farbstufen"
 
-#: app/resources/ui/window.ui:744
+#: app/resources/ui/window.ui:745
 msgid "Seed"
 msgstr "Seed"
 
-#: app/resources/ui/window.ui:745
+#: app/resources/ui/window.ui:746
 msgid "For reproducible results"
 msgstr "Für reproduzierbare Ergebnisse"
 
-#: app/resources/ui/window.ui:761
+#: app/resources/ui/window.ui:762
 msgid "Regenerate"
 msgstr "Neu generieren"
 
-#: app/resources/ui/window.ui:770
+#: app/resources/ui/window.ui:771
 msgid "Variants"
 msgstr "Varianten"
 
-#: app/resources/ui/window.ui:771
+#: app/resources/ui/window.ui:772
 msgid "Click a variant to use it"
 msgstr "Ein Klick übernimmt die Variante"
 
-#: app/resources/ui/window.ui:790
+#: app/resources/ui/window.ui:791
 msgid "Mix Styles"
 msgstr "Stile mischen"
 
-#: app/resources/ui/window.ui:791
+#: app/resources/ui/window.ui:792
 msgid "Variants from all styles instead of only the chosen one"
 msgstr "Varianten aus allen Stilen statt nur dem gewählten"
 
-#: app/resources/ui/window.ui:796
+#: app/resources/ui/window.ui:797
 msgid "New Variants"
 msgstr "Neue Varianten"
 
-#: app/resources/ui/window.ui:802
+#: app/resources/ui/window.ui:803
 msgid "More Variants…"
 msgstr "Mehr Varianten …"
 
-#: app/resources/ui/window.ui:821
+#: app/resources/ui/window.ui:822
 msgid "Effects"
 msgstr "Effekte"
 
-#: app/resources/ui/window.ui:824
+#: app/resources/ui/window.ui:825
 msgid "Shadow"
 msgstr "Schatten"
 
-#: app/resources/ui/window.ui:828
+#: app/resources/ui/window.ui:829
 msgid "No Shadow"
 msgstr "Kein Schatten"
 
-#: app/resources/ui/window.ui:829
+#: app/resources/ui/window.ui:830
 msgid "Subtle"
 msgstr "Subtil"
 
-#: app/resources/ui/window.ui:830
+#: app/resources/ui/window.ui:831
 msgid "Standard"
 msgstr "Standard"
 
-#: app/resources/ui/window.ui:831
+#: app/resources/ui/window.ui:832
 msgid "Strong"
 msgstr "Stark"
 
-#: app/resources/ui/window.ui:832
+#: app/resources/ui/window.ui:833
 msgid "Floating"
 msgstr "Floating"
 
-#: app/resources/ui/window.ui:833
+#: app/resources/ui/window.ui:834
 msgid "Custom"
 msgstr "Angepasst"
 
-#: app/resources/ui/window.ui:841
+#: app/resources/ui/window.ui:842
 msgid "Shadow Angle"
 msgstr "Schatten-Winkel"
 
-#: app/resources/ui/window.ui:842
+#: app/resources/ui/window.ui:843
 msgid "Direction the shadow falls, in degrees"
 msgstr "Richtung des Schattenwurfs, in Grad"
 
-#: app/resources/ui/window.ui:857
+#: app/resources/ui/window.ui:858
 msgid "Shadow Distance"
 msgstr "Schatten-Distanz"
 
-#: app/resources/ui/window.ui:858
+#: app/resources/ui/window.ui:859
 msgid "Length of the shadow, in pixels"
 msgstr "Länge des Schattenwurfs, in Pixeln"
 
-#: app/resources/ui/window.ui:873
+#: app/resources/ui/window.ui:874
 msgid "Softness"
 msgstr "Weichzeichner"
 
-#: app/resources/ui/window.ui:874
+#: app/resources/ui/window.ui:875
 msgid "Softness of the shadow, in pixels"
 msgstr "Unschärfe des Schattens, in Pixeln"
 
-#: app/resources/ui/window.ui:889
+#: app/resources/ui/window.ui:890
 msgid "Corner Radius"
 msgstr "Eckenradius"
 
-#: app/resources/ui/window.ui:890
+#: app/resources/ui/window.ui:891
 msgid "In pixels"
 msgstr "In Pixeln"
 
-#: app/resources/ui/window.ui:912 app/resources/ui/window.ui:936
+#: app/resources/ui/window.ui:913 app/resources/ui/window.ui:937
 msgid "Text"
 msgstr "Text"
 
-#: app/resources/ui/window.ui:918
+#: app/resources/ui/window.ui:919
 msgid "Label"
 msgstr "Label"
 
-#: app/resources/ui/window.ui:919 app/resources/ui/window.ui:970
+#: app/resources/ui/window.ui:920 app/resources/ui/window.ui:971
 msgid "For the selected screenshot"
 msgstr "Für den ausgewählten Screenshot"
 
-#: app/resources/ui/window.ui:923
+#: app/resources/ui/window.ui:924
 msgid "Show Label"
 msgstr "Label anzeigen"
 
-#: app/resources/ui/window.ui:969
+#: app/resources/ui/window.ui:970
 msgid "Callouts"
 msgstr "Callouts"
 
-#: app/resources/ui/window.ui:987
+#: app/resources/ui/window.ui:988
 msgid "+ Add Callout"
 msgstr "+ Callout hinzufügen"
 
-#: app/resources/ui/window.ui:1002
+#: app/resources/ui/window.ui:1003
 msgctxt "sidebar tab"
 msgid "Export"
 msgstr "Export"
 
-#: app/resources/ui/window.ui:1011
+#: app/resources/ui/window.ui:1012
 msgid "Target Width"
 msgstr "Zielbreite"
 
-#: app/resources/ui/window.ui:1012
+#: app/resources/ui/window.ui:1013
 msgid "The canvas fits the images automatically; this only scales the output size"
 msgstr "Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die Ausgabegröße skaliert"
 
-#: app/resources/ui/window.ui:1027
+#: app/resources/ui/window.ui:1028
 msgid "Height"
 msgstr "Höhe"
 
-#: app/resources/ui/window.ui:1028
+#: app/resources/ui/window.ui:1029
 msgid "Automatic, keeps the aspect ratio"
 msgstr "Automatisch, behält das Seitenverhältnis bei"
 
-#: app/resources/ui/window.ui:1044
+#: app/resources/ui/window.ui:1045
 msgid "Format"
 msgstr "Format"
 
-#: app/resources/ui/window.ui:1053
+#: app/resources/ui/window.ui:1054
 msgid "WebM (animated)"
 msgstr "WebM (animiert)"
 
-#: app/resources/ui/window.ui:1061
+#: app/resources/ui/window.ui:1062
 msgid "Quality"
 msgstr "Qualität"
 
-#: app/resources/ui/window.ui:1062
+#: app/resources/ui/window.ui:1063
 msgid "Only for JPEG/WebP/AVIF"
 msgstr "Nur für JPEG/WebP/AVIF"
 
-#: app/resources/ui/window.ui:1102
+#: app/resources/ui/window.ui:1103
 msgid "Add Screenshots"
 msgstr "Screenshots hinzufügen"
 
-#: app/resources/ui/window.ui:1103
+#: app/resources/ui/window.ui:1104
 msgid "Drag images here, paste them with Ctrl+V or fetch them from an Android device"
 msgstr "Bilder hierher ziehen, mit Strg+V einfügen oder vom Android-Gerät holen"
 
-#: app/resources/ui/window.ui:1110 app/resources/ui/window.ui:1209
+#: app/resources/ui/window.ui:1111 app/resources/ui/window.ui:1210
 msgid "Open Images…"
 msgstr "Bilder öffnen …"
 
-#: app/resources/ui/window.ui:1120 app/resources/ui/window.ui:1257
+#: app/resources/ui/window.ui:1121 app/resources/ui/window.ui:1258
 msgid "Scenes"
 msgstr "Szenen"
 
-#: app/resources/ui/window.ui:1146
+#: app/resources/ui/window.ui:1147
 msgid "Zoom Out (Ctrl+−)"
 msgstr "Verkleinern (Strg+−)"
 
-#: app/resources/ui/window.ui:1153
+#: app/resources/ui/window.ui:1154
 msgid "Zoom"
 msgstr "Zoom"
 
-#: app/resources/ui/window.ui:1162
+#: app/resources/ui/window.ui:1163
 msgid "Zoom In (Ctrl++)"
 msgstr "Vergrößern (Strg++)"
 
-#: app/resources/ui/window.ui:1172
+#: app/resources/ui/window.ui:1173
 msgid "Drag out the image — into a browser, file manager or chat"
 msgstr "Bild herausziehen — in den Browser, Dateimanager oder Chat ziehen"
 
-#: app/resources/ui/window.ui:1178
+#: app/resources/ui/window.ui:1179
 msgid "Copy Image to Clipboard (Ctrl+Shift+C)"
 msgstr "Bild in die Zwischenablage kopieren (Strg+Umschalt+C)"
 
-#: app/resources/ui/window.ui:1188
+#: app/resources/ui/window.ui:1189
 msgid "Hide the screenshots temporarily to judge the background"
 msgstr "Screenshots vorübergehend ausblenden, um den Hintergrund zu beurteilen"
 
-#: app/resources/ui/window.ui:1213
+#: app/resources/ui/window.ui:1214
 msgid "Paste from Clipboard"
 msgstr "Aus Zwischenablage einfügen"
 
-#: app/resources/ui/window.ui:1217
+#: app/resources/ui/window.ui:1218
 msgid "Take Screenshot…"
 msgstr "Bildschirmfoto aufnehmen …"
 
-#: app/resources/ui/window.ui:1223 app/resources/ui/window.ui:1267
+#: app/resources/ui/window.ui:1224 app/resources/ui/window.ui:1268
 msgid "Import File…"
 msgstr "Datei importieren …"
 
-#: app/resources/ui/window.ui:1230
+#: app/resources/ui/window.ui:1231
 msgid "Fit to Window"
 msgstr "An Fenster anpassen"
 
-#: app/resources/ui/window.ui:1235
+#: app/resources/ui/window.ui:1236
 msgid "100 %"
 msgstr "100 %"
 
-#: app/resources/ui/window.ui:1240
+#: app/resources/ui/window.ui:1241
 msgid "Zoom In"
 msgstr "Vergrößern"
 
-#: app/resources/ui/window.ui:1245
+#: app/resources/ui/window.ui:1246
 msgid "Zoom Out"
 msgstr "Verkleinern"
 
-#: app/resources/ui/window.ui:1253
+#: app/resources/ui/window.ui:1254
 msgid "New Scene"
 msgstr "Neue Szene"
 
-#: app/resources/ui/window.ui:1261
+#: app/resources/ui/window.ui:1262
 msgid "Duplicate Scene"
 msgstr "Szene duplizieren"
 
-#: app/resources/ui/window.ui:1271
+#: app/resources/ui/window.ui:1272
 msgid "Export as File…"
 msgstr "Als Datei exportieren …"
 
-#: app/resources/ui/window.ui:1277
+#: app/resources/ui/window.ui:1278
 msgid "Preferences"
 msgstr "Einstellungen"
 
-#: app/resources/ui/window.ui:1281
+#: app/resources/ui/window.ui:1282
 msgid "Keyboard Shortcuts"
 msgstr "Tastenkürzel"
 
-#: app/resources/ui/window.ui:1285
+#: app/resources/ui/window.ui:1286
 msgid "About ScreenForge"
 msgstr "Info zu ScreenForge"
 
@@ -972,15 +976,15 @@ msgid_plural "{count} screenshots · {width} × {height} px"
 msgstr[0] "{count} Screenshot · {width} × {height} px"
 msgstr[1] "{count} Screenshots · {width} × {height} px"
 
-#: app/src/panels/background.rs:250 app/src/panels/output.rs:283
+#: app/src/panels/background.rs:251 app/src/panels/output.rs:283
 msgid "Images"
 msgstr "Bilder"
 
-#: app/src/panels/background.rs:253
+#: app/src/panels/background.rs:254
 msgid "Choose Background Image"
 msgstr "Hintergrundbild wählen"
 
-#: app/src/panels/background.rs:253
+#: app/src/panels/background.rs:254
 msgid "Choose"
 msgstr "Wählen"
 
@@ -1464,23 +1468,23 @@ msgstr "Ausgangswerte für neu erstellte Projekte — bereits bestehende Projekt
 msgid "Shared by all labels of this project — not set per screenshot"
 msgstr "Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"
 
-#: app/src/panels/variants.rs:193
+#: app/src/panels/variants.rs:194
 msgid "Choose Background"
 msgstr "Hintergrund wählen"
 
-#: app/src/panels/variants.rs:198 app/src/presets.rs:119 app/src/scenes.rs:354
+#: app/src/panels/variants.rs:199 app/src/presets.rs:119 app/src/scenes.rs:354
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#: app/src/panels/variants.rs:199
+#: app/src/panels/variants.rs:200
 msgid "Apply"
 msgstr "Übernehmen"
 
-#: app/src/panels/variants.rs:211
+#: app/src/panels/variants.rs:212
 msgid "All Styles"
 msgstr "Alle Stile"
 
-#: app/src/panels/variants.rs:245
+#: app/src/panels/variants.rs:246
 msgid "Show Screenshots"
 msgstr "Screenshots zeigen"
 
