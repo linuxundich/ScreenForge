@@ -11,7 +11,7 @@
     <p>Features:</p>
     <ul>
       <li>Horizontal, vertical, grid or free layouts, with shadows and rounded corners</li>
-      <li>Generated abstract backgrounds in seven styles, with variants to choose from</li>
+      <li>Generated abstract backgrounds in eleven styles, with variants to choose from</li>
       <li>Generic phone, tablet and browser frames, and a 3D tilt</li>
       <li>Labels and callouts with arrows that point at details</li>
       <li>Redact sensitive areas with a black bar, pixels or blur</li>
@@ -61,6 +61,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.36.0" date="2026-10-11">
+      <description translate="no">
+        <p>Four new background styles: pebbles, mesh gradients, low-poly facets and Bauhaus geometry.</p>
+      </description>
+    </release>
     <release version="0.35.0" date="2026-10-11">
       <description translate="no">
         <p>A new background style: contours, paper-cut layers of a relief map.</p>

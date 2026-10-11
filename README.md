@@ -33,7 +33,7 @@ Drop in a few screenshots, paste them from the clipboard or take them straight f
 
 ### Backgrounds that look designed
 
-The background generator draws abstract scenes in seven styles: layered paper, concentric arcs, silk ribbons, folded planes, line bundles, soft mist and paper-cut contours. It is [Prospekt](https://github.com/linuxundich/prospekt), a library of its own. Colors come in harmonious palettes, vivid, light or dark, or taken from your screenshots. Don't like it? The sidebar always offers six variants, and the background studio shows nine large previews of your actual composition. Plain colors, gradients, your own image or a blurred copy of a screenshot work too.
+The background generator draws abstract scenes in eleven styles: layered paper, concentric arcs, silk ribbons, folded planes, line bundles, soft mist, paper-cut contours, pebbles, mesh gradients, low-poly facets and Bauhaus geometry. It is [Prospekt](https://github.com/linuxundich/prospekt), a library of its own. Colors come in harmonious palettes, vivid, light or dark, or taken from your screenshots. Don't like it? The sidebar always offers six variants, and the background studio shows nine large previews of your actual composition. Plain colors, gradients, your own image or a blurred copy of a screenshot work too.
 
 <p align="center">
   <img src="docs/screenshots/background-studio.png" alt="The background studio with nine variants of the arcs style" width="100%">

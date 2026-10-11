@@ -505,6 +505,10 @@
                                           <item translatable="yes">Lines</item>
                                           <item translatable="yes">Mist</item>
                                           <item translatable="yes">Contours</item>
+                                          <item translatable="yes">Pebbles</item>
+                                          <item translatable="yes">Gradient</item>
+                                          <item translatable="yes">Facets</item>
+                                          <item translatable="yes">Bauhaus</item>
                                           <item translatable="yes">Waves (Classic)</item>
                                         </items>
                                       </object>

@@ -20,7 +20,7 @@ pub(crate) fn index_for_color_strategy(strategy: ColorStrategy) -> u32 {
 
 /// Order of the "Stil" dropdown: the modern styles first, the legacy
 /// wave generator last.
-pub(crate) const GENERATOR_STYLES: [GeneratorStyle; 8] = [
+pub(crate) const GENERATOR_STYLES: [GeneratorStyle; 12] = [
     GeneratorStyle::Layers,
     GeneratorStyle::Arcs,
     GeneratorStyle::Ribbons,
@@ -28,6 +28,10 @@ pub(crate) const GENERATOR_STYLES: [GeneratorStyle; 8] = [
     GeneratorStyle::Lines,
     GeneratorStyle::Mist,
     GeneratorStyle::Contours,
+    GeneratorStyle::Blobs,
+    GeneratorStyle::Mesh,
+    GeneratorStyle::LowPoly,
+    GeneratorStyle::Bauhaus,
     GeneratorStyle::Waves,
 ];
 

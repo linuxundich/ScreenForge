@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: screenforge\n"
 "Report-Msgid-Bugs-To: https://github.com/linuxundich/ScreenForge/issues\n"
-"POT-Creation-Date: 2026-10-11 15:49+0200\n"
+"POT-Creation-Date: 2026-10-11 16:26+0200\n"
 "PO-Revision-Date: 2026-10-06 19:00+0200\n"
 "Last-Translator: Christoph Langner\n"
 "Language-Team: German\n"
@@ -35,24 +35,36 @@ msgid "screenshot;mockup;smartphone;android;collage;background;"
 msgstr "Screenshot;Bildschirmfoto;Mockup;Smartphone;Android;Collage;Hintergrund;"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:10
-msgid "ScreenForge puts several smartphone screenshots side by side on one image, ready for a blog post, a store listing or social media. Add the screenshots, pick a background and export."
-msgstr "ScreenForge setzt mehrere Smartphone-Screenshots nebeneinander auf ein Bild, fertig für einen Blogartikel, einen Store-Eintrag oder soziale Netzwerke. Screenshots hinzufügen, Hintergrund wählen, exportieren."
+msgid ""
+"ScreenForge puts several smartphone screenshots side by side on one image, "
+"ready for a blog post, a store listing or social media. Add the screenshots, "
+"pick a background and export."
+msgstr ""
+"ScreenForge setzt mehrere Smartphone-Screenshots nebeneinander auf ein Bild, "
+"fertig für einen Blogartikel, einen Store-Eintrag oder soziale Netzwerke. "
+"Screenshots hinzufügen, Hintergrund wählen, exportieren."
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:11
 msgid "Features:"
 msgstr "Funktionen:"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:13
-msgid "Horizontal, vertical, grid or free layouts, with shadows and rounded corners"
-msgstr "Horizontale, vertikale, Raster- oder freie Anordnung, mit Schatten und abgerundeten Ecken"
+msgid ""
+"Horizontal, vertical, grid or free layouts, with shadows and rounded corners"
+msgstr ""
+"Horizontale, vertikale, Raster- oder freie Anordnung, mit Schatten und "
+"abgerundeten Ecken"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:14
-msgid "Generated abstract backgrounds in seven styles, with variants to choose from"
-msgstr "Generierte abstrakte Hintergründe in sieben Stilen, mit Varianten zur Auswahl"
+msgid ""
+"Generated abstract backgrounds in eleven styles, with variants to choose from"
+msgstr ""
+"Generierte abstrakte Hintergründe in elf Stilen, mit Varianten zur Auswahl"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:15
 msgid "Generic phone, tablet and browser frames, and a 3D tilt"
-msgstr "Generische Smartphone-, Tablet- und Browserrahmen sowie eine 3D-Neigung"
+msgstr ""
+"Generische Smartphone-, Tablet- und Browserrahmen sowie eine 3D-Neigung"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:16
 msgid "Labels and callouts with arrows that point at details"
@@ -64,15 +76,24 @@ msgstr "Sensible Bereiche schwärzen, verpixeln oder weichzeichnen"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:18
 msgid "Format presets for 16:9, square, Open Graph, Mastodon and app stores"
-msgstr "Formatvorgaben für 16:9, quadratisch, Open Graph, Mastodon und App-Stores"
+msgstr ""
+"Formatvorgaben für 16:9, quadratisch, Open Graph, Mastodon und App-Stores"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:19
-msgid "Import from files, the clipboard, a desktop screenshot or an Android device over adb, with a clean status bar"
-msgstr "Import aus Dateien, der Zwischenablage, einem Bildschirmfoto oder von einem Android-Gerät per adb, mit aufgeräumter Statusleiste"
+msgid ""
+"Import from files, the clipboard, a desktop screenshot or an Android device "
+"over adb, with a clean status bar"
+msgstr ""
+"Import aus Dateien, der Zwischenablage, einem Bildschirmfoto oder von einem "
+"Android-Gerät per adb, mit aufgeräumter Statusleiste"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:20
-msgid "Export to PNG, JPEG, WebP, AVIF, PDF or as an animated WebM, or copy the result to the clipboard"
-msgstr "Export als PNG, JPEG, WebP, AVIF, PDF oder als animiertes WebM, oder das Ergebnis in die Zwischenablage kopieren"
+msgid ""
+"Export to PNG, JPEG, WebP, AVIF, PDF or as an animated WebM, or copy the "
+"result to the clipboard"
+msgstr ""
+"Export als PNG, JPEG, WebP, AVIF, PDF oder als animiertes WebM, oder das "
+"Ergebnis in die Zwischenablage kopieren"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:21
 msgid "Panoramas split across several app store images"
@@ -80,11 +101,13 @@ msgstr "Panoramen, aufgeteilt auf mehrere App-Store-Bilder"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:23
 msgid "ScreenForge works entirely offline. Nothing is uploaded anywhere."
-msgstr "ScreenForge arbeitet komplett offline. Nichts wird irgendwohin hochgeladen."
+msgstr ""
+"ScreenForge arbeitet komplett offline. Nichts wird irgendwohin hochgeladen."
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:51
 msgid "Screenshots on a generated background, with the variant grid"
-msgstr "Screenshots auf einem generierten Hintergrund, mit dem Varianten-Raster"
+msgstr ""
+"Screenshots auf einem generierten Hintergrund, mit dem Varianten-Raster"
 
 #: app/data/de.christophlangner.ScreenForge.metainfo.xml.in:55
 msgid "The background studio with large previews"
@@ -118,7 +141,7 @@ msgstr "Szene"
 msgid "Main Menu"
 msgstr "Hauptmenü"
 
-#: app/resources/ui/window.ui:89 app/resources/ui/window.ui:1009
+#: app/resources/ui/window.ui:89 app/resources/ui/window.ui:1013
 msgid "Export"
 msgstr "Exportieren"
 
@@ -216,7 +239,8 @@ msgstr "Gleichmäßig verteilen"
 
 #: app/resources/ui/window.ui:307
 msgid "All screenshots in one row with equal gaps, centered on one line"
-msgstr "Alle Screenshots in eine Reihe mit gleichen Abständen, mittig auf einer Linie"
+msgstr ""
+"Alle Screenshots in eine Reihe mit gleichen Abständen, mittig auf einer Linie"
 
 #: app/resources/ui/window.ui:319 app/resources/ui/window.ui:325
 msgid "Background"
@@ -250,17 +274,17 @@ msgstr "Generiert"
 msgid "Screenshot (Blurred)"
 msgstr "Screenshot (unscharf)"
 
-#: app/resources/ui/window.ui:345 app/resources/ui/window.ui:570
+#: app/resources/ui/window.ui:345 app/resources/ui/window.ui:574
 msgid "Color 1"
 msgstr "Farbe 1"
 
 #: app/resources/ui/window.ui:358 app/resources/ui/window.ui:379
-#: app/resources/ui/window.ui:584 app/resources/ui/window.ui:605
-#: app/resources/ui/window.ui:626 app/resources/ui/window.ui:647
+#: app/resources/ui/window.ui:588 app/resources/ui/window.ui:609
+#: app/resources/ui/window.ui:630 app/resources/ui/window.ui:651
 msgid "Pick a color from a screenshot"
 msgstr "Farbe aus einem Screenshot übernehmen"
 
-#: app/resources/ui/window.ui:365 app/resources/ui/window.ui:591
+#: app/resources/ui/window.ui:365 app/resources/ui/window.ui:595
 msgid "Color 2"
 msgstr "Farbe 2"
 
@@ -277,8 +301,11 @@ msgid "Automatic Colors"
 msgstr "Automatische Farben"
 
 #: app/resources/ui/window.ui:404
-msgid "Suggested from the imported screenshots — click again for another suggestion"
-msgstr "Aus den importierten Screenshots vorschlagen — erneut klicken für einen anderen Vorschlag"
+msgid ""
+"Suggested from the imported screenshots — click again for another suggestion"
+msgstr ""
+"Aus den importierten Screenshots vorschlagen — erneut klicken für einen "
+"anderen Vorschlag"
 
 #: app/resources/ui/window.ui:409
 msgid "Generate"
@@ -304,7 +331,7 @@ msgstr "Passung"
 msgid "Fill (crop)"
 msgstr "Ausfüllen (zuschneiden)"
 
-#: app/resources/ui/window.ui:435 app/resources/ui/window.ui:1153
+#: app/resources/ui/window.ui:435 app/resources/ui/window.ui:1157
 msgid "Fit"
 msgstr "Einpassen"
 
@@ -340,7 +367,7 @@ msgstr "Helligkeit"
 msgid "In percent — negative darkens, positive lightens"
 msgstr "In Prozent — negativ abdunkeln, positiv aufhellen"
 
-#: app/resources/ui/window.ui:496 app/resources/ui/window.ui:816
+#: app/resources/ui/window.ui:496 app/resources/ui/window.ui:820
 msgid "Style"
 msgstr "Stil"
 
@@ -373,369 +400,402 @@ msgid "Contours"
 msgstr "Höhenlinien"
 
 #: app/resources/ui/window.ui:508
+msgid "Pebbles"
+msgstr "Kiesel"
+
+#: app/resources/ui/window.ui:509
+msgid "Gradient"
+msgstr "Verlauf"
+
+#: app/resources/ui/window.ui:510
+msgid "Facets"
+msgstr "Facetten"
+
+#: app/resources/ui/window.ui:511
+msgid "Bauhaus"
+msgstr "Bauhaus"
+
+#: app/resources/ui/window.ui:512
 msgid "Waves (Classic)"
 msgstr "Wellen (klassisch)"
 
-#: app/resources/ui/window.ui:516
+#: app/resources/ui/window.ui:520
 msgid "Colors"
 msgstr "Farben"
 
-#: app/resources/ui/window.ui:521
+#: app/resources/ui/window.ui:525
 msgid "Manual"
 msgstr "Manuell"
 
-#: app/resources/ui/window.ui:522
+#: app/resources/ui/window.ui:526
 msgid "From Screenshots"
 msgstr "Von Screenshots"
 
-#: app/resources/ui/window.ui:523
+#: app/resources/ui/window.ui:527
 msgid "Black and White"
 msgstr "Schwarz-Weiß"
 
-#: app/resources/ui/window.ui:524
+#: app/resources/ui/window.ui:528
 msgid "Random"
 msgstr "Zufällig"
 
-#: app/resources/ui/window.ui:554
+#: app/resources/ui/window.ui:558
 msgid "Mood"
 msgstr "Stimmung"
 
-#: app/resources/ui/window.ui:555
+#: app/resources/ui/window.ui:559
 msgid "Lightness of the generated colors"
 msgstr "Helligkeit der erzeugten Farben"
 
-#: app/resources/ui/window.ui:560
+#: app/resources/ui/window.ui:564
 msgid "Vivid"
 msgstr "Kräftig"
 
-#: app/resources/ui/window.ui:561
+#: app/resources/ui/window.ui:565
 msgid "Light"
 msgstr "Hell"
 
-#: app/resources/ui/window.ui:562
+#: app/resources/ui/window.ui:566
 msgid "Dark"
 msgstr "Dunkel"
 
-#: app/resources/ui/window.ui:612
+#: app/resources/ui/window.ui:616
 msgid "Color 3"
 msgstr "Farbe 3"
 
-#: app/resources/ui/window.ui:633
+#: app/resources/ui/window.ui:637
 msgid "Color 4"
 msgstr "Farbe 4"
 
-#: app/resources/ui/window.ui:654
+#: app/resources/ui/window.ui:658
 msgid "Adapt to Screenshots"
 msgstr "An Screenshots anpassen"
 
-#: app/resources/ui/window.ui:655
+#: app/resources/ui/window.ui:659
 msgid "Colors and placement take the screenshots into account"
 msgstr "Farben und Platzierung berücksichtigen die Screenshots"
 
-#: app/resources/ui/window.ui:661
+#: app/resources/ui/window.ui:665
 msgid "Inverted Contrast"
 msgstr "Invertierter Kontrast"
 
-#: app/resources/ui/window.ui:662
-msgid "In percent — only for \"From Screenshots\": higher looks more opposed/complementary instead of similar"
-msgstr "In Prozent — nur bei \"Von Screenshots\": höher wirkt stärker gegensätzlich/komplementär statt ähnlich"
+#: app/resources/ui/window.ui:666
+msgid ""
+"In percent — only for \"From Screenshots\": higher looks more opposed/"
+"complementary instead of similar"
+msgstr ""
+"In Prozent — nur bei \"Von Screenshots\": höher wirkt stärker gegensätzlich/"
+"komplementär statt ähnlich"
 
-#: app/resources/ui/window.ui:678
+#: app/resources/ui/window.ui:682
 msgid "Focus"
 msgstr "Fokus"
 
-#: app/resources/ui/window.ui:679
+#: app/resources/ui/window.ui:683
 msgid "In percent — 0 % wave bands, 100 % corner arcs"
 msgstr "In Prozent — 0 % Wellenbänder, 100 % Eckbögen"
 
-#: app/resources/ui/window.ui:695
+#: app/resources/ui/window.ui:699
 msgid "Scale"
 msgstr "Skalierung"
 
-#: app/resources/ui/window.ui:696
+#: app/resources/ui/window.ui:700
 msgid "In percent — enlarges or shrinks the pattern"
 msgstr "In Prozent — vergrößert oder verkleinert das Muster"
 
-#: app/resources/ui/window.ui:712
+#: app/resources/ui/window.ui:716
 msgid "Contrast"
 msgstr "Kontrast"
 
-#: app/resources/ui/window.ui:728
+#: app/resources/ui/window.ui:732
 msgid "Grain"
 msgstr "Körnung"
 
-#: app/resources/ui/window.ui:729
+#: app/resources/ui/window.ui:733
 msgid "In percent — fine noise against color banding"
 msgstr "In Prozent — feines Rauschen gegen Farbstufen"
 
-#: app/resources/ui/window.ui:745
+#: app/resources/ui/window.ui:749
 msgid "Seed"
 msgstr "Seed"
 
-#: app/resources/ui/window.ui:746
+#: app/resources/ui/window.ui:750
 msgid "For reproducible results"
 msgstr "Für reproduzierbare Ergebnisse"
 
-#: app/resources/ui/window.ui:762
+#: app/resources/ui/window.ui:766
 msgid "Regenerate"
 msgstr "Neu generieren"
 
-#: app/resources/ui/window.ui:771
+#: app/resources/ui/window.ui:775
 msgid "Variants"
 msgstr "Varianten"
 
-#: app/resources/ui/window.ui:772
+#: app/resources/ui/window.ui:776
 msgid "Click a variant to use it"
 msgstr "Ein Klick übernimmt die Variante"
 
-#: app/resources/ui/window.ui:791
+#: app/resources/ui/window.ui:795
 msgid "Mix Styles"
 msgstr "Stile mischen"
 
-#: app/resources/ui/window.ui:792
+#: app/resources/ui/window.ui:796
 msgid "Variants from all styles instead of only the chosen one"
 msgstr "Varianten aus allen Stilen statt nur dem gewählten"
 
-#: app/resources/ui/window.ui:797
+#: app/resources/ui/window.ui:801
 msgid "New Variants"
 msgstr "Neue Varianten"
 
-#: app/resources/ui/window.ui:803
+#: app/resources/ui/window.ui:807
 msgid "More Variants…"
 msgstr "Mehr Varianten …"
 
-#: app/resources/ui/window.ui:822
+#: app/resources/ui/window.ui:826
 msgid "Effects"
 msgstr "Effekte"
 
-#: app/resources/ui/window.ui:825
+#: app/resources/ui/window.ui:829
 msgid "Shadow"
 msgstr "Schatten"
 
-#: app/resources/ui/window.ui:829
+#: app/resources/ui/window.ui:833
 msgid "No Shadow"
 msgstr "Kein Schatten"
 
-#: app/resources/ui/window.ui:830
+#: app/resources/ui/window.ui:834
 msgid "Subtle"
 msgstr "Subtil"
 
-#: app/resources/ui/window.ui:831
+#: app/resources/ui/window.ui:835
 msgid "Standard"
 msgstr "Standard"
 
-#: app/resources/ui/window.ui:832
+#: app/resources/ui/window.ui:836
 msgid "Strong"
 msgstr "Stark"
 
-#: app/resources/ui/window.ui:833
+#: app/resources/ui/window.ui:837
 msgid "Floating"
 msgstr "Floating"
 
-#: app/resources/ui/window.ui:834
+#: app/resources/ui/window.ui:838
 msgid "Custom"
 msgstr "Angepasst"
 
-#: app/resources/ui/window.ui:842
+#: app/resources/ui/window.ui:846
 msgid "Shadow Angle"
 msgstr "Schatten-Winkel"
 
-#: app/resources/ui/window.ui:843
+#: app/resources/ui/window.ui:847
 msgid "Direction the shadow falls, in degrees"
 msgstr "Richtung des Schattenwurfs, in Grad"
 
-#: app/resources/ui/window.ui:858
+#: app/resources/ui/window.ui:862
 msgid "Shadow Distance"
 msgstr "Schatten-Distanz"
 
-#: app/resources/ui/window.ui:859
+#: app/resources/ui/window.ui:863
 msgid "Length of the shadow, in pixels"
 msgstr "Länge des Schattenwurfs, in Pixeln"
 
-#: app/resources/ui/window.ui:874
+#: app/resources/ui/window.ui:878
 msgid "Softness"
 msgstr "Weichzeichner"
 
-#: app/resources/ui/window.ui:875
+#: app/resources/ui/window.ui:879
 msgid "Softness of the shadow, in pixels"
 msgstr "Unschärfe des Schattens, in Pixeln"
 
-#: app/resources/ui/window.ui:890
+#: app/resources/ui/window.ui:894
 msgid "Corner Radius"
 msgstr "Eckenradius"
 
-#: app/resources/ui/window.ui:891
+#: app/resources/ui/window.ui:895
 msgid "In pixels"
 msgstr "In Pixeln"
 
-#: app/resources/ui/window.ui:913 app/resources/ui/window.ui:937
+#: app/resources/ui/window.ui:917 app/resources/ui/window.ui:941
 msgid "Text"
 msgstr "Text"
 
-#: app/resources/ui/window.ui:919
+#: app/resources/ui/window.ui:923
 msgid "Label"
 msgstr "Label"
 
-#: app/resources/ui/window.ui:920 app/resources/ui/window.ui:971
+#: app/resources/ui/window.ui:924 app/resources/ui/window.ui:975
 msgid "For the selected screenshot"
 msgstr "Für den ausgewählten Screenshot"
 
-#: app/resources/ui/window.ui:924
+#: app/resources/ui/window.ui:928
 msgid "Show Label"
 msgstr "Label anzeigen"
 
-#: app/resources/ui/window.ui:970
+#: app/resources/ui/window.ui:974
 msgid "Callouts"
 msgstr "Callouts"
 
-#: app/resources/ui/window.ui:988
+#: app/resources/ui/window.ui:992
 msgid "+ Add Callout"
 msgstr "+ Callout hinzufügen"
 
-#: app/resources/ui/window.ui:1003
+#: app/resources/ui/window.ui:1007
 msgctxt "sidebar tab"
 msgid "Export"
 msgstr "Export"
 
-#: app/resources/ui/window.ui:1012
+#: app/resources/ui/window.ui:1016
 msgid "Target Width"
 msgstr "Zielbreite"
 
-#: app/resources/ui/window.ui:1013
-msgid "The canvas fits the images automatically; this only scales the output size"
-msgstr "Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die Ausgabegröße skaliert"
+#: app/resources/ui/window.ui:1017
+msgid ""
+"The canvas fits the images automatically; this only scales the output size"
+msgstr ""
+"Die Arbeitsfläche passt sich automatisch den Bildern an; hier wird nur die "
+"Ausgabegröße skaliert"
 
-#: app/resources/ui/window.ui:1028
+#: app/resources/ui/window.ui:1032
 msgid "Height"
 msgstr "Höhe"
 
-#: app/resources/ui/window.ui:1029
+#: app/resources/ui/window.ui:1033
 msgid "Automatic, keeps the aspect ratio"
 msgstr "Automatisch, behält das Seitenverhältnis bei"
 
-#: app/resources/ui/window.ui:1045
+#: app/resources/ui/window.ui:1049
 msgid "Format"
 msgstr "Format"
 
-#: app/resources/ui/window.ui:1054
+#: app/resources/ui/window.ui:1058
 msgid "WebM (animated)"
 msgstr "WebM (animiert)"
 
-#: app/resources/ui/window.ui:1062
+#: app/resources/ui/window.ui:1066
 msgid "Quality"
 msgstr "Qualität"
 
-#: app/resources/ui/window.ui:1063
+#: app/resources/ui/window.ui:1067
 msgid "Only for JPEG/WebP/AVIF"
 msgstr "Nur für JPEG/WebP/AVIF"
 
-#: app/resources/ui/window.ui:1103
+#: app/resources/ui/window.ui:1107
 msgid "Add Screenshots"
 msgstr "Screenshots hinzufügen"
 
-#: app/resources/ui/window.ui:1104
-msgid "Drag images here, paste them with Ctrl+V or fetch them from an Android device"
-msgstr "Bilder hierher ziehen, mit Strg+V einfügen oder vom Android-Gerät holen"
+#: app/resources/ui/window.ui:1108
+msgid ""
+"Drag images here, paste them with Ctrl+V or fetch them from an Android device"
+msgstr ""
+"Bilder hierher ziehen, mit Strg+V einfügen oder vom Android-Gerät holen"
 
-#: app/resources/ui/window.ui:1111 app/resources/ui/window.ui:1210
+#: app/resources/ui/window.ui:1115 app/resources/ui/window.ui:1214
 msgid "Open Images…"
 msgstr "Bilder öffnen …"
 
-#: app/resources/ui/window.ui:1121 app/resources/ui/window.ui:1258
+#: app/resources/ui/window.ui:1125 app/resources/ui/window.ui:1262
 msgid "Scenes"
 msgstr "Szenen"
 
-#: app/resources/ui/window.ui:1147
+#: app/resources/ui/window.ui:1151
 msgid "Zoom Out (Ctrl+−)"
 msgstr "Verkleinern (Strg+−)"
 
-#: app/resources/ui/window.ui:1154
+#: app/resources/ui/window.ui:1158
 msgid "Zoom"
 msgstr "Zoom"
 
-#: app/resources/ui/window.ui:1163
+#: app/resources/ui/window.ui:1167
 msgid "Zoom In (Ctrl++)"
 msgstr "Vergrößern (Strg++)"
 
-#: app/resources/ui/window.ui:1173
+#: app/resources/ui/window.ui:1177
 msgid "Drag out the image — into a browser, file manager or chat"
 msgstr "Bild herausziehen — in den Browser, Dateimanager oder Chat ziehen"
 
-#: app/resources/ui/window.ui:1179
+#: app/resources/ui/window.ui:1183
 msgid "Copy Image to Clipboard (Ctrl+Shift+C)"
 msgstr "Bild in die Zwischenablage kopieren (Strg+Umschalt+C)"
 
-#: app/resources/ui/window.ui:1189
+#: app/resources/ui/window.ui:1193
 msgid "Hide the screenshots temporarily to judge the background"
 msgstr "Screenshots vorübergehend ausblenden, um den Hintergrund zu beurteilen"
 
-#: app/resources/ui/window.ui:1214
+#: app/resources/ui/window.ui:1218
 msgid "Paste from Clipboard"
 msgstr "Aus Zwischenablage einfügen"
 
-#: app/resources/ui/window.ui:1218
+#: app/resources/ui/window.ui:1222
 msgid "Take Screenshot…"
 msgstr "Bildschirmfoto aufnehmen …"
 
-#: app/resources/ui/window.ui:1224 app/resources/ui/window.ui:1268
+#: app/resources/ui/window.ui:1228 app/resources/ui/window.ui:1272
 msgid "Import File…"
 msgstr "Datei importieren …"
 
-#: app/resources/ui/window.ui:1231
+#: app/resources/ui/window.ui:1235
 msgid "Fit to Window"
 msgstr "An Fenster anpassen"
 
-#: app/resources/ui/window.ui:1236
+#: app/resources/ui/window.ui:1240
 msgid "100 %"
 msgstr "100 %"
 
-#: app/resources/ui/window.ui:1241
+#: app/resources/ui/window.ui:1245
 msgid "Zoom In"
 msgstr "Vergrößern"
 
-#: app/resources/ui/window.ui:1246
+#: app/resources/ui/window.ui:1250
 msgid "Zoom Out"
 msgstr "Verkleinern"
 
-#: app/resources/ui/window.ui:1254
+#: app/resources/ui/window.ui:1258
 msgid "New Scene"
 msgstr "Neue Szene"
 
-#: app/resources/ui/window.ui:1262
+#: app/resources/ui/window.ui:1266
 msgid "Duplicate Scene"
 msgstr "Szene duplizieren"
 
-#: app/resources/ui/window.ui:1272
+#: app/resources/ui/window.ui:1276
 msgid "Export as File…"
 msgstr "Als Datei exportieren …"
 
-#: app/resources/ui/window.ui:1278
+#: app/resources/ui/window.ui:1282
 msgid "Preferences"
 msgstr "Einstellungen"
 
-#: app/resources/ui/window.ui:1282
+#: app/resources/ui/window.ui:1286
 msgid "Keyboard Shortcuts"
 msgstr "Tastenkürzel"
 
-#: app/resources/ui/window.ui:1286
+#: app/resources/ui/window.ui:1290
 msgid "About ScreenForge"
 msgstr "Info zu ScreenForge"
 
 #: app/src/adb.rs:18
-msgid "adb was not found — are the Android Platform Tools installed and in PATH?"
-msgstr "adb wurde nicht gefunden — sind die Android Platform Tools installiert und im PATH?"
+msgid ""
+"adb was not found — are the Android Platform Tools installed and in PATH?"
+msgstr ""
+"adb wurde nicht gefunden — sind die Android Platform Tools installiert und "
+"im PATH?"
 
 #: app/src/adb.rs:20
 msgid "adb could not be started: {0}"
 msgstr "adb konnte nicht gestartet werden: {0}"
 
 #: app/src/adb.rs:22
-msgid "no authorized Android device found — enable USB debugging and confirm access on the device"
-msgstr "kein autorisiertes Android-Gerät gefunden — USB-Debugging aktivieren und den Zugriff auf dem Gerät bestätigen"
+msgid ""
+"no authorized Android device found — enable USB debugging and confirm access "
+"on the device"
+msgstr ""
+"kein autorisiertes Android-Gerät gefunden — USB-Debugging aktivieren und den "
+"Zugriff auf dem Gerät bestätigen"
 
 #: app/src/adb.rs:24
 msgid "several Android devices found ({0}) — please keep only one connected"
-msgstr "mehrere Android-Geräte gefunden ({0}) — bitte nur eines verbunden lassen"
+msgstr ""
+"mehrere Android-Geräte gefunden ({0}) — bitte nur eines verbunden lassen"
 
 #: app/src/adb.rs:26
 msgid "screencap failed: {0}"
@@ -746,12 +806,20 @@ msgid "could not store the screenshot: {0}"
 msgstr "konnte den Screenshot nicht zwischenspeichern: {0}"
 
 #: app/src/adb.rs:133
-msgid "Import from Android device — no device found. Connect via USB and enable USB debugging."
-msgstr "Von Android-Gerät importieren — kein Gerät gefunden. Per USB verbinden und USB-Debugging aktivieren."
+msgid ""
+"Import from Android device — no device found. Connect via USB and enable USB "
+"debugging."
+msgstr ""
+"Von Android-Gerät importieren — kein Gerät gefunden. Per USB verbinden und "
+"USB-Debugging aktivieren."
 
 #: app/src/adb.rs:134
-msgid "Import from Android device — confirm access on the device (“Allow USB debugging?”)"
-msgstr "Von Android-Gerät importieren — auf dem Gerät den Zugriff bestätigen (Meldung „USB-Debugging zulassen?“)"
+msgid ""
+"Import from Android device — confirm access on the device (“Allow USB "
+"debugging?”)"
+msgstr ""
+"Von Android-Gerät importieren — auf dem Gerät den Zugriff bestätigen "
+"(Meldung „USB-Debugging zulassen?“)"
 
 #: app/src/adb.rs:136
 msgid "Import from Android device — not possible: {reason}"
@@ -769,15 +837,18 @@ msgid ""
 "                                       render IMAGEs with a saved preset\n"
 "  screenforge --list-presets           list saved presets\n"
 "\n"
-"The output format follows the file extension: png, jpg, webp, avif, pdf or webm (animated)."
+"The output format follows the file extension: png, jpg, webp, avif, pdf or "
+"webm (animated)."
 msgstr ""
 "Aufruf:\n"
 "  screenforge [DATEI…]                 die App öffnen\n"
 "  screenforge --preset NAME [--output DATEI] [--width N] BILD…\n"
-"                                       BILDer mit einem gespeicherten Preset rendern\n"
+"                                       BILDer mit einem gespeicherten Preset "
+"rendern\n"
 "  screenforge --list-presets           gespeicherte Presets auflisten\n"
 "\n"
-"Das Ausgabeformat richtet sich nach der Dateiendung: png, jpg, webp, avif, pdf oder webm (animiert)."
+"Das Ausgabeformat richtet sich nach der Dateiendung: png, jpg, webp, avif, "
+"pdf oder webm (animiert)."
 
 #: app/src/cli.rs:62
 msgid "--width needs a number of pixels"
@@ -796,8 +867,11 @@ msgid "No preset named “{name}”. See --list-presets."
 msgstr "Kein Preset namens „{name}“. Siehe --list-presets."
 
 #: app/src/cli.rs:111
-msgid "Unsupported output format “{ext}”; use png, jpg, webp, avif, pdf or webm."
-msgstr "Nicht unterstütztes Ausgabeformat „{ext}“; möglich sind png, jpg, webp, avif, pdf oder webm."
+msgid ""
+"Unsupported output format “{ext}”; use png, jpg, webp, avif, pdf or webm."
+msgstr ""
+"Nicht unterstütztes Ausgabeformat „{ext}“; möglich sind png, jpg, webp, "
+"avif, pdf oder webm."
 
 #: app/src/dialogs.rs:29
 msgid "Export Quality"
@@ -816,8 +890,12 @@ msgid "Clean Status Bar"
 msgstr "Saubere Statusleiste"
 
 #: app/src/dialogs.rs:42
-msgid "Android imports show 12:00, full battery, full signal and no notifications (demo mode)"
-msgstr "Beim Android-Import 12:00 Uhr, voller Akku, volles Netz, keine Benachrichtigungen (Demo-Modus)"
+msgid ""
+"Android imports show 12:00, full battery, full signal and no notifications "
+"(demo mode)"
+msgstr ""
+"Beim Android-Import 12:00 Uhr, voller Akku, volles Netz, keine "
+"Benachrichtigungen (Demo-Modus)"
 
 #: app/src/dialogs.rs:46
 msgid "Android"
@@ -828,8 +906,12 @@ msgid "General"
 msgstr "Allgemein"
 
 #: app/src/dialogs.rs:187
-msgid "Arranges smartphone screenshots into a single presentation image — a native GNOME app."
-msgstr "Ordnet Smartphone-Screenshots zu einer einzigen Präsentationsgrafik an — eine native GNOME-App."
+msgid ""
+"Arranges smartphone screenshots into a single presentation image — a native "
+"GNOME app."
+msgstr ""
+"Ordnet Smartphone-Screenshots zu einer einzigen Präsentationsgrafik an — "
+"eine native GNOME-App."
 
 #: app/src/dialogs.rs:200
 msgid "Language"
@@ -856,8 +938,11 @@ msgid "gtk4-rs, libadwaita-rs (Rust bindings)"
 msgstr "gtk4-rs, libadwaita-rs (Rust-Bindings)"
 
 #: app/src/dialogs.rs:235
-msgid "Dual-licensed under MIT or Apache-2.0, at the copyright holder's option."
-msgstr "Dual-lizenziert unter MIT oder Apache-2.0, nach Wahl der Rechteinhaberin oder des Rechteinhabers."
+msgid ""
+"Dual-licensed under MIT or Apache-2.0, at the copyright holder's option."
+msgstr ""
+"Dual-lizenziert unter MIT oder Apache-2.0, nach Wahl der Rechteinhaberin "
+"oder des Rechteinhabers."
 
 #: app/src/dialogs.rs:258
 msgid "Back to Scenes"
@@ -976,15 +1061,15 @@ msgid_plural "{count} screenshots · {width} × {height} px"
 msgstr[0] "{count} Screenshot · {width} × {height} px"
 msgstr[1] "{count} Screenshots · {width} × {height} px"
 
-#: app/src/panels/background.rs:251 app/src/panels/output.rs:283
+#: app/src/panels/background.rs:255 app/src/panels/output.rs:283
 msgid "Images"
 msgstr "Bilder"
 
-#: app/src/panels/background.rs:254
+#: app/src/panels/background.rs:258
 msgid "Choose Background Image"
 msgstr "Hintergrundbild wählen"
 
-#: app/src/panels/background.rs:254
+#: app/src/panels/background.rs:258
 msgid "Choose"
 msgstr "Wählen"
 
@@ -1054,10 +1139,6 @@ msgstr "Rechts"
 #: app/src/panels/callouts.rs:135 app/src/panels/text.rs:277
 msgid "No Background"
 msgstr "Kein Hintergrund"
-
-#: app/src/panels/callouts.rs:135 app/src/panels/text.rs:277
-msgid "Gradient"
-msgstr "Verlauf"
 
 #: app/src/panels/callouts.rs:145 app/src/panels/text.rs:278
 msgid "Background Color"
@@ -1275,8 +1356,12 @@ msgid "Split Into"
 msgstr "Aufteilen in"
 
 #: app/src/panels/output.rs:85
-msgid "Several images side by side with one continuous background, e.g. for app store screenshots"
-msgstr "Mehrere Bilder nebeneinander mit durchgehendem Hintergrund, z. B. für App-Store-Screenshots"
+msgid ""
+"Several images side by side with one continuous background, e.g. for app "
+"store screenshots"
+msgstr ""
+"Mehrere Bilder nebeneinander mit durchgehendem Hintergrund, z. B. für App-"
+"Store-Screenshots"
 
 #: app/src/panels/output.rs:125
 msgid "Transparent Background"
@@ -1390,7 +1475,9 @@ msgstr "Schwärzen"
 
 #: app/src/panels/redactions.rs:154
 msgid "Make areas of the selected screenshot unreadable, e.g. e-mail addresses"
-msgstr "Bereiche des ausgewählten Screenshots unkenntlich machen, z. B. E-Mail-Adressen"
+msgstr ""
+"Bereiche des ausgewählten Screenshots unkenntlich machen, z. B. E-Mail-"
+"Adressen"
 
 #: app/src/panels/redactions.rs:188
 msgid "Drag a rectangle over the area to hide"
@@ -1461,30 +1548,35 @@ msgid "Appearance"
 msgstr "Gestaltung"
 
 #: app/src/panels/text.rs:804
-msgid "Starting values for newly created projects — existing projects are not changed"
-msgstr "Ausgangswerte für neu erstellte Projekte — bereits bestehende Projekte bleiben davon unverändert"
+msgid ""
+"Starting values for newly created projects — existing projects are not "
+"changed"
+msgstr ""
+"Ausgangswerte für neu erstellte Projekte — bereits bestehende Projekte "
+"bleiben davon unverändert"
 
 #: app/src/panels/text.rs:854
 msgid "Shared by all labels of this project — not set per screenshot"
-msgstr "Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"
+msgstr ""
+"Für alle Labels dieses Projekts gemeinsam — nicht einzeln pro Screenshot"
 
-#: app/src/panels/variants.rs:194
+#: app/src/panels/variants.rs:198
 msgid "Choose Background"
 msgstr "Hintergrund wählen"
 
-#: app/src/panels/variants.rs:199 app/src/presets.rs:119 app/src/scenes.rs:354
+#: app/src/panels/variants.rs:203 app/src/presets.rs:119 app/src/scenes.rs:354
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#: app/src/panels/variants.rs:200
+#: app/src/panels/variants.rs:204
 msgid "Apply"
 msgstr "Übernehmen"
 
-#: app/src/panels/variants.rs:212
+#: app/src/panels/variants.rs:216
 msgid "All Styles"
 msgstr "Alle Stile"
 
-#: app/src/panels/variants.rs:246
+#: app/src/panels/variants.rs:250
 msgid "Show Screenshots"
 msgstr "Screenshots zeigen"
 
@@ -1525,8 +1617,12 @@ msgid "Save Preset"
 msgstr "Preset speichern"
 
 #: app/src/presets.rs:322
-msgid "This project's layout, background, shadow, corner radius, device frame, watermark and label settings"
-msgstr "Layout, Hintergrund, Schatten, Eckenradius, Geräterahmen, Wasserzeichen und Label-Einstellungen dieses Projekts"
+msgid ""
+"This project's layout, background, shadow, corner radius, device frame, "
+"watermark and label settings"
+msgstr ""
+"Layout, Hintergrund, Schatten, Eckenradius, Geräterahmen, Wasserzeichen und "
+"Label-Einstellungen dieses Projekts"
 
 #. Translators: default name of a new scene; {date} is today's date.
 #: app/src/scenes.rs:56
@@ -1689,8 +1785,12 @@ msgid "No Scenes Yet"
 msgstr "Noch keine Szenen"
 
 #: app/src/scenes.rs:734
-msgid "Add screenshots to a new scene. ScreenForge saves every composition here automatically, with all its settings."
-msgstr "Füge Screenshots zu einer neuen Szene hinzu. ScreenForge sichert jede Komposition hier automatisch, mit allen Einstellungen."
+msgid ""
+"Add screenshots to a new scene. ScreenForge saves every composition here "
+"automatically, with all its settings."
+msgstr ""
+"Füge Screenshots zu einer neuen Szene hinzu. ScreenForge sichert jede "
+"Komposition hier automatisch, mit allen Einstellungen."
 
 #: app/src/scenes.rs:737
 msgid "No Matching Scenes"
@@ -1759,30 +1859,3 @@ msgstr "Bildschirmfoto: keine Datei erhalten"
 #: app/src/sources.rs:357
 msgid "Screenshot"
 msgstr "Screenshot"
-
-#~ msgid "Open Project…"
-#~ msgstr "Projekt öffnen …"
-
-#~ msgid "Save As…"
-#~ msgstr "Speichern unter …"
-
-#~ msgid "Save Project"
-#~ msgstr "Projekt speichern"
-
-#~ msgid "Save Project As"
-#~ msgstr "Projekt speichern unter"
-
-#~ msgid "New Project"
-#~ msgstr "Neues Projekt"
-
-#~ msgid "Project saved"
-#~ msgstr "Projekt gespeichert"
-
-#~ msgid "ScreenForge Projects"
-#~ msgstr "ScreenForge-Projekte"
-
-#~ msgid "Open Project"
-#~ msgstr "Projekt öffnen"
-
-#~ msgid "Project loaded"
-#~ msgstr "Projekt geladen"

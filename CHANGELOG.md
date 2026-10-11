@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-11
+
+### Added
+
+- Four background styles from Prospekt 0.4.0: Pebbles, Gradient (a soft
+  mesh gradient), Facets (low-poly) and Bauhaus.
+
+### Changed
+
+- Mixed variants include the new styles. Existing backgrounds render
+  exactly as before.
+
 ## [0.35.0] - 2026-10-11
 
 ### Added
